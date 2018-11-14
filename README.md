@@ -28,9 +28,9 @@ We encourage those who are interested in using this library to take a look at `e
 </p>
 
 ## Basic usage
-This library provides one main interface `odeint` which contains general-purpose algorithms for solving initial value problems (IVP), with gradients implemented for all main arguments. An initial value problem provides an ODE and an initial value
+This library provides one main interface `odeint` which contains general-purpose algorithms for solving initial value problems (IVP), with gradients implemented for all main arguments. An initial value problem consists of an ODE and an initial value,
 ```
-dy/dt = f(t, y)    y(t_0) = y_0
+dy/dt = f(t, y)    y(t_0) = y_0.
 ```
 The goal of an ODE solver is to find a continuous trajectory satisfying the ODE that passes through the initial condition.
 
