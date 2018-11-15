@@ -279,6 +279,7 @@ if __name__ == '__main__':
         ]
     elif args.downsampling_method == 'res':
         downsampling_layers = [
+            nn.Conv2d(1, 64, 3, 1),
             ResBlock(64, 64, stride=2, downsample=conv1x1(64, 64, 2)),
             ResBlock(64, 64, stride=2, downsample=conv1x1(64, 64, 2)),
         ]
@@ -326,15 +327,15 @@ if __name__ == '__main__':
         loss = criterion(logits, y)
 
         if is_odenet:
-            nfe_forward = model[7].nfe
-            model[7].nfe = 0
+            nfe_forward = feature_layers[0].nfe
+            feature_layers[0].nfe = 0
 
         loss.backward()
         optimizer.step()
 
         if is_odenet:
-            nfe_backward = model[7].nfe
-            model[7].nfe = 0
+            nfe_backward = feature_layers[0].nfe
+            feature_layers[0].nfe = 0
 
         batch_time_meter.update(time.time() - end)
         if is_odenet:
