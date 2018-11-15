@@ -105,6 +105,7 @@ class ODEBlock(nn.Module):
         self.integration_time = torch.tensor([0, 1]).float()
 
     def forward(self, x):
+        self.integration_time = self.integration_time.type_as(x)
         out = odeint(self.odefunc, x, self.integration_time, rtol=args.tol, atol=args.tol)
         return out[1]
 
