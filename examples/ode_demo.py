@@ -8,7 +8,7 @@ import torch.nn as nn
 import torch.optim as optim
 
 parser = argparse.ArgumentParser('ODE demo')
-parser.add_argument('--method', type=str, default='dopri5')
+parser.add_argument('--method', type=str, choices=['dopri5', 'adams'], default='dopri5')
 parser.add_argument('--data_size', type=int, default=1000)
 parser.add_argument('--batch_time', type=int, default=10)
 parser.add_argument('--batch_size', type=int, default=20)
@@ -38,7 +38,7 @@ class Lambda(nn.Module):
 
 
 with torch.no_grad():
-    true_y = odeint(Lambda(), true_y0, t)
+    true_y = odeint(Lambda(), true_y0, t, method='dopri5')
 
 
 def get_batch():
@@ -152,7 +152,7 @@ if __name__ == '__main__':
     ii = 0
 
     func = ODEFunc()
-    optimizer = optim.Adam(func.parameters(), lr=1e-3)
+    optimizer = optim.RMSprop(func.parameters(), lr=1e-3)
     end = time.time()
 
     time_meter = RunningAverageMeter(0.97)

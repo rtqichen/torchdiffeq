@@ -21,7 +21,7 @@ pip install -e .
 ## Examples
 Examples are placed in the [`examples`](./examples) directory.
 
-We encourage those who are interested in using this library to take a look at `examples/ode_demo.py` for understanding how to use `torchdiffeq` to fit a simple spiral ODE.
+We encourage those who are interested in using this library to take a look at [`examples/ode_demo.py`](./examples/ode_demo.py) for understanding how to use `torchdiffeq` to fit a simple spiral ODE.
 
 <p align="center">
 <img align="middle" src="./assets/ode_demo.gif" alt="ODE Demo" width="500" height="250" />
@@ -74,3 +74,15 @@ Fixed-step:
 
 ### References
 [1] Ricky T. Q. Chen, Yulia Rubanova, Jesse Bettencourt, David Duvenaud. "Neural Ordinary Differential Equations." *Advances in Neural Processing Information Systems.* 2018.
+
+---
+
+If you found this library useful in your research, please consider citing
+```
+@article{chen2018neural,
+  title={Neural Ordinary Differential Equations},
+  author={Chen, Ricky T. Q. and Rubanova, Yulia and Bettencourt, Jesse and Duvenaud, David},
+  journal={Advances in Neural Information Processing Systems},
+  year={2018}
+}
+```
