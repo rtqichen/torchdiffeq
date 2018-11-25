@@ -16,7 +16,7 @@ The training should look similar to this:
 </p>
 
 ## ODEnet for MNIST
-The `odenet_mnist.py` file contains a reproduction of the MNIST experiments in our Neural ODE paper. Notably the ODE solver library and method are different from our original experiments, but the results are similar to those we report in the paper.
+The `odenet_mnist.py` file contains a reproduction of the MNIST experiments in our Neural ODE paper. Notably not just the architecture but the ODE solver library and integration method are different from our original experiments, though the results are similar to those we report in the paper.
 
 We can use an adaptive ODE solver to approximate our continuous-depth network while still backpropagating through the network.
 ```
