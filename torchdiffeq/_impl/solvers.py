@@ -37,6 +37,8 @@ class FixedGridODESolver(object):
     __metaclass__ = abc.ABCMeta
 
     def __init__(self, func, y0, step_size=None, grid_constructor=None, **unused_kwargs):
+        unused_kwargs.pop('rtol', None)
+        unused_kwargs.pop('atol', None)
         _handle_unused_kwargs(self, unused_kwargs)
         del unused_kwargs
 
