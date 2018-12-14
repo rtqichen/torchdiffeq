@@ -30,7 +30,7 @@ class OdeintAdjointMethod(torch.autograd.Function):
 
         # TODO: use a nn.Module and call odeint_adjoint to implement higher order derivatives.
         def augmented_dynamics(t, y_aug):
-            # Dynamics of the orginal system augmented with
+            # Dynamics of the original system augmented with
             # the adjoint wrt y, and an integrator wrt t and args.
             y, adj_y = y_aug[:n_tensors], y_aug[n_tensors:2 * n_tensors]  # Ignore adj_time and adj_params.
 
