@@ -51,7 +51,7 @@ def odeint(func, y0, t, rtol=1e-7, atol=1e-9, method=None, options=None):
                 in the range 0.8-1 (default: 0.9).
             * ifactor: maximum factor by which the adaptive step may be increased
                 (default: 10.0).
-            * dfactor: maximum factor by which the adpative step may be decreased
+            * dfactor: maximum factor by which the adaptive step may be decreased
                 (default: 0.2).
             * max_num_steps: integer maximum number of integrate steps between time
                 points in `t` (default: 2**31-1).
