@@ -26,8 +26,7 @@ def odeint(func, y0, t, rtol=1e-7, atol=1e-9, method=None, options=None):
         ```
     where y is a Tensor of any shape.
 
-    Output dtypes and numerical precision are based on the dtypes of the inputs
-    `y0`.
+    Output dtypes and numerical precision are based on the dtypes of the inputs `y0`.
 
     Args:
         func: Function that maps a Tensor holding the state `y` and a scalar Tensor
@@ -42,19 +41,9 @@ def odeint(func, y0, t, rtol=1e-7, atol=1e-9, method=None, options=None):
             per element of `y`.
         atol: optional float64 Tensor specifying an upper bound on absolute error,
             per element of `y`.
-        method: optional string indicating the integration method to use. Currently,
-            the only valid option is `'dopri5'`.
+        method: optional string indicating the integration method to use.
         options: optional dict of configuring options for the indicated integration
-            method. Can only be provided if a `method` is explicitly set. For
-            `'dopri5'`, valid options include:
-            * safety: safety factor for adaptive step control, generally a constant
-                in the range 0.8-1 (default: 0.9).
-            * ifactor: maximum factor by which the adaptive step may be increased
-                (default: 10.0).
-            * dfactor: maximum factor by which the adaptive step may be decreased
-                (default: 0.2).
-            * max_num_steps: integer maximum number of integrate steps between time
-                points in `t` (default: 2**31-1).
+            method. Can only be provided if a `method` is explicitly set.
         name: Optional name for this operation.
 
     Returns:
