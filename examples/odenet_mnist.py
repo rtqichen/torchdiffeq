@@ -13,7 +13,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--network', type=str, choices=['resnet', 'odenet'], default='odenet')
 parser.add_argument('--tol', type=float, default=1e-3)
 parser.add_argument('--adjoint', type=eval, default=False, choices=[True, False])
-parser.add_argument('--downsampling-method', type=str, default='res', choices=['conv', 'res'])
+parser.add_argument('--downsampling-method', type=str, default='conv', choices=['conv', 'res'])
 parser.add_argument('--nepochs', type=int, default=160)
 parser.add_argument('--data_aug', type=eval, default=True, choices=[True, False])
 parser.add_argument('--lr', type=float, default=0.1)
@@ -73,15 +73,31 @@ class ResBlock(nn.Module):
         return out + shortcut
 
 
+class ConcatConv2d(nn.Module):
+
+    def __init__(self, dim_in, dim_out, ksize=3, stride=1, padding=0, dilation=1, groups=1, bias=True, transpose=False):
+        super(ConcatConv2d, self).__init__()
+        module = nn.ConvTranspose2d if transpose else nn.Conv2d
+        self._layer = module(
+            dim_in + 1, dim_out, kernel_size=ksize, stride=stride, padding=padding, dilation=dilation, groups=groups,
+            bias=bias
+        )
+
+    def forward(self, t, x):
+        tt = torch.ones_like(x[:, :1, :, :]) * t
+        ttx = torch.cat([tt, x], 1)
+        return self._layer(ttx)
+
+
 class ODEfunc(nn.Module):
 
     def __init__(self, dim):
         super(ODEfunc, self).__init__()
         self.norm1 = norm(dim)
         self.relu = nn.ReLU(inplace=True)
-        self.conv1 = conv3x3(dim, dim)
+        self.conv1 = ConcatConv2d(dim, dim, 3, 1, 1)
         self.norm2 = norm(dim)
-        self.conv2 = conv3x3(dim, dim)
+        self.conv2 = ConcatConv2d(dim, dim, 3, 1, 1)
         self.norm3 = norm(dim)
         self.nfe = 0
 
@@ -89,10 +105,10 @@ class ODEfunc(nn.Module):
         self.nfe += 1
         out = self.norm1(x)
         out = self.relu(out)
-        out = self.conv1(out)
+        out = self.conv1(t, out)
         out = self.norm2(out)
         out = self.relu(out)
-        out = self.conv2(out)
+        out = self.conv2(t, out)
         out = self.norm3(out)
         return out
 
