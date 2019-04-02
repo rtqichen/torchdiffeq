@@ -68,7 +68,7 @@ class OdeintAdjointMethod(torch.autograd.Function):
 
                 # Compute the effect of moving the current time measurement point.
                 dLd_cur_t = sum(
-                    torch.dot(func_i_.view(-1), grad_output_i_.view(-1)).view(1)
+                    torch.dot(func_i_.reshape(-1), grad_output_i_.reshape(-1)).reshape(1)
                     for func_i_, grad_output_i_ in zip(func_i, grad_output_i)
                 )
                 adj_time = adj_time - dLd_cur_t
