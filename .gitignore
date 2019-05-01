@@ -2,3 +2,4 @@
 .installed.cfg
 *.egg
 *__pycache__*
+*.png

@@ -32,10 +32,10 @@ def generate_spiral2d(nspiral=1000,
                       ntotal=500,
                       nsample=100,
                       start=0.,
-                      stop=1,  # approximately equal to 6pi
-                      noise_std=.1,
+                      stop=18.849555921538776,  # approximately equal to 6pi
+                      noise_std=.3,
                       a=0.,
-                      b=1.,
+                      b=.3,
                       savefig=True):
     """Parametric formula for 2d spiral is `r = a + b * theta`.
 
