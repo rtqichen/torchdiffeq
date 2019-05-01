@@ -21,11 +21,7 @@ Those experiments show neural ODEs to be superior in comparison with RNNs, but t
  * Spirograph (a = 11, b =6)
 
  
-Data augmentations:
- * Angles of rotation (-30° to 30°)
- * Flip horizontally
- * Translation
-
+Data augmentation: Rotation and translation
 Evaluation: Evaluated on ability to reconstruct true curve.
 
 ## Basic usage
