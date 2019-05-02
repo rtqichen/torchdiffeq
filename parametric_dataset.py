@@ -118,9 +118,8 @@ def translate(sample, T):
     return sample + T
 
 
-def generate_sample(res = RESOLUTION, rotation_augment = True, trans_augment_std = 1, shape_functions=shape_functions):
-    """Generate a single training example.
-    Randomly chooses a shape and augments its data.
+def generate_sample(f, res = RESOLUTION, rotation_augment = True, trans_augment_std = 1, shape_functions=shape_functions):
+    """Generate a single training example using function f
     
     res: Integer, the number of datapoints to plot.
     rotation_augment: Boolean; if true, rotate the data by 360 degrees randomly.
@@ -130,8 +129,6 @@ def generate_sample(res = RESOLUTION, rotation_augment = True, trans_augment_std
     # res: number of datapoints in the sample
     # rotation_augment = True, rotate randomly
     # trans_augment_std: translation augmentation standard deviation, after normalization
-    # Choose f randomly, acquire 'res' datapoints
-    f = shape_functions[np.random.randint(len(shape_functions))]
     data_sample = gen(f, dt = 2*np.pi/res)
     # Rotation augment
     if rotation_augment:
@@ -151,11 +148,13 @@ def generate_true_dataset(nsamples=NUMSAMPLES, rotation_augment = True, trans_au
     rotation_augment: bool. If true, randomly rotate each shape.
     trans_augment_std: real, translation standard deviation
     """
-    return np.stack([generate_sample(rotation_augment = rotation_augment, 
+    labels = np.array([np.random.randint(len(shape_functions)) for _ in range(nsamples)])
+    return np.stack([generate_sample(f = shape_functions[label],
+                                     rotation_augment = rotation_augment, 
                                      trans_augment_std = trans_augment_std)
-                     for _ in range(nsamples)])
+                     for label in labels]), labels
 
-def generate_train_dataset(dataset, subsize=NUMOBSERVE, start="random-nowrap", std = 2**-7):
+def generate_train_dataset(dataset, subsize=NUMOBSERVE, start=200, std = 2**-7):
     """ Generate a training dataset.
     dataset: As returned by generate_true_dataset.
              dataset.shape = (nsamples, resolution, 2), e.g. (10000, 1000, 2)
@@ -186,12 +185,20 @@ def generate_train_dataset(dataset, subsize=NUMOBSERVE, start="random-nowrap", s
                                          axis=1),
                             scale=2**-7)
 
-if __name__ == "__main__":
+def generate_parametric2d():
+    # Just use this as a drop-in replacement for 'generate spiral 2d'
+    # Take care to look for the labels
     print("Generating dataset")
-    dataset = generate_true_dataset()
-    print("Generating training dataset")
+    dataset, labels = generate_true_dataset()
+    print("    Generating training dataset")
     train_dataset = generate_train_dataset(dataset, std = 2**-7)
-    print("Almost done...")
+    print("    Almost done...")
+    # orig_ts, samp_ts are produced ad-hoc here. Heads up!
+    # don't rely on it to be valid if you change any code above...
     dt = 2*np.pi/RESOLUTION
-    # TODO
-    print("... Done!")
+    orig_ts = np.arange(0, 2*np.pi, dt)
+    samp_ts = orig_ts[200:700]
+    print("    ...Done!")
+    
+    return dataset, train_dataset, orig_ts, samp_ts, labels
+
