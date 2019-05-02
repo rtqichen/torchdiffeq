@@ -60,7 +60,7 @@ def spirograph(t, a = 11, b = 6):
                      a*np.sin(t*b) - b*np.sin(a*t)])
 
 
-def gen(f, t0 = 0, t1 = 2*np.pi, dt = 0.001, noise_std = 0):
+def gen(f, t0 = 0, t1 = 2*np.pi, dt = 0.001):
     '''gen
     # Arguments:
     f: function from t --> (x,y) pairs. (See snake, trefoil, etc. above)
@@ -72,8 +72,6 @@ def gen(f, t0 = 0, t1 = 2*np.pi, dt = 0.001, noise_std = 0):
     # From a shape f(t), generate samples.
     sample = f(np.arange(t0, t1, dt))
     sample = np.moveaxis(sample, 0, 1)
-    if noise_std:
-        return np.random.gaussian(sample, scale=noise_std)
     return sample
 
 
