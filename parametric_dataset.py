@@ -154,7 +154,7 @@ def generate_true_dataset(nsamples=NUMSAMPLES, rotation_augment = True, trans_au
                                      trans_augment_std = trans_augment_std)
                      for label in labels]), labels
 
-def generate_train_dataset(dataset, subsize=NUMOBSERVE, start=200, std = 2**-7):
+def generate_train_dataset(dataset, subsize=NUMOBSERVE, start=200, std = 2**-6):
     """ Generate a training dataset.
     dataset: As returned by generate_true_dataset.
              dataset.shape = (nsamples, resolution, 2), e.g. (10000, 1000, 2)
@@ -183,7 +183,7 @@ def generate_train_dataset(dataset, subsize=NUMOBSERVE, start=200, std = 2**-7):
     return np.random.normal(dataset.take(range(start,start+subsize),
                                          mode="wrap",
                                          axis=1),
-                            scale=2**-7)
+                            scale=std)
 
 def generate_parametric2d():
     # Just use this as a drop-in replacement for 'generate spiral 2d'
