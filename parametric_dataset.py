@@ -23,7 +23,7 @@ def trefoil(t):
     return np.array([np.sin(t) + 2*np.sin(2*t),
                      np.cos(t) - 2*np.cos(2*t)])
 
-def rose(t, k = 6):
+def rose(t, k = 7):
     # k = number of petals if odd, else = number of petals / 2
     return np.array([np.cos(k*t)*np.cos(t),
                      np.cos(k*t)*np.sin(t)])
@@ -71,7 +71,7 @@ def gen(f, t0 = 0, t1 = 2*np.pi, dt = 0.001, noise_std = 0):
     '''
     # From a shape f(t), generate samples.
     sample = f(np.arange(t0, t1, dt))
-    sample = np.moveaxis(samples, 0, 1)
+    sample = np.moveaxis(sample, 0, 1)
     if noise_std:
         return np.random.gaussian(sample, scale=noise_std)
     return sample
@@ -91,19 +91,78 @@ def vg(f):
 def R(deg, use_radians=False):
     # Get rotation matrix in radians
     if use_radians:
-        return np.array([cos(deg), -sin(deg)],
-                        [sin(deg), cos(deg)])
+        return np.array([[np.cos(deg), -np.sin(deg)],
+                         [np.sin(deg),  np.cos(deg)]])
     return R(deg*0.01745329251993889, use_radians=True)
 
 def rotate(sample, deg):
-    return np.matmul(sample.T, R(deg))
+    return np.matmul(sample, R(deg))
 
 def translate(sample, T):
     return sample + T
 
-# TODO: Function that uses gen to generate and save an entire dataset.
-#   Generate with shape [ (10 classes)*(1000 augmented samples per class), 1000 points, 2]
-#       to get "true" shape, using equally-spaced time stamps.
-#   Normalization: Divide such that bounding box max dimension = 1, maintain aspect ratio.
-#   From generated data (testing), generate training data (first 200 samples + noise with std dev)
-#   Then do training
+
+def generate_sample(res = 1000, rotation_augment = True, trans_augment_std = 1):
+    """Generate a single training example.
+    Randomly chooses a shape and augments its data.
+    
+    res: Integer, the number of datapoints to plot.
+    rotation_augment: Boolean; if true, rotate the data by 360 degrees randomly.
+    trans_augment_std: The std of the translation to be applied.
+    """
+    # res: number of datapoints in the sample
+    # rotation_augment = True, rotate randomly
+    # trans_augment_std: translation augmentation standard deviation, after normalization
+    
+    # Randomly generate one true sample, with random augmentations.
+    shape_functions = [snake,
+                       trefoil,
+                       lambda t : rose(t,k=7),
+                       lambda t : rose(t,k=2),
+                       lambda t : torus(t,p=1,q=6),
+                       lambda t : torus(t,p=2,q=3),
+                       lambda t : torus(t,p=3,q=2),
+                       spiral,
+                       logspiral,
+                       spirograph]
+    # Choose f randomly, acquire 'res' datapoints
+    f = shape_functions[np.random.randint(len(shape_functions)-1)]
+    data_sample = gen(f, dt = 2*np.pi/res)
+    # Rotation augment
+    if rotation_augment:
+        data_sample = rotate(data_sample, deg=np.random.rand()*360)
+    # Scale such that maximum dimension of bounding box is 1
+    xmin, ymin = np.min(data_sample, axis=0)
+    xmax, ymax = np.max(data_sample, axis=0)
+    scale_factor = max(ymax-ymin, xmax-xmin)
+    data_sample = data_sample / scale_factor
+    # Translation augment
+    data_sample = data_sample + [np.random.normal(scale=trans_augment_std), np.random.normal(scale=trans_augment_std)]
+    return data_sample
+
+# Generate our dataset...
+def generate_true_dataset(nsamples=10000, rotation_augment = True, trans_augment_std = .2):
+    return np.stack([generate_sample(rotation_augment = rotation_augment, 
+                                     trans_augment_std = trans_augment_std)
+                     for _ in range(nsamples)])
+
+#dataset = generate_true_dataset()
+#np.save("parametric_dataset_10000_samples", dataset)
+#dataset = np.load("parametric_dataset_10000_samples.npy")
+# Take 500 samples samples, + noise with 1/128 std dev
+#train_dataset = np.random.normal(dataset[:,200:700,:], scale=2**-7)
+#np.save("train_parametric_dataset", train_dataset)
+
+# Generate images to visualize
+shape_functions = [snake,
+                   trefoil,
+                   lambda t : rose(t,k=7),
+                   lambda t : rose(t,k=2),
+                   lambda t : torus(t,p=1,q=6),
+                   lambda t : torus(t,p=2,q=3),
+                   lambda t : torus(t,p=3,q=2),
+                   spiral,
+                   logspiral,
+                   spirograph]
+
+[vg(f) for f in shape_functions]
