@@ -203,11 +203,14 @@ def generate_parametric2d():
     
     return dataset, train_dataset, orig_ts, samp_ts, labels
 
-def generate_spirals2d():
+def generate_spirals2d(rotation_augment = False, trans_augment_std = 0):
     # TODO: Make this more-accurately replicate generate_spiral2d()
     #       from the original code
     print("Generating dataset")
-    dataset, labels = generate_true_dataset(nsamples=1000,shape_functions = [spiral, logspiral])
+    dataset, labels = generate_true_dataset(nsamples=1000,
+                                            shape_functions = [spiral, logspiral],
+                                            rotation_augment = rotation_augment,
+                                            trans_augment_std = 0)
     print("    Generating training dataset")
     train_dataset = generate_train_dataset(dataset, std = 2**-7)
     print("    Almost done...")

@@ -22,6 +22,7 @@ parser.add_argument('--gpu', type=int, default=0)
 parser.add_argument('--train_dir', type=str, default=None)
 args = parser.parse_args()
 
+
 NUMSAMPLES = 1000#0  # Number of training example shapes
 RESOLUTION = 500 #1000   # Resolution of training (i.e. number of points per shape)
 NUMOBSERVE = 500
