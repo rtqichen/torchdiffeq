@@ -17,13 +17,13 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--adjoint', type=eval, default=False)
 parser.add_argument('--visualize', type=eval, default=False)
 parser.add_argument('--niters', type=int, default=2000)
-parser.add_argument('--lr', type=float, default=0.01)
+parser.add_argument('--lr', type=float, default=0.001)
 parser.add_argument('--gpu', type=int, default=0)
 parser.add_argument('--train_dir', type=str, default=None)
 args = parser.parse_args()
 
-NUMSAMPLES = 10000  # Number of training example shapes
-RESOLUTION = 1000   # Resolution of training (i.e. number of points per shape)
+NUMSAMPLES = 1000#0  # Number of training example shapes
+RESOLUTION = 500 #1000   # Resolution of training (i.e. number of points per shape)
 NUMOBSERVE = 500
 
 if args.adjoint:
@@ -31,7 +31,7 @@ if args.adjoint:
 else:
     from torchdiffeq import odeint
 
-from parametric_dataset import generate_parametric2d
+from parametric_dataset import generate_parametric2d, generate_spirals2d
 # returns orig_trajs, samp_trajs, orig_ts, samp_ts labels
 # replaces generate_spiral2d
 
@@ -139,7 +139,7 @@ if __name__ == '__main__':
                           if torch.cuda.is_available() else 'cpu')
 
     # generate toy spiral data
-    orig_trajs, samp_trajs, orig_ts, samp_ts, labels = generate_parametric2d()
+    orig_trajs, samp_trajs, orig_ts, samp_ts, labels = generate_spirals2d() #generate_parametric2d()
     orig_trajs = torch.from_numpy(orig_trajs).float().to(device)
     samp_trajs = torch.from_numpy(samp_trajs).float().to(device)
     samp_ts = torch.from_numpy(samp_ts).float().to(device)

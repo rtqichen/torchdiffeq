@@ -15,9 +15,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 from math import cos, sin
 
-NUMSAMPLES = 10000  # Number of training example shapes
-RESOLUTION = 1000   # Resolution of training (i.e. number of points per shape)
-NUMOBSERVE = 500    # Number of training observations per shape. (<= RESOLUTION)
+NUMSAMPLES = 1000#0  # Number of training example shapes
+RESOLUTION = 500#1000   # Resolution of training (i.e. number of points per shape)
+NUMOBSERVE = 200#500    # Number of training observations per shape. (<= RESOLUTION)
 
 def snake(t, f = 2):
     # f: Number of oscillations per 2pi*t travelled
@@ -143,7 +143,7 @@ def generate_sample(f, res = RESOLUTION, rotation_augment = True, trans_augment_
     return data_sample
 
 # Generate our dataset...
-def generate_true_dataset(nsamples=NUMSAMPLES, rotation_augment = True, trans_augment_std = .2):
+def generate_true_dataset(nsamples=NUMSAMPLES, rotation_augment = True, trans_augment_std = .2, shape_functions=shape_functions):
     """Generate the "true" / training dataset.
     rotation_augment: bool. If true, randomly rotate each shape.
     trans_augment_std: real, translation standard deviation
@@ -151,7 +151,8 @@ def generate_true_dataset(nsamples=NUMSAMPLES, rotation_augment = True, trans_au
     labels = np.array([np.random.randint(len(shape_functions)) for _ in range(nsamples)])
     return np.stack([generate_sample(f = shape_functions[label],
                                      rotation_augment = rotation_augment, 
-                                     trans_augment_std = trans_augment_std)
+                                     trans_augment_std = trans_augment_std,
+                                     shape_functions = shape_functions)
                      for label in labels]), labels
 
 def generate_train_dataset(dataset, subsize=NUMOBSERVE, start=200, std = 2**-6):
@@ -202,3 +203,20 @@ def generate_parametric2d():
     
     return dataset, train_dataset, orig_ts, samp_ts, labels
 
+def generate_spirals2d():
+    # TODO: Make this more-accurately replicate generate_spiral2d()
+    #       from the original code
+    print("Generating dataset")
+    dataset, labels = generate_true_dataset(nsamples=1000,shape_functions = [spiral, logspiral])
+    print("    Generating training dataset")
+    train_dataset = generate_train_dataset(dataset, std = 2**-7)
+    print("    Almost done...")
+    # orig_ts, samp_ts are produced ad-hoc here. Heads up!
+    # don't rely on it to be valid if you change any code above...
+    dt = 2*np.pi/RESOLUTION
+    orig_ts = np.arange(0, 2*np.pi, dt)
+    samp_ts = orig_ts[200:400]
+    print("    ...Done!")
+    
+    return dataset, train_dataset, orig_ts, samp_ts, labels
+    
