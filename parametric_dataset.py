@@ -55,7 +55,7 @@ def logspiral(t, a=1, b=.1759, r = 3):
     # a = scale
     # b = speed of exponential growth
     l = a*np.exp(b*r*t)
-    return np.array([l*np.cos(r*t), l*np.sin(r*t)])
+    return np.array([-l*np.cos(r*t), l*np.sin(r*t)])
 
 def spirograph(t, a = 11, b = 6):
     # a, b are spirograph parameters
