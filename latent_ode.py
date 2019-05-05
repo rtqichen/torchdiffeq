@@ -15,6 +15,9 @@ from time import time
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--adjoint',  action='store_true')
+parser.add_argument('--exp1',  action='store_true')
+parser.add_argument('--exp2',  action='store_true')
+parser.add_argument('--exp3',  action='store_true')
 args = parser.parse_args()
 
 
@@ -134,7 +137,8 @@ def experiment(generate_data = generate_spirals_nonaugmented,
                epochs = 1,
                load_from_fn = None,
                save_to_fn = "ckpt.pth",
-               visualize = True,
+               vis_fn = "vis_{}.png",
+               viscount = 1,
                lr = 0.01):
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
@@ -210,49 +214,50 @@ def experiment(generate_data = generate_spirals_nonaugmented,
         print('Stored ckpt at {}'.format(save_to_fn))
     print('Training complete after {} iters.'.format(itr))
 
-    if visualize:
-        with torch.no_grad():
-            # sample from trajectorys' approx. posterior
-            h = rec.initHidden().to(device)
-            for t in reversed(range(samp_trajs.size(1))):
-                obs = samp_trajs[:, t, :]
-                out, h = rec.forward(obs, h)
-            qz0_mean, qz0_logvar = out[:, :latent_dim], out[:, latent_dim:]
-            epsilon = torch.randn(qz0_mean.size()).to(device)
-            z0 = epsilon * torch.exp(.5 * qz0_logvar) + qz0_mean
-            orig_ts = torch.from_numpy(orig_ts).float().to(device)
+    if vis_fn:
+        orig_ts = torch.from_numpy(orig_ts).float().to(device)
+        for ii in range(viscount):
+            with torch.no_grad():
+                # sample from trajectorys' approx. posterior
+                h = rec.initHidden().to(device)
+                for t in reversed(range(samp_trajs.size(1))):
+                    obs = samp_trajs[:, t, :]
+                    out, h = rec.forward(obs, h)
+                qz0_mean, qz0_logvar = out[:, :latent_dim], out[:, latent_dim:]
+                epsilon = torch.randn(qz0_mean.size()).to(device)
+                z0 = epsilon * torch.exp(.5 * qz0_logvar) + qz0_mean
 
-            # take first trajectory for visualization
-            z0 = z0[0]
+                # take iith trajectory for visualization
+                z0 = z0[ii]
 
-            ts_pos = np.linspace(0., 2. * np.pi, num=2000)
-            ts_neg = np.linspace(-np.pi, 0., num=2000)[::-1].copy()
-            ts_pos = torch.from_numpy(ts_pos).float().to(device)
-            ts_neg = torch.from_numpy(ts_neg).float().to(device)
+                ts_pos = np.linspace(0., 2. * np.pi, num=2000)
+                ts_neg = np.linspace(-np.pi, 0., num=2000)[::-1].copy()
+                ts_pos = torch.from_numpy(ts_pos).float().to(device)
+                ts_neg = torch.from_numpy(ts_neg).float().to(device)
 
-            zs_pos = odeint(func, z0, ts_pos)
-            zs_neg = odeint(func, z0, ts_neg)
+                zs_pos = odeint(func, z0, ts_pos)
+                zs_neg = odeint(func, z0, ts_neg)
 
-            xs_pos = dec(zs_pos)
-            xs_neg = torch.flip(dec(zs_neg), dims=[0])
+                xs_pos = dec(zs_pos)
+                xs_neg = torch.flip(dec(zs_neg), dims=[0])
 
-        xs_pos = xs_pos.cpu().numpy()
-        xs_neg = xs_neg.cpu().numpy()
-        orig_traj = orig_trajs[0].cpu().numpy()
-        samp_traj = samp_trajs[0].cpu().numpy()
+            xs_pos = xs_pos.cpu().numpy()
+            xs_neg = xs_neg.cpu().numpy()
+            orig_traj = orig_trajs[ii].cpu().numpy()
+            samp_traj = samp_trajs[ii].cpu().numpy()
 
-        plt.figure()
-        plt.plot(orig_traj[:, 0], orig_traj[:, 1],
-                 'g', label='true trajectory')
-        plt.plot(xs_pos[:, 0], xs_pos[:, 1], 'r',
-                 label='learned trajectory (t>0)')
-        plt.plot(xs_neg[:, 0], xs_neg[:, 1], 'c',
-                 label='learned trajectory (t<0)')
-        plt.scatter(samp_traj[:, 0], samp_traj[
-                    :, 1], label='sampled data', s=3)
-        plt.legend()
-        plt.savefig('./vis.png', dpi=500)
-        print('Saved visualization figure at {}'.format('./vis.png'))
+            plt.figure()
+            plt.plot(orig_traj[:, 0], orig_traj[:, 1],  'g', label='true trajectory')
+            plt.plot(xs_pos[:, 0],    xs_pos[:, 1],     'r', label='learned trajectory (t>0)')
+            plt.plot(xs_neg[:, 0],    xs_neg[:, 1],     'c', label='learned trajectory (t<0)')
+            plt.scatter(samp_traj[:, 0], samp_traj[:, 1],    label='sampled data', s=3)
+            plt.legend()
+            
+            vis_i_fn = vis_fn.format(ii)
+            plt.savefig(vis_i_fn, dpi=500)
+            print('Saved visualization figure at {}'.format(vis_i_fn))
+
+    return func, rec, dec, params, optimizer, loss_meter
 
 
 def experiment_1():
@@ -261,8 +266,10 @@ def experiment_1():
                       nhidden = 40,
                       rnn_nhidden = 50,
                       hidden_depth = 2,
-                      epochs = 1,
-                      save_to_fn = "ckpt_exp1_{}.pth".format(round(time())))
+                      epochs = 3,
+                      save_to_fn = "./exp1/ckpt_{}.pth".format(round(time())),
+                      vis_fn = "./exp1/vis_{}.png",
+                      viscount = 10)
 
 def experiment_2():
     return experiment(generate_data = generate_spirals_augmented,
@@ -270,16 +277,27 @@ def experiment_2():
                       nhidden = 60,
                       rnn_nhidden = 75,
                       hidden_depth = 2,
-                      epochs = 1,
-                      save_to_fn = "ckpt_exp2_{}.pth".format(round(time())))
+                      epochs = 3,
+                      save_to_fn = "./exp2/ckpt_{}.pth".format(round(time())),
+                      vis_fn = "./exp2/vis_{}.png",
+                      viscount = 10)
 
 def experiment_3():
-    return experiment(generate_data = generate_spirals_augmented,
+    return experiment(generate_data = generate_parametric,
                       latent_dim = 24,
                       nhidden = 120,
                       rnn_nhidden = 150,
                       hidden_depth = 3,
-                      epochs = 1,
-                      save_to_fn = "ckpt_exp3_{}.pth".format(round(time())))
+                      epochs = 3,
+                      save_to_fn = "./exp3/ckpt_{}.pth".format(round(time())),
+                      vis_fn = "./exp3/vis_{}.png",
+                      viscount = 10)
 
-experiment_1()
+
+if __name__ == "__main__":
+    if args.exp1:
+        exp1 = experiment_1()
+    if args.exp2:
+        exp2 = experiment_2()
+    if args.exp3:
+        exp3 = experiment_3()
