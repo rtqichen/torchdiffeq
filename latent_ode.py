@@ -12,52 +12,51 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 
-
 parser = argparse.ArgumentParser()
 parser.add_argument('--adjoint', type=eval, default=False)
 parser.add_argument('--visualize', type=eval, default=False)
 parser.add_argument('--niters', type=int, default=2000)
 parser.add_argument('--lr', type=float, default=0.001)
 parser.add_argument('--gpu', type=int, default=0)
-parser.add_argument('--train_dir', type=str, default=None)
+parser.add_argument('--train_dir', type=str, default=".")
 args = parser.parse_args()
 
 
-NUMSAMPLES = 1000#0  # Number of training example shapes
-RESOLUTION = 500 #1000   # Resolution of training (i.e. number of points per shape)
-NUMOBSERVE = 500
+# Big differences:
+# New dataset, modified models (increase latent space, depth, ...)
 
 if args.adjoint:
     from torchdiffeq import odeint_adjoint as odeint
 else:
     from torchdiffeq import odeint
 
-from parametric_dataset import generate_parametric2d, generate_spirals2d
+from parametric_dataset import generate_spirals_nonaugmented, generate_spirals_augmented, generate_parametric
 # returns orig_trajs, samp_trajs, orig_ts, samp_ts labels
 # replaces generate_spiral2d
 
 class LatentODEfunc(nn.Module):
-
-    def __init__(self, latent_dim=4, nhidden=20):
+    # TODO: Increase depth of blocks in loop
+    def __init__(self, latent_dim=4, nhidden=20, depth = 1):
         super(LatentODEfunc, self).__init__()
         self.elu = nn.ELU(inplace=True)
         self.fc1 = nn.Linear(latent_dim, nhidden)
-        self.fc2 = nn.Linear(nhidden, nhidden)
-        self.fc3 = nn.Linear(nhidden, latent_dim)
+        self.fcH = nn.ModuleList([nn.Linear(nhidden, nhidden) for _ in range(depth)])
+        self.fc_out = nn.Linear(nhidden, latent_dim)
         self.nfe = 0
 
     def forward(self, t, x):
         self.nfe += 1
         out = self.fc1(x)
         out = self.elu(out)
-        out = self.fc2(out)
-        out = self.elu(out)
-        out = self.fc3(out)
+        for fch in self.fcH:
+            out = fch(out)
+            out = self.elu(out)
+        out = self.fc_out(out)
         return out
 
 
 class RecognitionRNN(nn.Module):
-
+    # TODO: Increase depth of blocks in loop
     def __init__(self, latent_dim=4, obs_dim=2, nhidden=25, nbatch=1):
         super(RecognitionRNN, self).__init__()
         self.nhidden = nhidden
@@ -76,16 +75,20 @@ class RecognitionRNN(nn.Module):
 
 
 class Decoder(nn.Module):
-
-    def __init__(self, latent_dim=4, obs_dim=2, nhidden=20):
+    # TODO: Increase depth of blocks in loop
+    def __init__(self, latent_dim=4, obs_dim=2, nhidden=20, depth=0):
         super(Decoder, self).__init__()
         self.relu = nn.ReLU(inplace=True)
         self.fc1 = nn.Linear(latent_dim, nhidden)
+        self.fcH = nn.ModuleList([nn.Linear(nhidden, nhidden) for _ in range(depth)])
         self.fc2 = nn.Linear(nhidden, obs_dim)
 
     def forward(self, z):
         out = self.fc1(z)
         out = self.relu(out)
+        for fch in self.fcH:
+            out = fch(out)
+            out = self.relu(out)
         out = self.fc2(out)
         return out
 
@@ -125,30 +128,28 @@ def normal_kl(mu1, lv1, mu2, lv2):
     return kl
 
 
-if __name__ == '__main__':
-    # todo - consider increasing these dimensions to accomodate the more complex shapes
-    latent_dim = 4
-    nhidden = 20
-    rnn_nhidden = 25
-    obs_dim = 2
-    start = 0.
-    stop = 2 * np.pi # Changed from 6*np.pi to 2*np.pi
-    noise_std = 2**-6 # Changed from .3 to to 2**-6 (1/64)
-    a = 0.
-    b = .3
+def experiment(generate_data = generate_spirals_nonaugmented, 
+               latent_dim = 4,
+               nhidden = 20,
+               rnn_nhidden = 25,
+               hidden_depth = 2,
+               obs_dim = 2,
+               noise_std = 2**-7):
     device = torch.device('cuda:' + str(args.gpu)
                           if torch.cuda.is_available() else 'cpu')
 
     # generate toy spiral data
-    orig_trajs, samp_trajs, orig_ts, samp_ts, labels = generate_spirals2d() #generate_parametric2d()
+    orig_trajs, samp_trajs, orig_ts, samp_ts, labels = generate_data()
     orig_trajs = torch.from_numpy(orig_trajs).float().to(device)
     samp_trajs = torch.from_numpy(samp_trajs).float().to(device)
     samp_ts = torch.from_numpy(samp_ts).float().to(device)
 
     # model
-    func = LatentODEfunc(latent_dim, nhidden).to(device)
+    NUMSAMPLES = orig_trajs.shape[0]
+    
+    func = LatentODEfunc(latent_dim, nhidden, hidden_depth).to(device)
     rec = RecognitionRNN(latent_dim, obs_dim, rnn_nhidden, NUMSAMPLES).to(device)
-    dec = Decoder(latent_dim, obs_dim, nhidden).to(device)
+    dec = Decoder(latent_dim, obs_dim, nhidden, hidden_depth).to(device)
     params = (list(func.parameters()) + list(dec.parameters()) + list(rec.parameters()))
     optimizer = optim.Adam(params, lr=args.lr)
     loss_meter = RunningAverageMeter()
@@ -169,51 +170,49 @@ if __name__ == '__main__':
             samp_ts = checkpoint['samp_ts']
             print('Loaded ckpt from {}'.format(ckpt_path))
 
-    try:
-        for itr in range(1, args.niters + 1):
-            optimizer.zero_grad()
-            # backward in time to infer q(z_0)
-            h = rec.initHidden().to(device)
-            for t in reversed(range(samp_trajs.size(1))):
-                obs = samp_trajs[:, t, :]
-                out, h = rec.forward(obs, h)
-            qz0_mean, qz0_logvar = out[:, :latent_dim], out[:, latent_dim:]
-            epsilon = torch.randn(qz0_mean.size()).to(device)
-            z0 = epsilon * torch.exp(.5 * qz0_logvar) + qz0_mean
+    for itr in range(1, args.niters + 1):
+        optimizer.zero_grad()
+        # backward in time to infer q(z_0)
+        h = rec.initHidden().to(device)
+        for t in reversed(range(samp_trajs.size(1))):
+            obs = samp_trajs[:, t, :]
+            out, h = rec.forward(obs, h)
+        qz0_mean, qz0_logvar = out[:, :latent_dim], out[:, latent_dim:]
+        epsilon = torch.randn(qz0_mean.size()).to(device)
+        z0 = epsilon * torch.exp(.5 * qz0_logvar) + qz0_mean
 
-            # forward in time and solve ode for reconstructions
-            pred_z = odeint(func, z0, samp_ts).permute(1, 0, 2)
-            pred_x = dec(pred_z)
+        # forward in time and solve ode for reconstructions
+        pred_z = odeint(func, z0, samp_ts).permute(1, 0, 2)
+        pred_x = dec(pred_z)
 
-            # compute loss
-            noise_std_ = torch.zeros(pred_x.size()).to(device) + noise_std
-            noise_logvar = 2. * torch.log(noise_std_).to(device)
-            logpx = log_normal_pdf(
-                samp_trajs, pred_x, noise_logvar).sum(-1).sum(-1)
-            pz0_mean = pz0_logvar = torch.zeros(z0.size()).to(device)
-            analytic_kl = normal_kl(qz0_mean, qz0_logvar,
-                                    pz0_mean, pz0_logvar).sum(-1)
-            loss = torch.mean(-logpx + analytic_kl, dim=0)
-            loss.backward()
-            optimizer.step()
-            loss_meter.update(loss.item())
+        # compute loss
+        noise_std_ = torch.zeros(pred_x.size()).to(device) + noise_std
+        noise_logvar = 2. * torch.log(noise_std_).to(device)
+        logpx = log_normal_pdf(
+            samp_trajs, pred_x, noise_logvar).sum(-1).sum(-1)
+        pz0_mean = pz0_logvar = torch.zeros(z0.size()).to(device)
+        analytic_kl = normal_kl(qz0_mean, qz0_logvar,
+                                pz0_mean, pz0_logvar).sum(-1)
+        loss = torch.mean(-logpx + analytic_kl, dim=0)
+        loss.backward()
+        optimizer.step()
+        loss_meter.update(loss.item())
 
-            print('Iter: {}, running avg elbo: {:.4f}'.format(itr, -loss_meter.avg))
+        print('Iter: {}, running avg elbo: {:.4f}'.format(itr, -loss_meter.avg))
 
-    except KeyboardInterrupt:
-        if args.train_dir is not None:
-            ckpt_path = os.path.join(args.train_dir, 'ckpt.pth')
-            torch.save({
-                'func_state_dict': func.state_dict(),
-                'rec_state_dict': rec.state_dict(),
-                'dec_state_dict': dec.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'orig_trajs': orig_trajs,
-                'samp_trajs': samp_trajs,
-                'orig_ts': orig_ts,
-                'samp_ts': samp_ts,
-            }, ckpt_path)
-            print('Stored ckpt at {}'.format(ckpt_path))
+    if args.train_dir is not None:
+        ckpt_path = os.path.join(args.train_dir, 'ckpt.pth')
+        torch.save({
+            'func_state_dict': func.state_dict(),
+            'rec_state_dict': rec.state_dict(),
+            'dec_state_dict': dec.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'orig_trajs': orig_trajs,
+            'samp_trajs': samp_trajs,
+            'orig_ts': orig_ts,
+            'samp_ts': samp_ts,
+        }, ckpt_path)
+        print('Stored ckpt at {}'.format(ckpt_path))
     print('Training complete after {} iters.'.format(itr))
 
     if args.visualize:
@@ -259,3 +258,28 @@ if __name__ == '__main__':
         plt.legend()
         plt.savefig('./vis.png', dpi=500)
         print('Saved visualization figure at {}'.format('./vis.png'))
+
+# TODO: Set up default values, etc.
+# Save results to somewhere!
+def experiment_1():
+    return experiment(generate_data = generate_spirals_nonaugmented,
+                      latent_dim = 8,
+                      nhidden = 40,
+                      rnn_nhidden = 50,
+                      hidden_depth = 2)
+
+def experiment_2():
+    return experiment(generate_data = generate_spirals_augmented,
+                      latent_dim = 12,
+                      nhidden = 60,
+                      rnn_nhidden = 75,
+                      hidden_depth = 2)
+
+def experiment_3():
+    return experiment(generate_data = generate_spirals_augmented,
+                      latent_dim = 24,
+                      nhidden = 120,
+                      rnn_nhidden = 150,
+                      hidden_depth = 3)
+
+experiment_1()
