@@ -229,8 +229,8 @@ def generate_spirals_nonaugmented():
 
 def generate_spirals_augmented():
     return generate_parametric(NUMSAMPLES = 200,
-                               RESOLUTION = 200,
-                               NUMOBSERVE = 100,
+                               RESOLUTION = 100,
+                               NUMOBSERVE = 50,
                                START = 20,
                                shape_functions=[spiral, logspiral],
                                rotation_augment=True,

@@ -254,6 +254,7 @@ def experiment(generate_data = generate_spirals_nonaugmented,
     return func, rec, dec, params, optimizer, loss_meter
 
 
+
 def experiment_1():
     return experiment(generate_data = generate_spirals_nonaugmented,
                       latent_dim    = 8,
@@ -271,7 +272,7 @@ def experiment_2():
                       nhidden       = 60,
                       rnn_nhidden   = 75,
                       hidden_depth  = 2,
-                      epochs        = 1000,
+                      epochs        = 4000,
                       save_to_fn    = "./exp2/ckpt_{}.pth".format(round(time())),
                       vis_fn        = "./exp2/vis_{}.png",
                       viscount      = 20)
