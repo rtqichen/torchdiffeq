@@ -195,7 +195,7 @@ def generate_train_dataset(dataset, subsize=NUMOBSERVE, start=200, std = 2**-6):
     return np.random.normal(train_dataset, scale=std)
 
 #### These are the functions you're looking for
-def generate_parametric(NUMSAMPLES=10000,
+def generate_parametric(NUMSAMPLES=1000,
                         RESOLUTION=1000,
                         NUMOBSERVE=500,
                         START=100,
@@ -259,3 +259,5 @@ def quicktest():
     sanity_test(*generate_spirals_augmented(), nvis=4)
     sanity_test(*generate_parametric(), nvis=20)
 
+if __name__ == "__main__":
+    quicktest()

@@ -14,10 +14,11 @@ import torch.nn.functional as F
 from time import time
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--adjoint',  action='store_true')
-parser.add_argument('--exp1',  action='store_true')
-parser.add_argument('--exp2',  action='store_true')
-parser.add_argument('--exp3',  action='store_true')
+parser.add_argument('--adjoint', action='store_true')
+parser.add_argument('--exp1',    action='store_true')
+parser.add_argument('--exp2',    action='store_true')
+parser.add_argument('--exp3',    action='store_true')
+parser.add_argument('--device',  type=str, default="cuda:0") # "cpu", "cuda:0", "cuda:1", ...
 args = parser.parse_args()
 
 
@@ -140,7 +141,7 @@ def experiment(generate_data = generate_spirals_nonaugmented,
                vis_fn = "vis_{}.png",
                viscount = 1,
                lr = 0.01):
-    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    device = torch.device(args.device)
 
     # generate toy spiral data
     orig_trajs, samp_trajs, orig_ts, samp_ts, labels = generate_data()
@@ -300,4 +301,5 @@ if __name__ == "__main__":
     if args.exp2:
         exp2 = experiment_2()
     if args.exp3:
-        exp3 = experiment_3()
+        # Takes a lot of RAM!
+        exp3 = experiment_3()e
