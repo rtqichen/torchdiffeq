@@ -195,10 +195,10 @@ def generate_train_dataset(dataset, subsize=NUMOBSERVE, start=200, std = 2**-6):
     return np.random.normal(train_dataset, scale=std)
 
 #### These are the functions you're looking for
-def generate_parametric(NUMSAMPLES=1000,
-                        RESOLUTION=1000,
-                        NUMOBSERVE=500,
-                        START=100,
+def generate_parametric(NUMSAMPLES=500,
+                        RESOLUTION=200,
+                        NUMOBSERVE=100,
+                        START=50,
                         shape_functions=shape_functions,
                         rotation_augment=True,
                         trans_augment_std=.1):
@@ -228,14 +228,23 @@ def generate_spirals_nonaugmented():
                                trans_augment_std = 0)
 
 def generate_spirals_augmented():
-    return generate_parametric(NUMSAMPLES = 1000,
-                               RESOLUTION = 500,
-                               NUMOBSERVE = 250,
-                               START = 50,
+    return generate_parametric(NUMSAMPLES = 200,
+                               RESOLUTION = 200,
+                               NUMOBSERVE = 100,
+                               START = 20,
                                shape_functions=[spiral, logspiral],
                                rotation_augment=True,
                                trans_augment_std = .25)
-    
+
+
+def generate_spirals_nonaugmented_small():
+    return generate_parametric(NUMSAMPLES = 100,
+                               RESOLUTION = 50,
+                               NUMOBSERVE = 25,
+                               START = 5,
+                               shape_functions=[spiral, logspiral],
+                               rotation_augment=False,
+                               trans_augment_std = 0)    
 
 #### Testing
 def sanity_test(dataset, train_dataset, orig_ts, samp_ts, labels, nvis = 4):

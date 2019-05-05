@@ -21,21 +21,16 @@ parser.add_argument('--exp3',    action='store_true')
 parser.add_argument('--device',  type=str, default="cuda:0") # "cpu", "cuda:0", "cuda:1", ...
 args = parser.parse_args()
 
-
-# Big differences:
-# New dataset, modified models (increase latent space, depth, ...)
-
 if args.adjoint:
     from torchdiffeq import odeint_adjoint as odeint
 else:
     from torchdiffeq import odeint
 
-from parametric_dataset import generate_spirals_nonaugmented, generate_spirals_augmented, generate_parametric
+from parametric_dataset import generate_spirals_nonaugmented, generate_spirals_augmented, generate_parametric, generate_spirals_nonaugmented_small
 # returns orig_trajs, samp_trajs, orig_ts, samp_ts labels
 # replaces generate_spiral2d
 
 class LatentODEfunc(nn.Module):
-    # TODO: Increase depth of blocks in loop
     def __init__(self, latent_dim=4, nhidden=20, depth = 1):
         super(LatentODEfunc, self).__init__()
         self.elu = nn.ELU(inplace=True)
@@ -56,7 +51,6 @@ class LatentODEfunc(nn.Module):
 
 
 class RecognitionRNN(nn.Module):
-    # TODO: Increase depth of blocks in loop
     def __init__(self, latent_dim=4, obs_dim=2, nhidden=25, nbatch=1):
         super(RecognitionRNN, self).__init__()
         self.nhidden = nhidden
@@ -75,7 +69,6 @@ class RecognitionRNN(nn.Module):
 
 
 class Decoder(nn.Module):
-    # TODO: Increase depth of blocks in loop
     def __init__(self, latent_dim=4, obs_dim=2, nhidden=20, depth=0):
         super(Decoder, self).__init__()
         self.relu = nn.ReLU(inplace=True)
@@ -140,7 +133,7 @@ def experiment(generate_data = generate_spirals_nonaugmented,
                save_to_fn = "ckpt.pth",
                vis_fn = "vis_{}.png",
                viscount = 1,
-               lr = 0.01):
+               lr = 0.001):
     device = torch.device(args.device)
 
     # generate toy spiral data
@@ -263,37 +256,47 @@ def experiment(generate_data = generate_spirals_nonaugmented,
 
 def experiment_1():
     return experiment(generate_data = generate_spirals_nonaugmented,
-                      latent_dim = 8,
-                      nhidden = 40,
-                      rnn_nhidden = 50,
-                      hidden_depth = 2,
-                      epochs = 3,
-                      save_to_fn = "./exp1/ckpt_{}.pth".format(round(time())),
-                      vis_fn = "./exp1/vis_{}.png",
-                      viscount = 10)
+                      latent_dim    = 8,
+                      nhidden       = 40,
+                      rnn_nhidden   = 50,
+                      hidden_depth  = 2,
+                      epochs        = 1000,
+                      save_to_fn    = "./exp1/ckpt_{}.pth".format(round(time())),
+                      vis_fn        = "./exp1/vis_{}.png",
+                      viscount      = 10)
 
 def experiment_2():
     return experiment(generate_data = generate_spirals_augmented,
-                      latent_dim = 12,
-                      nhidden = 60,
-                      rnn_nhidden = 75,
-                      hidden_depth = 2,
-                      epochs = 3,
-                      save_to_fn = "./exp2/ckpt_{}.pth".format(round(time())),
-                      vis_fn = "./exp2/vis_{}.png",
-                      viscount = 10)
+                      latent_dim    = 12,
+                      nhidden       = 60,
+                      rnn_nhidden   = 75,
+                      hidden_depth  = 2,
+                      epochs        = 1000,
+                      save_to_fn    = "./exp2/ckpt_{}.pth".format(round(time())),
+                      vis_fn        = "./exp2/vis_{}.png",
+                      viscount      = 20)
 
 def experiment_3():
     return experiment(generate_data = generate_parametric,
-                      latent_dim = 24,
-                      nhidden = 120,
-                      rnn_nhidden = 150,
-                      hidden_depth = 3,
-                      epochs = 3,
-                      save_to_fn = "./exp3/ckpt_{}.pth".format(round(time())),
-                      vis_fn = "./exp3/vis_{}.png",
-                      viscount = 10)
+                      latent_dim    = 24,
+                      nhidden       = 120,
+                      rnn_nhidden   = 150,
+                      hidden_depth  = 3,
+                      epochs        = 1,
+                      save_to_fn    = "./exp3/ckpt_{}.pth".format(round(time())),
+                      vis_fn        = "./exp3/vis_{}.png",
+                      viscount      = 100)
 
+def experiment_1_small():
+    return experiment(generate_data = generate_spirals_nonaugmented_small,
+                      latent_dim    = 8,
+                      nhidden       = 40,
+                      rnn_nhidden   = 50,
+                      hidden_depth  = 2,
+                      epochs        = 1000,
+                      save_to_fn    = "./exp1/ckpt_{}.pth".format(round(time())),
+                      vis_fn        = "./exp1/vis_{}.png",
+                      viscount      = 10)
 
 if __name__ == "__main__":
     if args.exp1:
@@ -302,4 +305,5 @@ if __name__ == "__main__":
         exp2 = experiment_2()
     if args.exp3:
         # Takes a lot of RAM!
-        exp3 = experiment_3()e
+        exp3 = experiment_3()
+    # To load, just provide a load_from_filename and run for 0 iterations ...?
