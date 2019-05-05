@@ -11,14 +11,10 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
+from time import time
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--adjoint', type=eval, default=False)
-parser.add_argument('--visualize', type=eval, default=False)
-parser.add_argument('--niters', type=int, default=2000)
-parser.add_argument('--lr', type=float, default=0.001)
-parser.add_argument('--gpu', type=int, default=0)
-parser.add_argument('--train_dir', type=str, default=".")
+parser.add_argument('--adjoint',  action='store_true')
 args = parser.parse_args()
 
 
@@ -134,9 +130,13 @@ def experiment(generate_data = generate_spirals_nonaugmented,
                rnn_nhidden = 25,
                hidden_depth = 2,
                obs_dim = 2,
-               noise_std = 2**-7):
-    device = torch.device('cuda:' + str(args.gpu)
-                          if torch.cuda.is_available() else 'cpu')
+               noise_std = 2**-7,
+               epochs = 1,
+               load_from_fn = None,
+               save_to_fn = "ckpt.pth",
+               visualize = True,
+               lr = 0.01):
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
     # generate toy spiral data
     orig_trajs, samp_trajs, orig_ts, samp_ts, labels = generate_data()
@@ -151,26 +151,22 @@ def experiment(generate_data = generate_spirals_nonaugmented,
     rec = RecognitionRNN(latent_dim, obs_dim, rnn_nhidden, NUMSAMPLES).to(device)
     dec = Decoder(latent_dim, obs_dim, nhidden, hidden_depth).to(device)
     params = (list(func.parameters()) + list(dec.parameters()) + list(rec.parameters()))
-    optimizer = optim.Adam(params, lr=args.lr)
+    optimizer = optim.Adam(params, lr=lr)
     loss_meter = RunningAverageMeter()
 
-    if args.train_dir is not None:
-        if not os.path.exists(args.train_dir):
-            os.makedirs(args.train_dir)
-        ckpt_path = os.path.join(args.train_dir, 'ckpt.pth')
-        if os.path.exists(ckpt_path):
-            checkpoint = torch.load(ckpt_path)
-            func.load_state_dict(checkpoint['func_state_dict'])
-            rec.load_state_dict(checkpoint['rec_state_dict'])
-            dec.load_state_dict(checkpoint['dec_state_dict'])
-            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-            orig_trajs = checkpoint['orig_trajs']
-            samp_trajs = checkpoint['samp_trajs']
-            orig_ts = checkpoint['orig_ts']
-            samp_ts = checkpoint['samp_ts']
-            print('Loaded ckpt from {}'.format(ckpt_path))
+    if load_from_fn and os.path.exists(load_from_fn):
+        checkpoint = torch.load(load_from_fn)
+        func.load_state_dict(checkpoint['func_state_dict'])
+        rec.load_state_dict(checkpoint['rec_state_dict'])
+        dec.load_state_dict(checkpoint['dec_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        orig_trajs = checkpoint['orig_trajs']
+        samp_trajs = checkpoint['samp_trajs']
+        orig_ts = checkpoint['orig_ts']
+        samp_ts = checkpoint['samp_ts']
+        print('Loaded ckpt from {}'.format(load_from_fn))
 
-    for itr in range(1, args.niters + 1):
+    for itr in range(1, epochs + 1):
         optimizer.zero_grad()
         # backward in time to infer q(z_0)
         h = rec.initHidden().to(device)
@@ -200,8 +196,7 @@ def experiment(generate_data = generate_spirals_nonaugmented,
 
         print('Iter: {}, running avg elbo: {:.4f}'.format(itr, -loss_meter.avg))
 
-    if args.train_dir is not None:
-        ckpt_path = os.path.join(args.train_dir, 'ckpt.pth')
+    if save_to_fn:
         torch.save({
             'func_state_dict': func.state_dict(),
             'rec_state_dict': rec.state_dict(),
@@ -211,11 +206,11 @@ def experiment(generate_data = generate_spirals_nonaugmented,
             'samp_trajs': samp_trajs,
             'orig_ts': orig_ts,
             'samp_ts': samp_ts,
-        }, ckpt_path)
-        print('Stored ckpt at {}'.format(ckpt_path))
+        }, save_to_fn)
+        print('Stored ckpt at {}'.format(save_to_fn))
     print('Training complete after {} iters.'.format(itr))
 
-    if args.visualize:
+    if visualize:
         with torch.no_grad():
             # sample from trajectorys' approx. posterior
             h = rec.initHidden().to(device)
@@ -259,27 +254,32 @@ def experiment(generate_data = generate_spirals_nonaugmented,
         plt.savefig('./vis.png', dpi=500)
         print('Saved visualization figure at {}'.format('./vis.png'))
 
-# TODO: Set up default values, etc.
-# Save results to somewhere!
+
 def experiment_1():
     return experiment(generate_data = generate_spirals_nonaugmented,
                       latent_dim = 8,
                       nhidden = 40,
                       rnn_nhidden = 50,
-                      hidden_depth = 2)
+                      hidden_depth = 2,
+                      epochs = 1,
+                      save_to_fn = "ckpt_exp1_{}.pth".format(round(time())))
 
 def experiment_2():
     return experiment(generate_data = generate_spirals_augmented,
                       latent_dim = 12,
                       nhidden = 60,
                       rnn_nhidden = 75,
-                      hidden_depth = 2)
+                      hidden_depth = 2,
+                      epochs = 1,
+                      save_to_fn = "ckpt_exp2_{}.pth".format(round(time())))
 
 def experiment_3():
     return experiment(generate_data = generate_spirals_augmented,
                       latent_dim = 24,
                       nhidden = 120,
                       rnn_nhidden = 150,
-                      hidden_depth = 3)
+                      hidden_depth = 3,
+                      epochs = 1,
+                      save_to_fn = "ckpt_exp3_{}.pth".format(round(time())))
 
 experiment_1()
