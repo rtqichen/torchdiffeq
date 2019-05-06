@@ -1,3 +1,10 @@
+'''
+latent_ode.py
+
+Provides experiment() and experiment_1(), experiment_2(), experiment_3(), experiment_1_small().
+
+See README for command line usage.
+'''
 import os
 import argparse
 import logging
@@ -16,6 +23,7 @@ from time import time
 parser = argparse.ArgumentParser()
 parser.add_argument('--adjoint', action='store_true')
 parser.add_argument('--exp1',    action='store_true')
+parser.add_argument('--exp1s',    action='store_true')
 parser.add_argument('--exp2',    action='store_true')
 parser.add_argument('--exp3',    action='store_true')
 parser.add_argument('--device',  type=str, default="cuda:0") # "cpu", "cuda:0", "cuda:1", ...
@@ -130,10 +138,34 @@ def experiment(generate_data = generate_spirals_nonaugmented,
                noise_std = 2**-7,
                epochs = 1,
                load_from_fn = None,
-               save_to_fn = "ckpt.pth",
+               save_to_fn = "ckpt_{}.pth",
                vis_fn = "vis_{}.png",
                viscount = 1,
                lr = 0.001):
+    '''A more generic form of the experiment from 5.1 of the paper.
+    
+    # Arguments:
+    latent_dim: Int, The size of the latent space
+    nhidden: Int, The width of the models used.
+    rnn_nhidden: Int, width of the RNN
+    hidden_depth: Int, the number of hidden layers to use in the neural ODE and in the decoder
+    obs_dim: Int, how many dimensions we work in.
+    noise_std: Real, The std of Gaussian noise to add per observation.
+    epochs: Int, Number of iterations to train for
+    load_from_fn: String; reload a saved state from here.
+            Alternatively, None.
+    save_to_fn: String with one formattable field. Location to save model state to.
+            Alternatively, None.
+    vis_fn: String with one formattable field. Location to save visualizations to.
+            Alternatively, None.
+    viscount: Int >= 0; number of images to save when visualizing.
+    lr: Real; learning rate.
+    
+    # Returns:
+    func (PyTorch neural ODE model), rec (PyTorch RNN model), dec (PyTorch decoding MLP),
+    params (list of parameters to func, dec, RNN),
+    optimizer (PyTorch optim.Adam), loss_meter (PyTorch RunningAverageMeter)
+    '''
     device = torch.device(args.device)
 
     # generate toy spiral data
@@ -152,6 +184,7 @@ def experiment(generate_data = generate_spirals_nonaugmented,
     optimizer = optim.Adam(params, lr=lr)
     loss_meter = RunningAverageMeter()
 
+    # Load data
     if load_from_fn and os.path.exists(load_from_fn):
         checkpoint = torch.load(load_from_fn)
         func.load_state_dict(checkpoint['func_state_dict'])
@@ -164,6 +197,7 @@ def experiment(generate_data = generate_spirals_nonaugmented,
         samp_ts = checkpoint['samp_ts']
         print('Loaded ckpt from {}'.format(load_from_fn))
 
+    # Training
     for itr in range(1, epochs + 1):
         optimizer.zero_grad()
         # backward in time to infer q(z_0)
@@ -194,6 +228,7 @@ def experiment(generate_data = generate_spirals_nonaugmented,
 
         print('Iter: {}, running avg elbo: {:.4f}'.format(itr, -loss_meter.avg))
 
+    # Save
     if save_to_fn:
         torch.save({
             'func_state_dict': func.state_dict(),
@@ -208,6 +243,7 @@ def experiment(generate_data = generate_spirals_nonaugmented,
         print('Stored ckpt at {}'.format(save_to_fn))
     print('Training complete after {} iters.'.format(itr))
 
+    # Visualize
     if vis_fn:
         orig_ts = torch.from_numpy(orig_ts).float().to(device)
         for ii in range(viscount):
@@ -302,9 +338,9 @@ def experiment_1_small():
 if __name__ == "__main__":
     if args.exp1:
         exp1 = experiment_1()
+    if args.exp1s:
+        exp1s = experiment_1_small()
     if args.exp2:
         exp2 = experiment_2()
     if args.exp3:
-        # Takes a lot of RAM!
         exp3 = experiment_3()
-    # To load, just provide a load_from_filename and run for 0 iterations ...?

@@ -1,16 +1,16 @@
 """parametric_dataset.py
 
 Provides:
-    (TODO: Update)
-    Parametric shape functions f(t) --> (x,y)
-        Where t = int, float, or 1D np.array
-     - snake, trefoil, rose, torus, spiral, logspiral
-    gen(f, t0 = 0, t1 = 2*np.pi, dt = 0.001, noise_std = 0)
-    vis(sample)
-    vg(f)
-    R(deg, use_radians)
-    rotate(sample, deg)
-    translate(sample, T)
+    10 parametric shape functions,
+    gen(f), vis(g), vg(f) helper functions (for quick experimentation/testing),
+    R(deg, use_radians), rotate(sample, deg), translate(sample, T) for augmentation,
+    generate_sample(f) to generate an augmented sample,
+    generate_true_dataset() to generate smooth shape functions,
+    generate_train_dataset() to noisily `observe' a true_dataset,
+    generate_parametric() wrapper that provides the output necessary for latent_ode,
+    generate_spirals_nonaugmented(), generate_spirals_nonaugmented_small(),
+        and generate_spirals_augmented() as additional wrappers for use in experiments.
+    sanity_check() and quicktest() for quick testing of datasets.
 """
 import matplotlib.pyplot as plt
 import numpy as np
