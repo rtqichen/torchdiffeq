@@ -248,7 +248,7 @@ def experiment(generate_data = generate_spirals_nonaugmented,
             plt.legend()
             
             vis_i_fn = vis_fn.format(ii)
-            plt.savefig(vis_i_fn, dpi=500)
+            plt.savefig(vis_i_fn, dpi=200)
             print('Saved visualization figure at {}'.format(vis_i_fn))
 
     return func, rec, dec, params, optimizer, loss_meter
@@ -283,10 +283,10 @@ def experiment_3():
                       nhidden       = 120,
                       rnn_nhidden   = 150,
                       hidden_depth  = 3,
-                      epochs        = 1,
+                      epochs        = 8000,
                       save_to_fn    = "./exp3/ckpt_{}.pth".format(round(time())),
                       vis_fn        = "./exp3/vis_{}.png",
-                      viscount      = 100)
+                      viscount      = 50)
 
 def experiment_1_small():
     return experiment(generate_data = generate_spirals_nonaugmented_small,
