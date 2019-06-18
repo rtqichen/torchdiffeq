@@ -13,9 +13,7 @@ As the solvers are implemented in PyTorch, algorithms in this repository are ful
 
 ## Installation
 ```
-git clone https://github.com/rtqichen/torchdiffeq.git
-cd torchdiffeq
-pip install -e .
+pip install git+https://github.com/rtqichen/torchdiffeq
 ```
 
 ## Examples
