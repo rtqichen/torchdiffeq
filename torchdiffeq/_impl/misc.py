@@ -57,7 +57,7 @@ def _decreasing(t):
 
 
 def _assert_increasing(t):
-    assert (t[1:] > t[:-1]).all(), 't must be strictly increasing or decrasing'
+    assert (t[1:] > t[:-1]).all(), 't must be strictly increasing or decreasing'
 
 
 def _is_iterable(inputs):
