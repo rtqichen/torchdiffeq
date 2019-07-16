@@ -1,5 +1,4 @@
-
-#Frequently Asked Questions (FAQ)
+# Frequently Asked Questions (FAQ)
 
 **What are good resources to understand how ODEs can be solved?**<br>
 *Solving Ordinary Differential Equations I Nonstiff Problems* by Hairer et al.<br>
