@@ -49,7 +49,7 @@ The number of states required to be stored in memory during a forward pass is so
 
 **How do I obtain evaluations on the estimated path when using an adaptive solver ?**<br>
 The argument `t` of `odeint` specifies what times should the ODE solver output.<br>
-odeint(func, x0, t=torch.linspace(0, 1, 50))
+```odeint(func, x0, t=torch.linspace(0, 1, 50))```
 
 Note that the ODE solver will always integrate from `min t(0)` to `max t(1)`, and the intermediate values of `t` have no effect on how the ODE the solved. Intermediate values are computed using polynomial interpolation and have very small cost.
 
