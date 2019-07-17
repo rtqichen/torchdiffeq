@@ -79,4 +79,4 @@ This might be because you're running on CPU. Being extremely slow on CPU is expe
 
 
 **My Neural ODE produces underflow in dt when using dopri5**<br>
-This is a problem of the ODE becoming stiff, essentially acting too erratic in a region and the step size becomes so close to zero that no progress can be made in the solver. We were able to avoid this with regularization such as weight decay and using "nice" activation functions, but YMMV. Another option is to use a fixed step size solver to get an approximate solution.
+This is a problem of the ODE becoming stiff, essentially acting too erratic in a region and the step size becomes so close to zero that no progress can be made in the solver. We were able to avoid this with regularization such as weight decay and using "nice" activation functions, but YMMV.
