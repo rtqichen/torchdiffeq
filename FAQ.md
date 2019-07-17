@@ -33,7 +33,7 @@ The error tolerance is [calculated]((https://github.com/rtqichen/torchdiffeq/blo
 **Where is the code that computes the error tolerance?**<br>
 It is computed [here.](https://github.com/rtqichen/torchdiffeq/blob/c4c9c61c939c630b9b88267aa56ddaaec319cb16/torchdiffeq/_impl/misc.py#L146)
 
-**How many states must a Neural ODE solver store during a forward pass with the adjoint method**<br>
+**How many states must a Neural ODE solver store during a forward pass with the adjoint method?**<br>
 The number of states required to be stored in memory during a forward pass is solver dependent. For example, RK45 requires 6 intermediate states to be stored.
 
 **How many function evaluations are there per ODE step on adaptive solvers?**<br>
@@ -47,7 +47,7 @@ The number of states required to be stored in memory during a forward pass is so
     ```
 
 
-**How do I obtain evaluations on the estimated path when using an adaptive solver ?**<br>
+**How do I obtain evaluations on the estimated path when using an adaptive solver?**<br>
 The argument `t` of `odeint` specifies what times should the ODE solver output.<br>
 ```odeint(func, x0, t=torch.linspace(0, 1, 50))```
 
@@ -58,7 +58,7 @@ Avoid non-smooth non-linearities such as ReLU and LeakyReLU.<br>
 Prefer non-linearities with a theoretically unique adjoint/gradient such as Softplus.
 
 **Where is backpropagation for the Neural ODE defined?**<br>
-It's defined [here](https://github.com/rtqichen/torchdiffeq/blob/master/torchdiffeq/_impl/adjoint.py#L105) if you use the adjoing method `odeint_adjoint`.
+It's defined [here](https://github.com/rtqichen/torchdiffeq/blob/master/torchdiffeq/_impl/adjoint.py#L105) if you use the adjoint method `odeint_adjoint`.
 
 **What are Tableaus?**<br>
 Tableaus are ways to describe coefficients for [RK methods](https://en.wikipedia.org/wiki/Runge%E2%80%93Kutta_methods). The particular set of coefficients used on this repo was taken from [here](https://www.ams.org/journals/mcom/1986-46-173/S0025-5718-1986-0815836-3/).
