@@ -12,7 +12,7 @@ import torchvision.transforms as transforms
 parser = argparse.ArgumentParser()
 parser.add_argument('--network', type=str, choices=['resnet', 'odenet'], default='odenet')
 parser.add_argument('--tol', type=float, default=1e-3)
-parser.add_argument('--adjoint', type=eval, default=True, choices=[True, False])
+parser.add_argument('--adjoint', type=eval, default=False, choices=[True, False])
 parser.add_argument('--downsampling-method', type=str, default='conv', choices=['conv', 'res'])
 parser.add_argument('--nepochs', type=int, default=160)
 parser.add_argument('--data_aug', type=eval, default=True, choices=[True, False])
@@ -163,7 +163,7 @@ class RunningAverageMeter(object):
         self.val = val
 
 
-def get_mnist_loaders(data_aug=False, batch_size=128, test_batch_size=1000, perc=1.0):
+def get_cifar_loaders(data_aug=False, batch_size=128, test_batch_size=1000, perc=1.0):
     if data_aug:
         transform_train = transforms.Compose([
             transforms.RandomCrop(28, padding=4),
@@ -179,17 +179,17 @@ def get_mnist_loaders(data_aug=False, batch_size=128, test_batch_size=1000, perc
     ])
 
     train_loader = DataLoader(
-        datasets.MNIST(root='.data/mnist', train=True, download=True, transform=transform_train), batch_size=batch_size,
+        datasets.CIFAR10(root='.data/cifar', train=True, download=True, transform=transform_train), batch_size=batch_size,
         shuffle=True, num_workers=2, drop_last=True
     )
 
     train_eval_loader = DataLoader(
-        datasets.MNIST(root='.data/mnist', train=True, download=True, transform=transform_test),
+        datasets.CIFAR10(root='.data/cifar', train=True, download=True, transform=transform_test),
         batch_size=test_batch_size, shuffle=False, num_workers=2, drop_last=True
     )
 
     test_loader = DataLoader(
-        datasets.MNIST(root='.data/mnist', train=False, download=True, transform=transform_test),
+        datasets.CIFAR10(root='.data/cifar', train=False, download=True, transform=transform_test),
         batch_size=test_batch_size, shuffle=False, num_workers=2, drop_last=True
     )
 
@@ -286,7 +286,7 @@ if __name__ == '__main__':
 
     if args.downsampling_method == 'conv':
         downsampling_layers = [
-            nn.Conv2d(1, 64, 3, 1),
+            nn.Conv2d(3, 64, 3, 1),
             norm(64),
             nn.ReLU(inplace=True),
             nn.Conv2d(64, 64, 4, 2, 1),
@@ -311,7 +311,7 @@ if __name__ == '__main__':
 
     criterion = nn.CrossEntropyLoss().to(device)
 
-    train_loader, test_loader, train_eval_loader = get_mnist_loaders(
+    train_loader, test_loader, train_eval_loader = get_cifar_loaders(
         args.data_aug, args.batch_size, args.test_batch_size
     )
 

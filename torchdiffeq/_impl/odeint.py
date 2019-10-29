@@ -16,8 +16,8 @@ SOLVERS = {
     'rk4': RK4,
 }
 
-
-def odeint(func, y0, t, rtol=1e-7, atol=1e-9, method=None, options=None):
+# def odeint(func, y0, t, rtol=1e-7, atol=1e-9, method=None, options=None):
+def odeint():
     """Integrate a system of ordinary differential equations.
 
     Solves the initial value problem for a non-stiff system of first order ODEs:
@@ -57,20 +57,20 @@ def odeint(func, y0, t, rtol=1e-7, atol=1e-9, method=None, options=None):
         TypeError: if `options` is supplied without `method`, or if `t` or `y0` has
             an invalid dtype.
     """
-
-    tensor_input, func, y0, t = _check_inputs(func, y0, t)
-
-    if options is None:
-        options = {}
-    elif method is None:
-        raise ValueError('cannot supply `options` without specifying `method`')
-
-    if method is None:
-        method = 'dopri5'
-
-    solver = SOLVERS[method](func, y0, rtol=rtol, atol=atol, **options)
-    solution = solver.integrate(t)
-
-    if tensor_input:
-        solution = solution[0]
-    return solution
+    print('odeint called')
+    # tensor_input, func, y0, t = _check_inputs(func, y0, t)
+    #
+    # if options is None:
+    #     options = {}
+    # elif method is None:
+    #     raise ValueError('cannot supply `options` without specifying `method`')
+    #
+    # if method is None:
+    #     method = 'euler'
+    #
+    # solver = SOLVERS[method](func, y0, rtol=rtol, atol=atol, step_size="scott", **options)
+    # solution = solver.integrate(t)
+    #
+    # if tensor_input:
+    #     solution = solution[0]
+    # return solution

@@ -104,6 +104,8 @@ class OdeintAdjointMethod(torch.autograd.Function):
 
 def odeint_adjoint(func, y0, t, rtol=1e-6, atol=1e-12, method=None, options=None):
 
+    print('odeint_adjoint called')
+
     # We need this in order to access the variables inside this module,
     # since we have no other way of getting variables along the execution path.
     if not isinstance(func, nn.Module):
