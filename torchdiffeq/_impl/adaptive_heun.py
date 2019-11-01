@@ -13,10 +13,10 @@ _ADAPTIVE_HEUN_TABLEAU = _ButcherTableau(
     beta=[
         [1.],
     ],
-    c_sol=[1 / 2, 1 / 2],
+    c_sol=[0.5, 0.5],
     c_error=[
-        1. - 1 / 2,
-        0. - 1 / 2,
+        0.5,
+        -0.5,
     ],
 )
 
