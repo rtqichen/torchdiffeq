@@ -58,6 +58,13 @@ class TestSolverError(unittest.TestCase):
             with self.subTest(ode=ode):
                 self.assertLess(rel_error(sol, y), error_tol)
 
+    def test_adaptive_heun(self):
+        for ode in problems.PROBLEMS.keys():
+            f, y0, t_points, sol = problems.construct_problem(TEST_DEVICE, ode=ode)
+            y = torchdiffeq.odeint(f, y0, t_points, method='adaptive_heun')
+            with self.subTest(ode=ode):
+                self.assertLess(rel_error(sol, y), error_tol)
+
     def test_adjoint(self):
         for ode in problems.PROBLEMS.keys():
             f, y0, t_points, sol = problems.construct_problem(TEST_DEVICE, reverse=True)
@@ -109,6 +116,14 @@ class TestSolverBackwardsInTimeError(unittest.TestCase):
             with self.subTest(ode=ode):
                 self.assertLess(rel_error(sol, y), error_tol)
 
+    def test_adaptive_heun(self):
+        for ode in problems.PROBLEMS.keys():
+            f, y0, t_points, sol = problems.construct_problem(TEST_DEVICE, reverse=True)
+
+            y = torchdiffeq.odeint(f, y0, t_points, method='adaptive_heun')
+            with self.subTest(ode=ode):
+                self.assertLess(rel_error(sol, y), error_tol)
+
     def test_adjoint(self):
         for ode in problems.PROBLEMS.keys():
             f, y0, t_points, sol = problems.construct_problem(TEST_DEVICE, reverse=True)
@@ -148,6 +163,12 @@ class TestNoIntegration(unittest.TestCase):
         f, y0, t_points, sol = problems.construct_problem(TEST_DEVICE, reverse=True)
 
         y = torchdiffeq.odeint(f, y0, t_points[0:1], method='dopri5')
+        self.assertLess(max_abs(sol[0] - y), error_tol)
+
+    def test_dopri5(self):
+        f, y0, t_points, sol = problems.construct_problem(TEST_DEVICE, reverse=True)
+
+        y = torchdiffeq.odeint(f, y0, t_points[0:1], method='adaptive_heun')
         self.assertLess(max_abs(sol[0] - y), error_tol)
 
 

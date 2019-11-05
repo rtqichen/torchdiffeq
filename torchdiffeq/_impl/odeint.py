@@ -1,5 +1,6 @@
 from .tsit5 import Tsit5Solver
 from .dopri5 import Dopri5Solver
+from .adaptive_heun import AdaptiveHeunSolver
 from .fixed_grid import Euler, Midpoint, RK4
 from .fixed_adams import AdamsBashforth, AdamsBashforthMoulton
 from .adams import VariableCoefficientAdamsBashforth
@@ -14,6 +15,7 @@ SOLVERS = {
     'euler': Euler,
     'midpoint': Midpoint,
     'rk4': RK4,
+    'adaptive_heun': AdaptiveHeunSolver,
 }
 
 
