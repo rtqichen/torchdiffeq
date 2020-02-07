@@ -61,7 +61,7 @@ def compute_implicit_phi(explicit_phi, f_n, k):
 class VariableCoefficientAdamsBashforth(AdaptiveStepsizeODESolver):
 
     def __init__(
-        self, func, y0, rtol, atol, implicit=True, max_order=_MAX_ORDER, safety=0.9, ifactor=10.0, dfactor=0.2,
+        self, func, y0, rtol, atol, implicit=True, first_step=None, max_order=_MAX_ORDER, safety=0.9, ifactor=10.0, dfactor=0.2,
         **unused_kwargs
     ):
         _handle_unused_kwargs(self, unused_kwargs)
@@ -72,6 +72,7 @@ class VariableCoefficientAdamsBashforth(AdaptiveStepsizeODESolver):
         self.rtol = rtol if _is_iterable(rtol) else [rtol] * len(y0)
         self.atol = atol if _is_iterable(atol) else [atol] * len(y0)
         self.implicit = implicit
+        self.first_step = first_step
         self.max_order = int(max(_MIN_ORDER, min(max_order, _MAX_ORDER)))
         self.safety = _convert_to_tensor(safety, dtype=torch.float64, device=y0[0].device)
         self.ifactor = _convert_to_tensor(ifactor, dtype=torch.float64, device=y0[0].device)
@@ -87,7 +88,10 @@ class VariableCoefficientAdamsBashforth(AdaptiveStepsizeODESolver):
         prev_t.appendleft(t0)
         prev_f.appendleft(f0)
         phi.appendleft(f0)
-        first_step = _select_initial_step(self.func, t[0], self.y0, 2, self.rtol[0], self.atol[0], f0=f0).to(t)
+        if self.first_step is None:
+            first_step = _select_initial_step(self.func, t[0], self.y0, 2, self.rtol[0], self.atol[0], f0=f0).to(t)
+        else:
+            first_step = _select_initial_step(self.func, t[0], self.y0, 2, self.rtol[0], self.atol[0], f0=f0).to(t)
 
         self.vcabm_state = _VCABMState(self.y0, prev_f, prev_t, next_t=t[0] + first_step, phi=phi, order=1)
 
