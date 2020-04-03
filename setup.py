@@ -7,7 +7,10 @@ setuptools.setup(
     author_email="rtqichen@cs.toronto.edu",
     description="ODE solvers and adjoint sensitivity analysis in PyTorch.",
     url="https://github.com/rtqichen/torchdiffeq",
-    packages=['torchdiffeq', 'torchdiffeq._impl'],
+    packages=setuptools.find_packages(),
     install_requires=['torch>=0.4.1'],
-    classifiers=(
-        "Programming Language :: Python :: 3"),)
+    classifiers=[
+        "Programming Language :: Python :: 3",
+        "License :: OSI Approved :: MIT License",
+    ],
+)
