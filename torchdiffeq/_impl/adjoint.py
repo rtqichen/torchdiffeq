@@ -8,25 +8,27 @@ class OdeintAdjointMethod(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, *args):
-        assert len(args) >= 8, 'Internal error: all arguments required.'
-        y0, func, t, flat_params, rtol, atol, method, options = \
-            args[:-7], args[-7], args[-6], args[-5], args[-4], args[-3], args[-2], args[-1]
+        assert len(args) >= 9, 'Internal error: all arguments required.'
+        y0, func, t, params, flat_params, rtol, atol, method, options = \
+            args[:-8], args[-8], args[-7], args[-6], args[-5], args[-4], args[-3], args[-2], args[-1]
 
         ctx.func, ctx.rtol, ctx.atol, ctx.method, ctx.options = func, rtol, atol, method, options
+        ctx.num_params = len(params)
 
         with torch.no_grad():
             ans = odeint(func, y0, t, rtol=rtol, atol=atol, method=method, options=options)
-        ctx.save_for_backward(t, flat_params, *ans)
+        ctx.save_for_backward(t, *params, flat_params, *ans)
         return ans
 
     @staticmethod
     def backward(ctx, *grad_output):
-
-        t, flat_params, *ans = ctx.saved_tensors
-        ans = tuple(ans)
         func, rtol, atol, method, options = ctx.func, ctx.rtol, ctx.atol, ctx.method, ctx.options
+        num_params = ctx.num_params
+        t = ctx.saved_tensors[0]
+        f_params = ctx.saved_tensors[1:1 + num_params]
+        flat_params = ctx.saved_tensors[1 + num_params]
+        ans = ctx.saved_tensors[1 + num_params + 1:]
         n_tensors = len(ans)
-        f_params = tuple(func.parameters())
 
         # TODO: use a nn.Module and call odeint_adjoint to implement higher order derivatives.
         def augmented_dynamics(t, y_aug):
@@ -99,10 +101,10 @@ class OdeintAdjointMethod(torch.autograd.Function):
             time_vjps.append(adj_time)
             time_vjps = torch.cat(time_vjps[::-1])
 
-            return (*adj_y, None, time_vjps, adj_params, None, None, None, None, None)
+            return (*adj_y, None, time_vjps, None, adj_params, None, None, None, None, None)
 
 
-def odeint_adjoint(func, y0, t, rtol=1e-6, atol=1e-12, method=None, options=None):
+def odeint_adjoint(func, y0, t, rtol=1e-6, atol=1e-12, method=None, options=None, aditional_params=tuple()):
 
     # We need this in order to access the variables inside this module,
     # since we have no other way of getting variables along the execution path.
@@ -125,8 +127,9 @@ def odeint_adjoint(func, y0, t, rtol=1e-6, atol=1e-12, method=None, options=None
         y0 = (y0,)
         func = TupleFunc(func)
 
-    flat_params = _flatten(func.parameters())
-    ys = OdeintAdjointMethod.apply(*y0, func, t, flat_params, rtol, atol, method, options)
+    params = tuple(func.parameters()) + aditional_params
+    flat_params = _flatten(params)
+    ys = OdeintAdjointMethod.apply(*y0, func, t, params, flat_params, rtol, atol, method, options)
 
     if tensor_input:
         ys = ys[0]
