@@ -47,6 +47,12 @@ class TestGradient(unittest.TestCase):
 
         func = lambda y0, t_points: torchdiffeq.odeint(f, y0, t_points, method='adaptive_heun')
         self.assertTrue(torch.autograd.gradcheck(func, (y0, t_points)))
+    
+    def test_dopri8(self):
+        f, y0, t_points, _ = construct_problem(TEST_DEVICE)
+
+        func = lambda y0, t_points: torchdiffeq.odeint(f, y0, t_points, method='dopri8')
+        self.assertTrue(torch.autograd.gradcheck(func, (y0, t_points)))
 
     def test_adjoint(self):
         """
