@@ -5,6 +5,7 @@ from .adaptive_heun import AdaptiveHeunSolver
 from .fixed_grid import Euler, Midpoint, RK4
 from .fixed_adams import AdamsBashforth, AdamsBashforthMoulton
 from .adams import VariableCoefficientAdamsBashforth
+from .dopri8 import Dopri8Solver
 from .misc import _check_inputs
 
 SOLVERS = {
@@ -18,6 +19,7 @@ SOLVERS = {
     'midpoint': Midpoint,
     'rk4': RK4,
     'adaptive_heun': AdaptiveHeunSolver,
+    'dopri8': Dopri8Solver,
 }
 
 
