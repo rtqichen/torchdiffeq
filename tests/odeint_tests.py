@@ -68,7 +68,7 @@ class TestSolverError(unittest.TestCase):
     def test_dopri8(self):
         for ode in problems.PROBLEMS.keys():
             f, y0, t_points, sol = problems.construct_problem(TEST_DEVICE, ode=ode)
-            y = torchdiffeq.odeint(f, y0, t_points, method='dopri8')
+            y = torchdiffeq.odeint(f, y0, t_points, method='dopri8', rtol=1e-12, atol=1e-14)
             with self.subTest(ode=ode):
                 self.assertLess(rel_error(sol, y), error_tol)
                 
