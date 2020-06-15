@@ -6,10 +6,10 @@ import torch
 
 class ConstantODE(torch.nn.Module):
 
-    def __init__(self, device):
+    def __init__(self):
         super(ConstantODE, self).__init__()
-        self.a = torch.nn.Parameter(torch.tensor(0.2).to(device))
-        self.b = torch.nn.Parameter(torch.tensor(3.0).to(device))
+        self.a = torch.nn.Parameter(torch.tensor(0.2))
+        self.b = torch.nn.Parameter(torch.tensor(3.0))
 
     def forward(self, t, y):
         return self.a + (y - (self.a * t + self.b))**5
@@ -19,10 +19,6 @@ class ConstantODE(torch.nn.Module):
 
 
 class SineODE(torch.nn.Module):
-
-    def __init__(self, device):
-        super(SineODE, self).__init__()
-
     def forward(self, t, y):
         return 2 * y / t + t**4 * torch.sin(2 * t) - t**2 + 4 * t**3
 
@@ -34,10 +30,10 @@ class SineODE(torch.nn.Module):
 
 class LinearODE(torch.nn.Module):
 
-    def __init__(self, device, dim=10):
+    def __init__(self, dim=10):
         super(LinearODE, self).__init__()
         self.dim = dim
-        U = torch.randn(dim, dim).to(device) * 0.1
+        U = torch.randn(dim, dim) * 0.1
         A = 2 * U - (U + U.transpose(0, 1))
         self.A = torch.nn.Parameter(A)
         self.initial_val = np.ones((dim, 1))
@@ -46,12 +42,12 @@ class LinearODE(torch.nn.Module):
         return torch.mm(self.A, y.reshape(self.dim, 1)).reshape(-1)
 
     def y_exact(self, t):
-        t = t.detach().cpu().numpy()
+        t_numpy = t.detach().cpu().numpy()
         A_np = self.A.detach().cpu().numpy()
         ans = []
-        for t_i in t:
+        for t_i in t_numpy:
             ans.append(np.matmul(scipy.linalg.expm(A_np * t_i), self.initial_val))
-        return torch.stack([torch.tensor(ans_) for ans_ in ans]).reshape(len(t), self.dim)
+        return torch.stack([torch.tensor(ans_) for ans_ in ans]).reshape(len(t_numpy), self.dim).to(t)
 
 
 PROBLEMS = {'constant': ConstantODE, 'linear': LinearODE, 'sine': SineODE}
@@ -59,7 +55,7 @@ PROBLEMS = {'constant': ConstantODE, 'linear': LinearODE, 'sine': SineODE}
 
 def construct_problem(device, npts=10, ode='constant', reverse=False):
 
-    f = PROBLEMS[ode](device)
+    f = PROBLEMS[ode]().to(device)
 
     t_points = torch.linspace(1, 8, npts).to(device).requires_grad_(True)
     sol = f.y_exact(t_points)
