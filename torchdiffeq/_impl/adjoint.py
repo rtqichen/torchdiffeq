@@ -9,10 +9,12 @@ class OdeintAdjointMethod(torch.autograd.Function):
     @staticmethod
     def forward(ctx, *args):
         assert len(args) >= 8, 'Internal error: all arguments required.'
-        y0, func, t, flat_params, rtol, atol, method, options = \
-            args[:-7], args[-7], args[-6], args[-5], args[-4], args[-3], args[-2], args[-1]
+        (y0, func, t, flat_params, rtol, atol, method, options, adjoint_rtol, adjoint_atol, adjoint_method,
+         adjoint_options) = (args[:-11], args[-11], args[-10], args[-9], args[-8], args[-7], args[-6], args[-5],
+                             args[-4], args[-3], args[-2], args[-1])
 
-        ctx.func, ctx.rtol, ctx.atol, ctx.method, ctx.options = func, rtol, atol, method, options
+        (ctx.func, ctx.adjoint_rtol, ctx.adjoint_atol, ctx.adjoint_method,
+         ctx.adjoint_options) = func, adjoint_rtol, adjoint_atol, adjoint_method, adjoint_options
 
         with torch.no_grad():
             ans = odeint(func, y0, t, rtol=rtol, atol=atol, method=method, options=options)
@@ -21,10 +23,10 @@ class OdeintAdjointMethod(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, *grad_output):
-
         t, flat_params, *ans = ctx.saved_tensors
         ans = tuple(ans)
-        func, rtol, atol, method, options = ctx.func, ctx.rtol, ctx.atol, ctx.method, ctx.options
+        (func, adjoint_rtol, adjoint_atol, adjoint_method,
+         adjoint_options) = ctx.func, ctx.adjoint_rtol, ctx.adjoint_atol, ctx.adjoint_method, ctx.adjoint_options
         n_tensors = len(ans)
         f_params = tuple(func.parameters())
 
@@ -80,7 +82,8 @@ class OdeintAdjointMethod(torch.autograd.Function):
                 aug_y0 = (*ans_i, *adj_y, adj_time, adj_params)
                 aug_ans = odeint(
                     augmented_dynamics, aug_y0,
-                    torch.tensor([t[i], t[i - 1]]), rtol=rtol, atol=atol, method=method, options=options
+                    torch.tensor([t[i], t[i - 1]]),
+                    rtol=adjoint_rtol, atol=adjoint_atol, method=adjoint_method, options=adjoint_options
                 )
 
                 # Unpack aug_ans.
@@ -99,15 +102,25 @@ class OdeintAdjointMethod(torch.autograd.Function):
             time_vjps.append(adj_time)
             time_vjps = torch.cat(time_vjps[::-1])
 
-            return (*adj_y, None, time_vjps, adj_params, None, None, None, None, None)
+            return (*adj_y, None, time_vjps, adj_params, None, None, None, None, None, None, None, None)
 
 
-def odeint_adjoint(func, y0, t, rtol=1e-6, atol=1e-12, method=None, options=None):
+def odeint_adjoint(func, y0, t, rtol=1e-6, atol=1e-12, method=None, options=None, adjoint_rtol=None, adjoint_atol=None,
+                   adjoint_method=None, adjoint_options=None):
 
     # We need this in order to access the variables inside this module,
     # since we have no other way of getting variables along the execution path.
     if not isinstance(func, nn.Module):
         raise ValueError('func is required to be an instance of nn.Module.')
+
+    if adjoint_rtol is None:
+        adjoint_rtol = rtol
+    if adjoint_atol is None:
+        adjoint_atol = atol
+    if adjoint_method is None:
+        adjoint_method = method
+    if adjoint_options is None:
+        adjoint_options = options
 
     tensor_input = False
     if torch.is_tensor(y0):
@@ -126,7 +139,8 @@ def odeint_adjoint(func, y0, t, rtol=1e-6, atol=1e-12, method=None, options=None
         func = TupleFunc(func)
 
     flat_params = _flatten(func.parameters())
-    ys = OdeintAdjointMethod.apply(*y0, func, t, flat_params, rtol, atol, method, options)
+    ys = OdeintAdjointMethod.apply(*y0, func, t, flat_params, rtol, atol, method, options, adjoint_rtol, adjoint_atol,
+                                   adjoint_method, adjoint_options)
 
     if tensor_input:
         ys = ys[0]
