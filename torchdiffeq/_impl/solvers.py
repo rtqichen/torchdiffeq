@@ -45,12 +45,16 @@ class FixedGridODESolver(object):
         self.func = func
         self.y0 = y0
 
-        if step_size is not None and grid_constructor is None:
-            self.grid_constructor = self._grid_constructor_from_step_size(step_size)
-        elif grid_constructor is None:
-            self.grid_constructor = lambda f, y0, t: t
+        if step_size is None:
+            if grid_constructor is None:
+                self.grid_constructor = lambda f, y0, t: t
+            else:
+                self.grid_constructor = grid_constructor
         else:
-            raise ValueError("step_size and grid_constructor are exclusive arguments.")
+            if grid_constructor is None:
+                self.grid_constructor = self._grid_constructor_from_step_size(step_size)
+            else:
+                raise ValueError("step_size and grid_constructor are exclusive arguments.")
 
     def _grid_constructor_from_step_size(self, step_size):
 
