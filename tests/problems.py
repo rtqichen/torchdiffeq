@@ -55,7 +55,7 @@ PROBLEMS = {'constant': ConstantODE, 'linear': LinearODE, 'sine': SineODE}
 
 def construct_problem(device, npts=10, ode='constant', reverse=False):
 
-    f = PROBLEMS[ode].to(device)
+    f = PROBLEMS[ode]().to(device)
 
     t_points = torch.linspace(1, 8, npts).to(device).requires_grad_(True)
     sol = f.y_exact(t_points)
