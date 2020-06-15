@@ -42,12 +42,12 @@ class LinearODE(torch.nn.Module):
         return torch.mm(self.A, y.reshape(self.dim, 1)).reshape(-1)
 
     def y_exact(self, t):
-        t = t.detach().cpu().numpy()
+        t_numpy = t.detach().cpu().numpy()
         A_np = self.A.detach().cpu().numpy()
         ans = []
-        for t_i in t:
+        for t_i in t_numpy:
             ans.append(np.matmul(scipy.linalg.expm(A_np * t_i), self.initial_val))
-        return torch.stack([torch.tensor(ans_) for ans_ in ans]).reshape(len(t), self.dim)
+        return torch.stack([torch.tensor(ans_) for ans_ in ans]).reshape(len(t_numpy), self.dim).to(t)
 
 
 PROBLEMS = {'constant': ConstantODE, 'linear': LinearODE, 'sine': SineODE}
