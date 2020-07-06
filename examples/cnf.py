@@ -13,8 +13,8 @@ import torch.optim as optim
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--adjoint', type=eval, default=False)
-parser.add_argument('--visualize', type=eval, default=False)
+parser.add_argument('--adjoint', action='store_true')
+parser.add_argument('--viz', action='store_true')
 parser.add_argument('--niters', type=int, default=1000)
 parser.add_argument('--lr', type=float, default=1e-3)
 parser.add_argument('--num_samples', type=int, default=512)
@@ -203,7 +203,7 @@ if __name__ == '__main__':
             print('Stored ckpt at {}'.format(ckpt_path))
     print('Training complete after {} iters.'.format(itr))
 
-    if args.visualize:
+    if args.viz:
         viz_samples = 30000
         viz_timesteps = 41
         target_sample, _ = get_batch(viz_samples)
