@@ -40,6 +40,19 @@ else:
 The main gotcha is that `odeint_adjoint` requires implementing the dynamics network as a `nn.Module` while `odeint` can work with any callable in Python.
 
 ## Continuous Normalizing Flows
-Code for continuous normalizing flows (CNF)  have their own public repository. Tools for training, evaluating, and visualizing CNF for reversible generative modeling are provided along with FFJORD, a linear cost stochastic approximation of CNF.
+
+The `cnf.py` file contains a simple CNF implementation for learning the density of a coencentric circles dataset.
+
+To train a CNF and visualise the resulting dynamics, run
+```
+python cnf.py --viz
+```
+The result should look similar to this:
+
+<p align="center">
+<img align="middle" src="../assets/cnf_demo.gif" alt="CNF Demo" width="650" height="200" />
+</p>
+
+More comprehensive code for continuous normalizing flows (CNFs) has its own public repository. Tools for training, evaluating, and visualizing CNFs for reversible generative modeling are provided along with FFJORD, a linear cost stochastic approximation of CNFs.
 
 Find the code in https://github.com/rtqichen/ffjord. This code contains some advanced tricks for `torchdiffeq`.
