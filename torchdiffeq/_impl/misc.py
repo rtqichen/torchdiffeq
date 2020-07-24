@@ -56,8 +56,12 @@ def _decreasing(t):
     return (t[1:] < t[:-1]).all()
 
 
-def _assert_increasing(t):
-    assert (t[1:] > t[:-1]).all(), 't must be strictly increasing or decreasing'
+def _assert_one_dimensional(name, t):
+    assert t.ndimension() == 1, "{} must be one dimensional".format(name)
+
+
+def _assert_increasing(name, t):
+    assert (t[1:] > t[:-1]).all(), '{} must be strictly increasing or decreasing'.format(name)
 
 
 def _is_iterable(inputs):
@@ -192,6 +196,18 @@ def _check_inputs(func, y0, t, options):
         else:
             options = options.copy()
             options['grid_points'] = -grid_points
+
+    assert torch.is_tensor(t), 't must be a torch.Tensor'
+    _assert_one_dimensional('t', t)
+    _assert_increasing('t', t)
+    try:
+        grid_points = options['grid_points']
+    except KeyError:
+        pass
+    else:
+        assert torch.is_tensor(grid_points), 'grid_points must be a torch.Tensor'
+        _assert_one_dimensional('grid_points', grid_points)
+        _assert_increasing('grid_points', grid_points)
 
     for y0_ in y0:
         if not torch.is_floating_point(y0_):
