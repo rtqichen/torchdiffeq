@@ -170,7 +170,7 @@ def _optimal_step_size(last_step, mean_error_ratio, safety=0.9, ifactor=10.0, df
     return last_step / factor
 
 
-def _check_inputs(func, y0, t):
+def _check_inputs(func, y0, t, options):
     tensor_input = False
     if torch.is_tensor(y0):
         tensor_input = True
@@ -185,6 +185,13 @@ def _check_inputs(func, y0, t):
         t = -t
         _base_reverse_func = func
         func = lambda t, y: tuple(-f_ for f_ in _base_reverse_func(-t, y))
+        try:
+            grid_points = options['grid_points']
+        except KeyError:
+            pass
+        else:
+            options = options.copy()
+            options['grid_points'] = -grid_points
 
     for y0_ in y0:
         if not torch.is_floating_point(y0_):
@@ -192,4 +199,4 @@ def _check_inputs(func, y0, t):
     if not torch.is_floating_point(t):
         raise TypeError('`t` must be a floating point Tensor but is a {}'.format(t.type()))
 
-    return tensor_input, func, y0, t
+    return tensor_input, func, y0, t, options
