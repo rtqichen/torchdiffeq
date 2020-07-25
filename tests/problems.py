@@ -57,12 +57,12 @@ def construct_problem(device, npts=10, ode='constant', reverse=False):
 
     f = PROBLEMS[ode]().to(device)
 
-    t_points = torch.linspace(1, 8, npts).to(device).requires_grad_(True)
+    t_points = torch.linspace(1, 8, npts, device=device, requires_grad=True)
     sol = f.y_exact(t_points)
 
     def _flip(x, dim):
         indices = [slice(None)] * x.dim()
-        indices[dim] = torch.arange(x.size(dim) - 1, -1, -1, dtype=torch.long, device=x.device)
+        indices[dim] = torch.arange(x.size(dim) - 1, -1, -1, dtype=torch.long, device=device)
         return x[tuple(indices)]
 
     if reverse:
@@ -73,10 +73,10 @@ def construct_problem(device, npts=10, ode='constant', reverse=False):
 
 
 if __name__ == '__main__':
-    f = SineODE('cpu')
-    t_points = torch.linspace(1, 8, 100).to('cpu').requires_grad_(True)
+    f = SineODE().cpu()
+    t_points = torch.linspace(1, 8, 100, device='cpu')
     sol = f.y_exact(t_points)
 
     import matplotlib.pyplot as plt
-    plt.plot(t_points.detach().cpu().numpy(), sol.detach().cpu().numpy())
+    plt.plot(t_points, sol)
     plt.show()

@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from . import odeint
+from .odeint import odeint
 from .misc import _flatten, _flatten_convert_none_to_zeros
 
 
@@ -45,7 +45,7 @@ class OdeintAdjointMethod(torch.autograd.Function):
             y, adj_y = y_aug[:n_tensors], y_aug[n_tensors:2 * n_tensors]  # Ignore adj_time and adj_params.
 
             with torch.set_grad_enabled(True):
-                t = t.to(y[0].device).detach().requires_grad_(True)
+                t = t.detach().requires_grad_(True)
                 y = tuple(y_.detach().requires_grad_(True) for y_ in y)
                 func_eval = func(t, y)
                 vjp_t, *vjp_y_and_params = torch.autograd.grad(
@@ -61,14 +61,14 @@ class OdeintAdjointMethod(torch.autograd.Function):
             vjp_params = _flatten_convert_none_to_zeros(vjp_params, f_params)
 
             if len(f_params) == 0:
-                vjp_params = torch.tensor(0.).to(vjp_y[0])
+                vjp_params = torch.tensor(0.)
             return (*func_eval, *vjp_y, vjp_t, vjp_params)
 
         T = ans[0].shape[0]
         with torch.no_grad():
             adj_y = tuple(grad_output_[-1] for grad_output_ in grad_output)
             adj_params = torch.zeros_like(flat_params)
-            adj_time = torch.tensor(0.).to(t)
+            adj_time = torch.tensor(0.)
             time_vjps = []
             for i in range(T - 1, 0, -1):
 
@@ -86,11 +86,11 @@ class OdeintAdjointMethod(torch.autograd.Function):
 
                 # Run the augmented system backwards in time.
                 if adj_params.numel() == 0:
-                    adj_params = torch.tensor(0.).to(adj_y[0])
+                    adj_params = torch.tensor(0.)
                 aug_y0 = (*ans_i, *adj_y, adj_time, adj_params)
                 aug_ans = odeint(
                     augmented_dynamics, aug_y0,
-                    torch.tensor([t[i], t[i - 1]]),
+                    t[i - 1:i + 1].flip(0),
                     rtol=adjoint_rtol, atol=adjoint_atol, method=adjoint_method, options=adjoint_options
                 )
 

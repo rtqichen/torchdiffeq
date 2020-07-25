@@ -2,7 +2,7 @@ import collections
 import torch
 from .solvers import AdaptiveStepsizeODESolver
 from .misc import (
-    _handle_unused_kwargs, _select_initial_step, _convert_to_tensor, _scaled_dot_product, _is_iterable,
+    _handle_unused_kwargs, _select_initial_step, _scaled_dot_product, _expand_as,
     _optimal_step_size, _compute_error_ratio
 )
 
@@ -59,44 +59,41 @@ def compute_implicit_phi(explicit_phi, f_n, k):
 
 
 class VariableCoefficientAdamsBashforth(AdaptiveStepsizeODESolver):
-
-    def __init__(
-        self, func, y0, rtol, atol, implicit=True, first_step=None, max_order=_MAX_ORDER, safety=0.9, ifactor=10.0, dfactor=0.2,
-        **unused_kwargs
-    ):
+    def __init__(self, func, y0, rtol, atol, implicit=True, first_step=None, max_order=_MAX_ORDER, safety=0.9,
+                 ifactor=10.0, dfactor=0.2, **unused_kwargs):
         _handle_unused_kwargs(self, unused_kwargs)
         del unused_kwargs
 
-        self.func = func
+        self.func = lambda t, y: func(t.type_as(y[0]), y)
         self.y0 = y0
-        self.rtol = rtol if _is_iterable(rtol) else [rtol] * len(y0)
-        self.atol = atol if _is_iterable(atol) else [atol] * len(y0)
+        self.rtol = _expand_as(rtol, y0)
+        self.atol = _expand_as(atol, y0)
         self.implicit = implicit
-        self.first_step = first_step
+        self.first_step = None if first_step is None else torch.as_tensor(first_step, dtype=torch.float64, device=y0[0].device)
         self.max_order = int(max(_MIN_ORDER, min(max_order, _MAX_ORDER)))
-        self.safety = _convert_to_tensor(safety, dtype=torch.float64, device=y0[0].device)
-        self.ifactor = _convert_to_tensor(ifactor, dtype=torch.float64, device=y0[0].device)
-        self.dfactor = _convert_to_tensor(dfactor, dtype=torch.float64, device=y0[0].device)
+        self.safety = torch.as_tensor(safety, dtype=torch.float64, device=y0[0].device)
+        self.ifactor = torch.as_tensor(ifactor, dtype=torch.float64, device=y0[0].device)
+        self.dfactor = torch.as_tensor(dfactor, dtype=torch.float64, device=y0[0].device)
 
-    def before_integrate(self, t):
+    def _before_integrate(self, t):
         prev_f = collections.deque(maxlen=self.max_order + 1)
         prev_t = collections.deque(maxlen=self.max_order + 1)
         phi = collections.deque(maxlen=self.max_order)
 
         t0 = t[0]
-        f0 = self.func(t0.type_as(self.y0[0]), self.y0)
+        f0 = self.func(t0, self.y0)
         prev_t.appendleft(t0)
         prev_f.appendleft(f0)
         phi.appendleft(f0)
         if self.first_step is None:
-            first_step = _select_initial_step(self.func, t[0], self.y0, 2, self.rtol[0], self.atol[0], f0=f0).to(t)
+            first_step = _select_initial_step(self.func, t[0], self.y0, 2, self.rtol, self.atol, f0=f0)
         else:
-            first_step = _select_initial_step(self.func, t[0], self.y0, 2, self.rtol[0], self.atol[0], f0=f0).to(t)
+            first_step = self.first_step
 
         self.vcabm_state = _VCABMState(self.y0, prev_f, prev_t, next_t=t[0] + first_step, phi=phi, order=1)
 
-    def advance(self, final_t):
-        final_t = _convert_to_tensor(final_t).to(self.vcabm_state.prev_t[0])
+    def _advance(self, final_t):
+        final_t = torch.as_tensor(final_t).to(self.vcabm_state.prev_t[0])
         while final_t > self.vcabm_state.prev_t[0]:
             self.vcabm_state = self._adaptive_adams_step(self.vcabm_state, final_t)
         assert final_t == self.vcabm_state.prev_t[0]
@@ -118,7 +115,7 @@ class VariableCoefficientAdamsBashforth(AdaptiveStepsizeODESolver):
         )
 
         # Update phi to implicit.
-        next_f0 = self.func(next_t.to(p_next[0]), p_next)
+        next_f0 = self.func(next_t, p_next)
         implicit_phi_p = compute_implicit_phi(phi, next_f0, order + 1)
 
         # Implicit corrector step.
@@ -137,11 +134,11 @@ class VariableCoefficientAdamsBashforth(AdaptiveStepsizeODESolver):
 
         if not accept_step:
             # Retry with adjusted step size if step is rejected.
-            dt_next = _optimal_step_size(dt, error_k, self.safety, self.ifactor, self.dfactor, order=order)
+            dt_next = _optimal_step_size(dt, error_k, self.safety, self.ifactor, self.dfactor, order)
             return _VCABMState(y0, prev_f, prev_t, prev_t[0] + dt_next, prev_phi, order=order)
 
         # We accept the step. Evaluate f and update phi.
-        next_f0 = self.func(next_t.to(p_next[0]), y_next)
+        next_f0 = self.func(next_t, y_next)
         implicit_phi = compute_implicit_phi(phi, next_f0, order + 2)
 
         next_order = order
@@ -166,7 +163,7 @@ class VariableCoefficientAdamsBashforth(AdaptiveStepsizeODESolver):
 
         # Keep step size constant if increasing order. Else use adaptive step size.
         dt_next = dt if next_order > order else _optimal_step_size(
-            dt, error_k, self.safety, self.ifactor, self.dfactor, order=order + 1
+            dt, error_k, self.safety, self.ifactor, self.dfactor, order + 1
         )
 
         prev_f.appendleft(next_f0)

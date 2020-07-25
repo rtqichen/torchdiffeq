@@ -1,5 +1,6 @@
-import warnings
+import math
 import torch
+import warnings
 
 
 def _flatten(sequence):
@@ -30,54 +31,17 @@ def _dot_product(xs, ys):
     return sum([x * y for x, y in zip(xs, ys)])
 
 
-def _has_converged(y0, y1, rtol, atol):
-    """Checks that each element is within the error tolerance."""
-    error_tol = tuple(atol + rtol * torch.max(torch.abs(y0_), torch.abs(y1_)) for y0_, y1_ in zip(y0, y1))
-    error = tuple(torch.abs(y0_ - y1_) for y0_, y1_ in zip(y0, y1))
-    return all((error_ < error_tol_).all() for error_, error_tol_ in zip(error, error_tol))
+def _error_tol(rtol, atol, y0, y1):
+    return tuple(atol_ + rtol_ * torch.max(y0_.abs(), y1_.abs()) for atol_, rtol_, y0_, y1_ in zip(atol, rtol, y0, y1))
 
 
-def _convert_to_tensor(a, dtype=None, device=None):
-    if not isinstance(a, torch.Tensor):
-        a = torch.tensor(a)
-    if dtype is not None:
-        a = a.type(dtype)
-    if device is not None:
-        a = a.to(device)
-    return a
-
-
-def _is_finite(tensor):
-    _check = (tensor == float('inf')) + (tensor == float('-inf')) + torch.isnan(tensor)
-    return not _check.any()
-
-
-def _decreasing(t):
-    return (t[1:] < t[:-1]).all()
-
-
-def _assert_one_dimensional(name, t):
-    assert t.ndimension() == 1, "{} must be one dimensional".format(name)
-
-
-def _assert_increasing(name, t):
-    assert (t[1:] > t[:-1]).all(), '{} must be strictly increasing or decreasing'.format(name)
-
-
-def _is_iterable(inputs):
+def _expand_as(inputs, target):
     try:
         iter(inputs)
-        return True
     except TypeError:
-        return False
-
-
-def _norm(x):
-    """Compute RMS norm."""
-    if torch.is_tensor(x):
-        return x.norm() / (x.numel()**0.5)
+        return [inputs] * len(target)
     else:
-        return torch.sqrt(sum(x_.norm()**2 for x_ in x) / sum(x_.numel() for x_ in x))
+        return inputs
 
 
 def _handle_unused_kwargs(solver, unused_kwargs):
@@ -85,14 +49,19 @@ def _handle_unused_kwargs(solver, unused_kwargs):
         warnings.warn('{}: Unexpected arguments {}'.format(solver.__class__.__name__, unused_kwargs))
 
 
-def _select_initial_step(fun, t0, y0, order, rtol, atol, f0=None):
+def _norm(x):
+    """Compute RMS norm."""
+    return x.norm() / math.sqrt(x.numel())
+
+
+def _select_initial_step(func, t0, y0, order, rtol, atol, f0=None):
     """Empirically select a good initial step.
 
     The algorithm is described in [1]_.
 
     Parameters
     ----------
-    fun : callable
+    func : callable
         Right-hand side of the system.
     t0 : float
         Initial value of the independent variable.
@@ -117,61 +86,62 @@ def _select_initial_step(fun, t0, y0, order, rtol, atol, f0=None):
     .. [1] E. Hairer, S. P. Norsett G. Wanner, "Solving Ordinary Differential
            Equations I: Nonstiff Problems", Sec. II.4.
     """
-    t0 = t0.to(y0[0])
+
     if f0 is None:
-        f0 = fun(t0, y0)
+        f0 = func(t0, y0)
 
-    rtol = rtol if _is_iterable(rtol) else [rtol] * len(y0)
-    atol = atol if _is_iterable(atol) else [atol] * len(y0)
-
-    scale = tuple(atol_ + torch.abs(y0_) * rtol_ for y0_, atol_, rtol_ in zip(y0, atol, rtol))
+    scale = tuple(atol_ + y0_.abs() * rtol_ for y0_, atol_, rtol_ in zip(y0, atol, rtol))
 
     d0 = tuple(_norm(y0_ / scale_) for y0_, scale_ in zip(y0, scale))
     d1 = tuple(_norm(f0_ / scale_) for f0_, scale_ in zip(f0, scale))
 
     if max(d0).item() < 1e-5 or max(d1).item() < 1e-5:
-        h0 = torch.tensor(1e-6).to(t0)
+        h0 = torch.tensor(1e-6, dtype=y0.dtype, device=y0.device)
     else:
         h0 = 0.01 * max(d0_ / d1_ for d0_, d1_ in zip(d0, d1))
 
     y1 = tuple(y0_ + h0 * f0_ for y0_, f0_ in zip(y0, f0))
-    f1 = fun(t0 + h0, y1)
+    f1 = func(t0 + h0, y1)
 
     d2 = tuple(_norm((f1_ - f0_) / scale_) / h0 for f1_, f0_, scale_ in zip(f1, f0, scale))
 
     if max(d1).item() <= 1e-15 and max(d2).item() <= 1e-15:
-        h1 = torch.max(torch.tensor(1e-6).to(h0), h0 * 1e-3)
+        h1 = torch.max(torch.tensor(1e-6, dtype=y0.dtype, device=y0.device), h0 * 1e-3)
     else:
-        h1 = (0.01 / max(d1 + d2))**(1. / float(order + 1))
+        h1 = (0.01 / max(d1 + d2)) ** (1. / float(order + 1))
 
-    return torch.min(100 * h0, h1)
+    return torch.min(100 * h0, h1).type_as(t0)
 
 
-def _compute_error_ratio(error_estimate, error_tol=None, rtol=None, atol=None, y0=None, y1=None):
-    if error_tol is None:
-        assert rtol is not None and atol is not None and y0 is not None and y1 is not None
-        rtol if _is_iterable(rtol) else [rtol] * len(y0)
-        atol if _is_iterable(atol) else [atol] * len(y0)
-        error_tol = tuple(
-            atol_ + rtol_ * torch.max(torch.abs(y0_), torch.abs(y1_))
-            for atol_, rtol_, y0_, y1_ in zip(atol, rtol, y0, y1)
-        )
+def _compute_error_ratio(error_estimate, error_tol):
     error_ratio = tuple(error_estimate_ / error_tol_ for error_estimate_, error_tol_ in zip(error_estimate, error_tol))
-    mean_sq_error_ratio = tuple(torch.mean(error_ratio_ * error_ratio_) for error_ratio_ in error_ratio)
+    mean_sq_error_ratio = tuple(error_ratio_.pow(2).mean() for error_ratio_ in error_ratio)
     return mean_sq_error_ratio
 
 
-def _optimal_step_size(last_step, mean_error_ratio, safety=0.9, ifactor=10.0, dfactor=0.2, order=5):
+def _optimal_step_size(last_step, mean_error_ratio, safety, ifactor, dfactor, order):
     """Calculate the optimal size for the next step."""
     mean_error_ratio = max(mean_error_ratio)  # Compute step size based on highest ratio.
     if mean_error_ratio == 0:
         return last_step * ifactor
     if mean_error_ratio < 1:
-        dfactor = _convert_to_tensor(1, dtype=torch.float64, device=mean_error_ratio.device)
-    error_ratio = torch.sqrt(mean_error_ratio).to(last_step)
-    exponent = torch.tensor(1 / order).to(last_step)
-    factor = torch.max(1 / ifactor, torch.min(error_ratio**exponent / safety, 1 / dfactor))
-    return last_step / factor
+        dfactor = torch.ones((), dtype=last_step.dtype, device=last_step.device)
+    error_ratio = torch.sqrt(mean_error_ratio).type_as(last_step)
+    exponent = torch.tensor(order, dtype=last_step.dtype, device=last_step.device).reciprocal()
+    factor = torch.min(ifactor, torch.max(safety / error_ratio ** exponent, dfactor))
+    return last_step * factor
+
+
+def _decreasing(t):
+    return (t[1:] < t[:-1]).all()
+
+
+def _assert_one_dimensional(name, t):
+    assert t.ndimension() == 1, "{} must be one dimensional".format(name)
+
+
+def _assert_increasing(name, t):
+    assert (t[1:] > t[:-1]).all(), '{} must be strictly increasing or decreasing'.format(name)
 
 
 def _check_inputs(func, y0, t, options):

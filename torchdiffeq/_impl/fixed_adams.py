@@ -1,7 +1,9 @@
-import sys
 import collections
+import sys
+import torch
+import warnings
 from .solvers import FixedGridODESolver
-from .misc import _scaled_dot_product, _has_converged
+from .misc import _error_tol, _expand_as, _scaled_dot_product
 from . import rk_common
 
 _BASHFORTH_COEFFICIENTS = [
@@ -149,14 +151,12 @@ _MAX_ITERS = 4
 
 
 class AdamsBashforthMoulton(FixedGridODESolver):
-
-    def __init__(
-        self, func, y0, rtol=1e-3, atol=1e-4, implicit=True, max_iters=_MAX_ITERS, max_order=_MAX_ORDER, **kwargs
-    ):
+    def __init__(self, func, y0, rtol=1e-3, atol=1e-4, implicit=True, max_iters=_MAX_ITERS, max_order=_MAX_ORDER,
+                 **kwargs):
         super(AdamsBashforthMoulton, self).__init__(func, y0, **kwargs)
 
-        self.rtol = rtol
-        self.atol = atol
+        self.rtol = _expand_as(rtol, y0)
+        self.atol = _expand_as(atol, y0)
         self.implicit = implicit
         self.max_iters = max_iters
         self.max_order = int(min(max_order, _MAX_ORDER))
@@ -167,6 +167,12 @@ class AdamsBashforthMoulton(FixedGridODESolver):
         if self.prev_t is None or self.prev_t != t:
             self.prev_f.appendleft(f)
             self.prev_t = t
+
+    def _has_converged(self, y0, y1):
+        """Checks that each element is within the error tolerance."""
+        error_tol = _error_tol(self.rtol, self.atol, y0, y1)
+        error = tuple(torch.abs(y0_ - y1_) for y0_, y1_ in zip(y0, y1))
+        return all((error_ < error_tol_).all() for error_, error_tol_ in zip(error, error_tol))
 
     def step_func(self, func, t, dt, y):
         self._update_history(t, func(t, y))
@@ -191,11 +197,11 @@ class AdamsBashforthMoulton(FixedGridODESolver):
                     dy_old = dy
                     f = func(t + dt, tuple(y_ + dy_ for y_, dy_ in zip(y, dy)))
                     dy = tuple(dt * (moulton_coeffs[0] / am_div) * f_ + delta_ for f_, delta_ in zip(f, delta))
-                    converged = _has_converged(dy_old, dy, self.rtol, self.atol)
+                    converged = self._has_converged(dy_old, dy)
                     if converged:
                         break
                 if not converged:
-                    print('Warning: Functional iteration did not converge. Solution may be incorrect.', file=sys.stderr)
+                    warnings.warn('Functional iteration did not converge. Solution may be incorrect.', file=sys.stderr)
                     self.prev_f.pop()
                 self._update_history(t, f)
             return dy
@@ -206,6 +212,5 @@ class AdamsBashforthMoulton(FixedGridODESolver):
 
 
 class AdamsBashforth(AdamsBashforthMoulton):
-
     def __init__(self, func, y0, **kwargs):
         super(AdamsBashforth, self).__init__(func, y0, implicit=False, **kwargs)

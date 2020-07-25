@@ -97,9 +97,7 @@ class TestGradient(unittest.TestCase):
 class TestCompareAdjointGradient(unittest.TestCase):
 
     def problem(self):
-
         class Odefunc(torch.nn.Module):
-
             def __init__(self):
                 super(Odefunc, self).__init__()
                 self.A = torch.nn.Parameter(torch.tensor([[-0.1, 2.0], [-2.0, -0.1]]))
@@ -108,8 +106,8 @@ class TestCompareAdjointGradient(unittest.TestCase):
             def forward(self, t, y):
                 return torch.mm(y**3, self.A)
 
-        y0 = torch.tensor([[2., 0.]]).to(TEST_DEVICE).requires_grad_(True)
-        t_points = torch.linspace(0., 25., 10).to(TEST_DEVICE).requires_grad_(True)
+        y0 = torch.tensor([[2., 0.]], device=TEST_DEVICE, requires_grad=True)
+        t_points = torch.linspace(0., 25., 10, device=TEST_DEVICE, requires_grad=True)
         func = Odefunc().to(TEST_DEVICE)
         return func, y0, t_points
 

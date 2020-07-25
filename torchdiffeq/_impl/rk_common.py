@@ -1,6 +1,6 @@
 # Based on https://github.com/tensorflow/tensorflow/tree/master/tensorflow/contrib/integrate
 import collections
-from .misc import _scaled_dot_product, _convert_to_tensor
+from .misc import _scaled_dot_product
 
 _ButcherTableau = collections.namedtuple('_ButcherTableau', 'alpha beta c_sol c_error')
 
@@ -39,13 +39,8 @@ def _runge_kutta_step(func, y0, f0, t0, dt, tableau):
         estimated error at `t1`, and a list of Runge-Kutta coefficients `k` used for
         calculating these terms.
     """
-    dtype = y0[0].dtype
-    device = y0[0].device
 
-    t0 = _convert_to_tensor(t0, dtype=dtype, device=device)
-    dt = _convert_to_tensor(dt, dtype=dtype, device=device)
-
-    k = tuple(map(lambda x: [x], f0))
+    k = tuple([x] for x in f0)
     for alpha_i, beta_i in zip(tableau.alpha, tableau.beta):
         ti = t0 + alpha_i * dt
         yi = tuple(y0_ + _scaled_dot_product(dt, beta_i, k_) for y0_, k_ in zip(y0, k))
@@ -58,21 +53,28 @@ def _runge_kutta_step(func, y0, f0, t0, dt, tableau):
     y1 = yi
     f1 = tuple(k_[-1] for k_ in k)
     y1_error = tuple(_scaled_dot_product(dt, tableau.c_error, k_) for k_ in k)
-    return (y1, f1, y1_error, k)
+    return y1, f1, y1_error, k
+
+
+# Precompute divisions since they're expensive
+_one_third = 1 / 3
+_two_thirds = 2 / 3
+_one_sixth = 1 / 6
 
 
 def rk4_step_func(func, t, dt, y, k1=None):
     if k1 is None: k1 = func(t, y)
-    k2 = func(t + dt / 2, tuple(y_ + dt * k1_ / 2 for y_, k1_ in zip(y, k1)))
-    k3 = func(t + dt / 2, tuple(y_ + dt * k2_ / 2 for y_, k2_ in zip(y, k2)))
+    half_dt = dt * 0.5
+    k2 = func(t + half_dt, tuple(y_ + half_dt * k1_ for y_, k1_ in zip(y, k1)))
+    k3 = func(t + half_dt, tuple(y_ + half_dt * k2_ for y_, k2_ in zip(y, k2)))
     k4 = func(t + dt, tuple(y_ + dt * k3_ for y_, k3_ in zip(y, k3)))
-    return tuple((k1_ + 2 * k2_ + 2 * k3_ + k4_) * (dt / 6) for k1_, k2_, k3_, k4_ in zip(k1, k2, k3, k4))
+    return tuple((k1_ + 2 * (k2_ + k3_) + k4_) * dt * _one_sixth for k1_, k2_, k3_, k4_ in zip(k1, k2, k3, k4))
 
 
 def rk4_alt_step_func(func, t, dt, y, k1=None):
     """Smaller error with slightly more compute."""
     if k1 is None: k1 = func(t, y)
-    k2 = func(t + dt / 3, tuple(y_ + dt * k1_ / 3 for y_, k1_ in zip(y, k1)))
-    k3 = func(t + dt * 2 / 3, tuple(y_ + dt * (k1_ / -3 + k2_) for y_, k1_, k2_ in zip(y, k1, k2)))
+    k2 = func(t + dt * _one_third, tuple(y_ + dt * k1_ * _one_third for y_, k1_ in zip(y, k1)))
+    k3 = func(t + dt * _two_thirds, tuple(y_ + dt * (k2_ - k1_ * _one_third) for y_, k1_, k2_ in zip(y, k1, k2)))
     k4 = func(t + dt, tuple(y_ + dt * (k1_ - k2_ + k3_) for y_, k1_, k2_, k3_ in zip(y, k1, k2, k3)))
-    return tuple((k1_ + 3 * k2_ + 3 * k3_ + k4_) * (dt / 8) for k1_, k2_, k3_, k4_ in zip(k1, k2, k3, k4))
+    return tuple((k1_ + 3 * (k2_ + k3_) + k4_) * dt * 0.125 for k1_, k2_, k3_, k4_ in zip(k1, k2, k3, k4))

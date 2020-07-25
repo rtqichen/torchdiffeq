@@ -1,6 +1,6 @@
 import bisect
 import torch
-from .misc import _scaled_dot_product, _convert_to_tensor, _is_finite, _select_initial_step, _handle_unused_kwargs
+from .misc import _scaled_dot_product, _select_initial_step, _handle_unused_kwargs, _expand_as
 from .solvers import AdaptiveStepsizeODESolver
 from .rk_common import _RungeKuttaState, _ButcherTableau, _runge_kutta_step
 
@@ -53,18 +53,23 @@ def _optimal_step_size(last_step, mean_error_ratio, safety=0.9, ifactor=10.0, df
     if mean_error_ratio == 0:
         return last_step * ifactor
     if mean_error_ratio < 1:
-        dfactor = _convert_to_tensor(1, dtype=torch.float64, device=mean_error_ratio.device)
+        dfactor = torch.ones((), dtype=ifactor.dtype, device=ifactor.device)
     error_ratio = torch.sqrt(mean_error_ratio).type_as(last_step)
-    exponent = torch.tensor(1 / order).type_as(last_step)
-    factor = torch.max(1 / ifactor, torch.min(error_ratio**exponent / safety, 1 / dfactor))
+    exponent = torch.tensor(order, dtype=last_step, device=last_step).reciprocal()
+    factor = torch.min(ifactor, torch.max(safety / error_ratio ** exponent, dfactor))
     return last_step / factor
 
 
-def _abs_square(x):
-    return torch.mul(x, x)
-
-
 class Tsit5Solver(AdaptiveStepsizeODESolver):
+    order = 5
+    tableau = _TSITOURAS_TABLEAU
+    mid = None
+
+    def _init_interp_coeff(self):
+        return [[x] * 7 for x in self.y0]
+
+    def _interp_fit(self, y0, y1, k, dt):
+        return k
 
     def __init__(
         self, func, y0, rtol, atol, first_step=None, safety=0.9, ifactor=10.0, dfactor=0.2, max_num_steps=2**31 - 1,
@@ -73,24 +78,23 @@ class Tsit5Solver(AdaptiveStepsizeODESolver):
         _handle_unused_kwargs(self, unused_kwargs)
         del unused_kwargs
 
-        self.func = func
+        self.func = lambda t, y: func(t.type_as(y[0]), y)
         self.y0 = y0
-        self.rtol = rtol
-        self.atol = atol
-        self.first_step = first_step
-        self.safety = _convert_to_tensor(safety, dtype=torch.float64, device=y0[0].device)
-        self.ifactor = _convert_to_tensor(ifactor, dtype=torch.float64, device=y0[0].device)
-        self.dfactor = _convert_to_tensor(dfactor, dtype=torch.float64, device=y0[0].device)
-        self.max_num_steps = _convert_to_tensor(max_num_steps, dtype=torch.int32, device=y0[0].device)
-        self.grid_points = tuple(_convert_to_tensor(point, dtype=torch.float64, device=y0[0].device)
-                                 for point in grid_points)
-        self.eps = _convert_to_tensor(eps, dtype=torch.float64, device=y0[0].device)
+        self.rtol = _expand_as(rtol, y0)
+        self.atol = _expand_as(atol, y0)
+        self.first_step = None if first_step is None else torch.as_tensor(first_step, dtype=torch.float64, device=y0[0].device)
+        self.safety = torch.as_tensor(safety, dtype=torch.float64, device=y0[0].device)
+        self.ifactor = torch.as_tensor(ifactor, dtype=torch.float64, device=y0[0].device)
+        self.dfactor = torch.as_tensor(dfactor, dtype=torch.float64, device=y0[0].device)
+        self.max_num_steps = torch.as_tensor(max_num_steps, dtype=torch.int32, device=y0[0].device)
+        self.grid_points = () if grid_points is None else grid_points.to(torch.float64)
+        self.eps = torch.as_tensor(eps, dtype=torch.float64, device=y0[0].device)
 
-    def before_integrate(self, t):
+    def _before_integrate(self, t):
         if self.first_step is None:
-            first_step = _select_initial_step(self.func, t[0], self.y0, 4, self.rtol, self.atol).to(t)
+            first_step = _select_initial_step(self.func, t[0], self.y0, 4, self.rtol, self.atol)
         else:
-            first_step = _convert_to_tensor(self.first_step, dtype=t.dtype, device=t.device)
+            first_step = self.first_step
         self.rk_state = _RungeKuttaState(
             self.y0,
             self.func(t[0].type_as(self.y0[0]), self.y0), t[0], t[0], first_step,
@@ -98,7 +102,7 @@ class Tsit5Solver(AdaptiveStepsizeODESolver):
         )
         self.next_grid_index = min(bisect.bisect(self.grid_points, t[0]), len(self.grid_points) - 1)
 
-    def advance(self, next_t):
+    def _advance(self, next_t):
         """Interpolate through the next time point, integrating as necessary."""
         n_steps = 0
         while next_t > self.rk_state.t1:
@@ -115,7 +119,7 @@ class Tsit5Solver(AdaptiveStepsizeODESolver):
         ########################################################
         assert t0 + dt > t0, 'underflow in dt {}'.format(dt.item())
         for y0_ in y0:
-            assert _is_finite(torch.abs(y0_)), 'non-finite values in state `y`: {}'.format(y0_)
+            assert torch.isfinite(y0_).all(), 'non-finite values in state `y`: {}'.format(y0_)
 
         ########################################################
         #     Make step, respecting prescribed grid points     #
@@ -156,7 +160,7 @@ class Tsit5Solver(AdaptiveStepsizeODESolver):
             if self.next_grid_index != len(self.grid_points) - 1:
                 self.next_grid_index += 1
         f_next = f1 if accept_step else f0
-        dt_next = _optimal_step_size(dt, mean_error_ratio, self.safety, self.ifactor, self.dfactor)
+        dt_next = _optimal_step_size(dt, mean_error_ratio, self.safety, self.ifactor, self.dfactor, order=5)
         k_next = k if accept_step else self.rk_state.interp_coeff
         rk_state = _RungeKuttaState(y_next, f_next, t0, t_next, dt_next, k_next)
         return rk_state
