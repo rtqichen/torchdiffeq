@@ -124,7 +124,8 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
         self.ifactor = torch.as_tensor(ifactor, dtype=dtype, device=device)
         self.dfactor = torch.as_tensor(dfactor, dtype=dtype, device=device)
         self.max_num_steps = torch.as_tensor(max_num_steps, dtype=torch.int32, device=device)
-        self.grid_points = () if grid_points is None else grid_points.to(dtype)
+        grid_points = torch.tensor([], dtype=dtype, device=device) if grid_points is None else grid_points.to(dtype)
+        self.grid_points = grid_points
         self.eps = torch.as_tensor(eps, dtype=dtype, device=device)
 
     def _before_integrate(self, t):
@@ -134,7 +135,7 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
         else:
             first_step = self.first_step
         self.rk_state = _RungeKuttaState(self.y0, f0, t[0], t[0], first_step, self._init_interp_coeff())
-        self.next_grid_index = min(bisect.bisect(self.grid_points, t[0]), len(self.grid_points) - 1)
+        self.next_grid_index = min(bisect.bisect(self.grid_points.tolist(), t[0]), len(self.grid_points) - 1)
 
     # TODO: remove?
     def _init_interp_coeff(self):

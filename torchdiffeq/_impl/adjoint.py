@@ -34,8 +34,8 @@ class OdeintAdjointMethod(torch.autograd.Function):
         except (KeyError, TypeError):
             pass
         else:
-            adjoint_options = ctx.adjoint_options.copy()
-            adjoint_options['grid_points'] = grid_points.flip(0)
+            ctx.adjoint_options = ctx.adjoint_options.copy()
+            ctx.adjoint_options['grid_points'] = grid_points.flip(0)
 
         # TODO: use a nn.Module and call odeint_adjoint to implement higher order derivatives.
         def augmented_dynamics(t, y_aug):
