@@ -130,7 +130,7 @@ class VariableCoefficientAdamsBashforth(AdaptiveStepsizeODESolver):
         )
         local_error = tuple(dt_cast * (g[order] - g[order - 1]) * iphi_ for iphi_ in implicit_phi_p[order])
         error_k = _compute_error_ratio(local_error, tolerance)
-        accept_step = (torch.tensor(error_k) <= 1).all()
+        accept_step = max(error_k) <= 1
 
         if not accept_step:
             # Retry with adjusted step size if step is rejected.

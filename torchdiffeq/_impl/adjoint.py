@@ -61,14 +61,14 @@ class OdeintAdjointMethod(torch.autograd.Function):
             vjp_params = _flatten_convert_none_to_zeros(vjp_params, f_params)
 
             if len(f_params) == 0:
-                vjp_params = torch.tensor(0.)
+                vjp_params = torch.zeros((), dtype=vjp_y[0].dtype, device=vjp_y[0].device)
             return (*func_eval, *vjp_y, vjp_t, vjp_params)
 
         T = ans[0].shape[0]
         with torch.no_grad():
             adj_y = tuple(grad_output_[-1] for grad_output_ in grad_output)
             adj_params = torch.zeros_like(flat_params)
-            adj_time = torch.tensor(0.)
+            adj_time = torch.zeros((), dtype=t.dtype, device=t.device)
             time_vjps = []
             for i in range(T - 1, 0, -1):
 
@@ -85,8 +85,9 @@ class OdeintAdjointMethod(torch.autograd.Function):
                 time_vjps.append(dLd_cur_t)
 
                 # Run the augmented system backwards in time.
+                # TODO: switch this out to just not have an adj_params bit
                 if adj_params.numel() == 0:
-                    adj_params = torch.tensor(0.)
+                    adj_params = torch.zeros((), dtype=adj_y[0].dtype, device=adj_y[0].device)
                 aug_y0 = (*ans_i, *adj_y, adj_time, adj_params)
                 aug_ans = odeint(
                     augmented_dynamics, aug_y0,
@@ -99,9 +100,9 @@ class OdeintAdjointMethod(torch.autograd.Function):
                 adj_time = aug_ans[2 * n_tensors]
                 adj_params = aug_ans[2 * n_tensors + 1]
 
-                adj_y = tuple(adj_y_[1] if len(adj_y_) > 0 else adj_y_ for adj_y_ in adj_y)
-                if len(adj_time) > 0: adj_time = adj_time[1]
-                if len(adj_params) > 0: adj_params = adj_params[1]
+                adj_y = tuple(adj_y_[1] for adj_y_ in adj_y)
+                adj_time = adj_time[1]
+                adj_params = adj_params[1]
 
                 adj_y = tuple(adj_y_ + grad_output_[i - 1] for adj_y_, grad_output_ in zip(adj_y, grad_output))
 
@@ -146,6 +147,7 @@ def odeint_adjoint(func, y0, t, rtol=1e-6, atol=1e-12, method=None, options=None
         y0 = (y0,)
         func = TupleFunc(func)
 
+    # TODO: just send in all the parameters unflattened
     flat_params = _flatten(func.parameters())
     ys = OdeintAdjointMethod.apply(*y0, func, t, flat_params, rtol, atol, method, options, adjoint_rtol, adjoint_atol,
                                    adjoint_method, adjoint_options)

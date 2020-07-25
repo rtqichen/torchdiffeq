@@ -174,7 +174,7 @@ class AdamsBashforthMoulton(FixedGridODESolver):
         error = tuple(torch.abs(y0_ - y1_) for y0_, y1_ in zip(y0, y1))
         return all((error_ < error_tol_).all() for error_, error_tol_ in zip(error, error_tol))
 
-    def step_func(self, func, t, dt, y):
+    def _step_func(self, func, t, dt, y):
         self._update_history(t, func(t, y))
         order = min(len(self.prev_f), self.max_order - 1)
         if order < _MIN_ORDER - 1:

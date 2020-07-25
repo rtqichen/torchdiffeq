@@ -65,15 +65,13 @@ def odeint(func, y0, t, rtol=1e-7, atol=1e-9, method=None, options=None):
         options = {}
     elif method is None:
         raise ValueError('cannot supply `options` without specifying `method`')
-
-    tensor_input, func, y0, t, options = _check_inputs(func, y0, t, options)
-        
     if method is None:
         method = 'dopri5'
-        
     if method not in SOLVERS:
         raise ValueError('Invalid method "{}". Must be one of {}'.format(
                          method, '{"' + '", "'.join(SOLVERS.keys()) + '"}.'))
+
+    tensor_input, func, y0, t, options = _check_inputs(func, y0, t, options)
 
     solver = SOLVERS[method](func, y0, rtol=rtol, atol=atol, **options)
     solution = solver.integrate(t)

@@ -66,15 +66,13 @@ class FixedGridODESolver(metaclass=abc.ABCMeta):
                 t_infer[-1] = t[-1]
 
             return t_infer
-
         return _grid_constructor
 
     @abc.abstractmethod
-    def step_func(self, func, t, dt, y):
+    def _step_func(self, func, t, dt, y):
         pass
 
     def integrate(self, t):
-        t = t.type_as(self.y0[0])
         time_grid = self.grid_constructor(self.func, self.y0, t)
         assert time_grid[0] == t[0] and time_grid[-1] == t[-1]
 
@@ -83,7 +81,7 @@ class FixedGridODESolver(metaclass=abc.ABCMeta):
         j = 1
         y0 = self.y0
         for t0, t1 in zip(time_grid[:-1], time_grid[1:]):
-            dy = self.step_func(self.func, t0, t1 - t0, y0)
+            dy = self._step_func(self.func, t0, t1 - t0, y0)
             y1 = tuple(y0_ + dy_ for y0_, dy_ in zip(y0, dy))
 
             while j < len(t) and t1 >= t[j]:
@@ -138,6 +136,7 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
         self.rk_state = _RungeKuttaState(self.y0, f0, t[0], t[0], first_step, self._init_interp_coeff())
         self.next_grid_index = min(bisect.bisect(self.grid_points, t[0]), len(self.grid_points) - 1)
 
+    # TODO: remove?
     def _init_interp_coeff(self):
         return [self.y0] * 5
 
@@ -179,7 +178,7 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
         ########################################################
         error_tol = _error_tol(self.rtol, self.atol, y0, y1)
         mean_sq_error_ratio = _compute_error_ratio(y1_error, error_tol)
-        accept_step = (torch.tensor(mean_sq_error_ratio) <= 1).all()
+        accept_step = max(mean_sq_error_ratio) <= 1
 
         ########################################################
         #                   Update RK State                    #
@@ -198,6 +197,7 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
         rk_state = _RungeKuttaState(y_next, f_next, t0, t_next, dt_next, interp_coeff)
         return rk_state
 
+    # TODO: remove?
     def _interp_fit(self, y0, y1, k, dt):
         """Fit an interpolating polynomial to the results of a Runge-Kutta step."""
         dt = dt.type_as(y0[0])
