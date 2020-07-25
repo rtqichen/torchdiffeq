@@ -114,7 +114,7 @@ class Dopri8Solver(AdaptiveStepsizeODESolver):
         if on_grid and accept_step:
             # We've just passed a grid point, which is typically used to indicate a discontinuity in f; we should
             # update f to match the side of the discontinuity we're now on.
-            f1 = self.func(t_next, y_next)
+            f1 = self.func(t_next.type_as(y_next[0]), y_next)
             if self.next_grid_index != len(self.grid_points) - 1:
                 self.next_grid_index += 1
         f_next = f1 if accept_step else f0
