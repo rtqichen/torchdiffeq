@@ -5,6 +5,7 @@ import torchdiffeq
 import problems
 
 error_tol = 1e-4
+large_error_tol = 1e-3
 
 torch.set_default_dtype(torch.float64)
 TEST_DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -57,6 +58,14 @@ class TestSolverError(unittest.TestCase):
             y = torchdiffeq.odeint(f, y0, t_points, method='dopri5')
             with self.subTest(ode=ode):
                 self.assertLess(rel_error(sol, y), error_tol)
+
+    def test_bosh3(self):
+        for ode in problems.PROBLEMS.keys():
+            f, y0, t_points, sol = problems.construct_problem(TEST_DEVICE, ode=ode)
+            y = torchdiffeq.odeint(f, y0, t_points, method='bosh3')
+            with self.subTest(ode=ode):
+                # Seems less accurate so we increase the tolerance
+                self.assertLess(rel_error(sol, y), large_error_tol)
 
     def test_adaptive_heun(self):
         for ode in problems.PROBLEMS.keys():
@@ -123,6 +132,14 @@ class TestSolverBackwardsInTimeError(unittest.TestCase):
             with self.subTest(ode=ode):
                 self.assertLess(rel_error(sol, y), error_tol)
 
+    def test_bosh3(self):
+        for ode in problems.PROBLEMS.keys():
+            f, y0, t_points, sol = problems.construct_problem(TEST_DEVICE, reverse=True)
+
+            y = torchdiffeq.odeint(f, y0, t_points, method='bosh3')
+            with self.subTest(ode=ode):
+                self.assertLess(rel_error(sol, y), error_tol)
+
     def test_adaptive_heun(self):
         for ode in problems.PROBLEMS.keys():
             f, y0, t_points, sol = problems.construct_problem(TEST_DEVICE, reverse=True)
@@ -178,6 +195,12 @@ class TestNoIntegration(unittest.TestCase):
         f, y0, t_points, sol = problems.construct_problem(TEST_DEVICE, reverse=True)
 
         y = torchdiffeq.odeint(f, y0, t_points[0:1], method='dopri5')
+        self.assertLess(max_abs(sol[0] - y), error_tol)
+
+    def test_bosh3(self):
+        f, y0, t_points, sol = problems.construct_problem(TEST_DEVICE, reverse=True)
+
+        y = torchdiffeq.odeint(f, y0, t_points[0:1], method='bosh3')
         self.assertLess(max_abs(sol[0] - y), error_tol)
 
     def test_adaptive_heun(self):

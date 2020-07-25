@@ -32,7 +32,7 @@ class OdeintAdjointMethod(torch.autograd.Function):
 
         try:
             grid_points = adjoint_options['grid_points']
-        except KeyError:
+        except (KeyError, TypeError):
             pass
         else:
             adjoint_options = adjoint_options.copy()
