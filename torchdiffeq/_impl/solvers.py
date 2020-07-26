@@ -12,6 +12,7 @@ from .misc import (_compute_error_ratio,
                    _optimal_step_size)
 
 
+# TODO: this is assuming instance attributes y0 and dtype
 class AdaptiveStepsizeODESolver(metaclass=abc.ABCMeta):
     def _before_integrate(self, t):
         pass
@@ -22,7 +23,7 @@ class AdaptiveStepsizeODESolver(metaclass=abc.ABCMeta):
 
     def integrate(self, t):
         solution = [self.y0]
-        t = t.to(torch.float64)
+        t = t.to(self.dtype)
         self._before_integrate(t)
         for i in range(1, len(t)):
             y = self._advance(t[i])
@@ -127,6 +128,7 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
         grid_points = torch.tensor([], dtype=dtype, device=device) if grid_points is None else grid_points.to(dtype)
         self.grid_points = grid_points
         self.eps = torch.as_tensor(eps, dtype=dtype, device=device)
+        self.dtype = dtype
 
     def _before_integrate(self, t):
         f0 = self.func(t[0], self.y0)
