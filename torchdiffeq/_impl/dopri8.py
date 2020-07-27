@@ -1,4 +1,5 @@
 import numpy as np
+import torch
 from .rk_common import _ButcherTableau
 from .solvers import RKAdaptiveStepsizeODESolver
 
@@ -60,8 +61,12 @@ C_mid[12] = (- 41.7923486424390588923*(h**5) + 116.2662185791119533462*(h**4) - 
 
 C_mid[13] = (20.3006925822100825485*(h**5) - 53.9020777466385396792*(h**4) + 50.2558364226176017553*(h**3) - 19.0082099341608028453*(h**2) + 2.3537586759714983486*h) / (1/h)
 
-C_mid = C_mid.tolist()
 
+A = torch.tensor(A)
+B = [torch.tensor(B_) for B_ in B]
+C_sol = torch.tensor(C_sol)
+C_err = torch.tensor(C_err)
+_C_mid = torch.tensor(C_mid)
 
 _DOPRI8_TABLEAU = _ButcherTableau(alpha=A, beta=B, c_sol=C_sol, c_error=C_err)
 
@@ -69,4 +74,4 @@ _DOPRI8_TABLEAU = _ButcherTableau(alpha=A, beta=B, c_sol=C_sol, c_error=C_err)
 class Dopri8Solver(RKAdaptiveStepsizeODESolver):
     order = 8
     tableau = _DOPRI8_TABLEAU
-    mid = C_mid
+    mid = _C_mid

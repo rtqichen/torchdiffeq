@@ -6,15 +6,16 @@ class Euler(FixedGridODESolver):
     order = 1
 
     def _step_func(self, func, t, dt, y):
-        return tuple(dt * f_ for f_ in func(t + self.eps, y))
+        return dt * func(t + self.eps, y)
 
 
 class Midpoint(FixedGridODESolver):
     order = 2
 
     def _step_func(self, func, t, dt, y):
-        y_mid = tuple(y_ + f_ * dt / 2 for y_, f_ in zip(y, func(t + self.eps, y)))
-        return tuple(dt * f_ for f_ in func(t + dt / 2, y_mid))
+        half_dt = 0.5 * dt
+        y_mid = y + func(t + self.eps, y) * half_dt
+        return dt * func(t + half_dt, y_mid)
 
 
 class RK4(FixedGridODESolver):

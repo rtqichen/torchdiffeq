@@ -7,7 +7,7 @@ from problems import construct_problem
 eps = 1e-12
 
 torch.set_default_dtype(torch.float64)
-TEST_DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+TEST_DEVICE = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
 
 
 def max_abs(tensor):
@@ -31,6 +31,8 @@ class TestGradient(unittest.TestCase):
         self.assertTrue(torch.autograd.gradcheck(func, (y0, t_points)))
 
     def test_dopri5(self):
+        import torch
+        torch.autograd.set_detect_anomaly(True)
         f, y0, t_points, _ = construct_problem(TEST_DEVICE)
 
         func = lambda y0, t_points: torchdiffeq.odeint(f, y0, t_points, method='dopri5')

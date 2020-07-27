@@ -3,7 +3,7 @@ import sys
 import torch
 import warnings
 from .solvers import FixedGridODESolver
-from .misc import _error_tol, _expand_as, _scaled_dot_product
+from .misc import _error_tol, _scaled_dot_product
 from . import rk_common
 
 _BASHFORTH_COEFFICIENTS = [
@@ -155,8 +155,8 @@ class AdamsBashforthMoulton(FixedGridODESolver):
                  **kwargs):
         super(AdamsBashforthMoulton, self).__init__(func, y0, **kwargs)
 
-        self.rtol = _expand_as(rtol, y0)
-        self.atol = _expand_as(atol, y0)
+        self.rtol = rtol
+        self.atol = atol
         self.implicit = implicit
         self.max_iters = max_iters
         self.max_order = int(min(max_order, _MAX_ORDER))

@@ -12,7 +12,6 @@ SOLVERS = {
     'explicit_adams': AdamsBashforth,
     'fixed_adams': AdamsBashforthMoulton,
     'adams': VariableCoefficientAdamsBashforth,
-    'tsit5': Tsit5Solver,
     'dopri5': Dopri5Solver,
     'bosh3': Bosh3Solver,
     'euler': Euler,

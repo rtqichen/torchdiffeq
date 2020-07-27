@@ -1,25 +1,26 @@
+import torch
 from .rk_common import _ButcherTableau
 from .solvers import RKAdaptiveStepsizeODESolver
 
 
 _ADAPTIVE_HEUN_TABLEAU = _ButcherTableau(
-    alpha=[1.],
+    alpha=torch.tensor([1.]),
     beta=[
-        [1.],
+        torch.tensor([1.]),
     ],
-    c_sol=[0.5, 0.5],
-    c_error=[
+    c_sol=torch.tensor([0.5, 0.5]),
+    c_error=torch.tensor([
         0.5,
         -0.5,
-    ],
+    ]),
 )
 
-AH_C_MID = [
+_AH_C_MID = torch.tensor([
     0.5, 0.
-]
+])
 
 
 class AdaptiveHeunSolver(RKAdaptiveStepsizeODESolver):
     order = 2
     tableau = _ADAPTIVE_HEUN_TABLEAU
-    mid = AH_C_MID
+    mid = _AH_C_MID

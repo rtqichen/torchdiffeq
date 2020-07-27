@@ -1,10 +1,11 @@
 import collections
 import torch
 from .solvers import AdaptiveStepsizeODESolver
-from .misc import (
-    _handle_unused_kwargs, _select_initial_step, _scaled_dot_product, _expand_as,
-    _optimal_step_size, _compute_error_ratio
-)
+from .misc import (_handle_unused_kwargs,
+                   _select_initial_step,
+                   _scaled_dot_product,
+                   _optimal_step_size,
+                   _compute_error_ratio)
 
 _MIN_ORDER = 1
 _MAX_ORDER = 12
@@ -66,8 +67,8 @@ class VariableCoefficientAdamsBashforth(AdaptiveStepsizeODESolver):
 
         self.func = lambda t, y: func(t.type_as(y[0]), y)
         self.y0 = y0
-        self.rtol = _expand_as(rtol, y0)
-        self.atol = _expand_as(atol, y0)
+        self.rtol = rtol, y0
+        self.atol = atol, y0
         self.implicit = implicit
         self.first_step = None if first_step is None else torch.as_tensor(first_step, dtype=torch.float64, device=y0[0].device)
         self.max_order = int(max(_MIN_ORDER, min(max_order, _MAX_ORDER)))
