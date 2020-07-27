@@ -131,32 +131,43 @@ def _assert_increasing(name, t):
     assert (t[1:] > t[:-1]).all(), '{} must be strictly increasing or decreasing'.format(name)
 
 
+def _flat_to_shape(tensor, shapes):
+    tensor_list = []
+    total = 0
+    for shape in shapes:
+        next_total = total + shape.numel()
+        tensor_list.append(tensor[total:next_total].view(*shape))
+        total = next_total
+    return tuple(tensor_list)
+
+
+class _TupleFunc(torch.nn.Module):
+    def __init__(self, base_func, shapes):
+        super(_TupleFunc, self).__init__()
+        self.base_func = base_func
+        self.shapes = shapes
+
+    def forward(self, t, y):
+        f = self.base_func(t, _flat_to_shape(y, self.shapes))
+        return torch.cat([f_.reshape(-1) for f_ in f])
+
+
+class _ReverseFunc(torch.nn.Module):
+    def __init__(self, base_func):
+        super(_ReverseFunc, self).__init__()
+        self.base_func = base_func
+
+    def forward(self, t, y):
+        return -self.base_func(-t, y)
+
+
 def _check_inputs(func, y0, t, options):
-    tensor_input = False
-    if torch.is_tensor(y0):
-        tensor_input = True
-        y0 = (y0,)
-        _base_nontuple_func_ = func
-        func = lambda t, y: (_base_nontuple_func_(t, y[0]),)
-    assert isinstance(y0, tuple), 'y0 must be either a torch.Tensor or a tuple'
-    for y0_ in y0:
-        assert torch.is_tensor(y0_), 'each element must be a torch.Tensor but received {}'.format(type(y0_))
-
-    if _decreasing(t):
-        t = -t
-        _base_reverse_func = func
-        func = lambda t, y: tuple(-f_ for f_ in _base_reverse_func(-t, y))
-        try:
-            grid_points = options['grid_points']
-        except KeyError:
-            pass
-        else:
-            options = options.copy()
-            options['grid_points'] = -grid_points
-
     assert torch.is_tensor(t), 't must be a torch.Tensor'
     _assert_one_dimensional('t', t)
     _assert_increasing('t', t)
+    if not torch.is_floating_point(t):
+        raise TypeError('`t` must be a floating point Tensor but is a {}'.format(t.type()))
+
     try:
         grid_points = options['grid_points']
     except KeyError:
@@ -166,10 +177,26 @@ def _check_inputs(func, y0, t, options):
         _assert_one_dimensional('grid_points', grid_points)
         _assert_increasing('grid_points', grid_points)
 
-    for y0_ in y0:
-        if not torch.is_floating_point(y0_):
-            raise TypeError('`y0` must be a floating point Tensor but is a {}'.format(y0_.type()))
-    if not torch.is_floating_point(t):
-        raise TypeError('`t` must be a floating point Tensor but is a {}'.format(t.type()))
+    tensor_input = True
+    shapes = []
+    if not torch.is_tensor(y0):
+        assert isinstance(y0, tuple), 'y0 must be either a torch.Tensor or a tuple'
+        tensor_input = False
+        shapes = [y0_.shape for y0_ in y0]
+        y0 = torch.cat([y0_.reshape(-1) for y0_ in y0])
+        func = _TupleFunc(func, shapes)
+    if not torch.is_floating_point(y0):
+        raise TypeError('`y0` must be a floating point Tensor but is a {}'.format(y0.type()))
 
-    return tensor_input, func, y0, t, options
+    if _decreasing(t):
+        t = -t
+        func = _ReverseFunc(func)
+        try:
+            grid_points = options['grid_points']
+        except KeyError:
+            pass
+        else:
+            options = options.copy()
+            options['grid_points'] = -grid_points
+
+    return tensor_input, shapes, func, y0, t, options

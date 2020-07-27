@@ -2,7 +2,7 @@ import setuptools
 
 setuptools.setup(
     name="torchdiffeq",
-    version="0.0.1",
+    version="0.0.2",
     author="Ricky Tian Qi Chen",
     author_email="rtqichen@cs.toronto.edu",
     description="ODE solvers and adjoint sensitivity analysis in PyTorch.",
