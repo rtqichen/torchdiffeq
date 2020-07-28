@@ -7,7 +7,7 @@ from .misc import _check_inputs, _flat_to_shape
 class OdeintAdjointMethod(torch.autograd.Function):
 
     @staticmethod
-    def forward(ctx, func, y0, t, flat_params, rtol, atol, method, options, adjoint_rtol, adjoint_atol, adjoint_method,
+    def forward(ctx, func, y0, t, rtol, atol, method, options, adjoint_rtol, adjoint_atol, adjoint_method,
                 adjoint_options, t_requires_grad, *adjoint_params):
 
         ctx.func = func
@@ -52,7 +52,7 @@ class OdeintAdjointMethod(torch.autograd.Function):
             # the adjoint wrt y, and an integrator wrt t and args.
 
             y = y_aug[1:y_numel + 1].view_as(grad_y[0])
-            adj_y = y_aug[y_numel + 1, 2 * y_numel + 1].view_as(grad_y[0])
+            adj_y = y_aug[y_numel + 1:2 * y_numel + 1].view_as(grad_y[0])
 
             with torch.enable_grad():
                 t = t.detach().requires_grad_(True)
@@ -65,8 +65,8 @@ class OdeintAdjointMethod(torch.autograd.Function):
                 _params = tuple(torch.as_strided(param, (), ()) for param in adjoint_params)
 
                 vjp_t, vjp_y, *vjp_params = torch.autograd.grad(
-                    func_eval, (t, y) + adjoint_params,
-                    tuple(-adj_y_ for adj_y_ in adj_y), allow_unused=True, retain_graph=True
+                    func_eval, (t, y) + adjoint_params, -adj_y,
+                    allow_unused=True, retain_graph=True
                 )
 
             # autograd.grad returns None if no gradient, set to zero.
@@ -75,7 +75,7 @@ class OdeintAdjointMethod(torch.autograd.Function):
             vjp_params = [torch.zeros_like(param) if vjp_param is None else vjp_param
                           for param, vjp_param in zip(adjoint_params, vjp_params)]
 
-            vjp = [vjp_t, vjp_y, *vjp_params]
+            vjp = [func_eval, vjp_t, vjp_y, *vjp_params]
             vjp = torch.cat([x.reshape(-1) for x in vjp])
             return vjp
 
@@ -102,7 +102,7 @@ class OdeintAdjointMethod(torch.autograd.Function):
                     rtol=adjoint_rtol, atol=adjoint_atol, method=adjoint_method, options=adjoint_options
                 )
                 aug_state = aug_state[1]  # extract just the t[i - 1] value
-                aug_state[1:y_numel + 1] = y[i - 1]  # update to use our forward-pass estimate of the state
+                aug_state[1:y_numel + 1] = y[i - 1].reshape(-1)  # update to use our forward-pass estimate of the state
                 aug_state[y_numel + 1: 2 * y_numel + 1] += grad_y[i - 1].reshape(-1)  # update any gradients wrt state at this time point
 
             if t_requires_grad:
@@ -111,7 +111,7 @@ class OdeintAdjointMethod(torch.autograd.Function):
             else:
                 time_vjps = None
 
-            adj_y = aug_state[1].view_as(y[0])
+            adj_y = aug_state[y_numel + 1: 2 * y_numel + 1].view_as(y[0])
             flat_adj_params = aug_state[2 * y_numel + 1:]
             adj_params = []
             total_numel = 0
@@ -121,7 +121,7 @@ class OdeintAdjointMethod(torch.autograd.Function):
                 adj_params.append(adj_param)
                 total_numel = next_total_numel
 
-            return (None, adj_y, time_vjps, None, None, None, None, None, None, None, None, None, None, *adj_params)
+            return (None, adj_y, time_vjps, None, None, None, None, None, None, None, None, None, *adj_params)
 
 
 def odeint_adjoint(func, y0, t, rtol=1e-6, atol=1e-12, method=None, options=None, adjoint_rtol=None, adjoint_atol=None,

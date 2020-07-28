@@ -50,16 +50,26 @@ def _runge_kutta_step(func, y0, f0, t0, dt, tableau):
         calculating these terms.
     """
 
+    # Little bit of black magic coming up.
+    # We copy all the func evaluations into this buffer k, as that means we can do the subsequent matrix-vector products
+    # faster, as it all happens in PyTorch.
+    # However we need to make sure that gradients flow correctly, and by default, if computing gradients wrt t, then it
+    # will throw an error about in-place modification of k, for the `matmul`. The tensor `k` has indeed been modified
+    # in-place, but only in places which won't affect the computation.
+    # So we sneak in the copy by going via torch.no_grad(), and then fix the gradients after the fact (without
+    # modifying k, so the version doesn't increment) with _DistributeGradients.
     k = torch.empty(*f0.shape, tableau.length + 1, dtype=f0.dtype, device=f0.device)
-    k.data[..., 0] = f0  # sneak past the version checker
+    with torch.no_grad():
+        k[..., 0] = f0  # sneak past the version checker
     fs = [f0]
     for i, (alpha_i, beta_i) in enumerate(zip(tableau.alpha, tableau.beta)):
         ti = t0 + alpha_i * dt
         yi = y0 + k[..., :i + 1].matmul(beta_i * dt).view_as(f0)
         f = func(ti, yi)
         fs.append(f)
-        k.data[..., i + 1] = f  # sneak past the version checker
-    k = _DistributeGradients.apply(k, *fs)  # then fix the gradients we broke by going via .data
+        with torch.no_grad():
+            k[..., i + 1] = f  # sneak past the version checker
+    k = _DistributeGradients.apply(k, *fs)  # then fix the gradients we broke
 
     if not (tableau.c_sol[-1] == 0 and (tableau.c_sol[:-1] == tableau.beta[-1]).all()):
         # This property (true for Dormand-Prince) lets us save a few FLOPs.
