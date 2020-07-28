@@ -7,7 +7,7 @@ from problems import construct_problem
 eps = 1e-12
 
 torch.set_default_dtype(torch.float64)
-TEST_DEVICE = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
+TEST_DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 
 def max_abs(tensor):

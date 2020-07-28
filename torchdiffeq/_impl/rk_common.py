@@ -2,11 +2,7 @@ import collections
 import torch
 
 
-class _ButcherTableau(collections.namedtuple('_ButcherTableau', 'alpha, beta, c_sol, c_error')):
-    # TODO: optimise a bit
-    @property
-    def length(self):
-        return len(self.alpha)
+_ButcherTableau = collections.namedtuple('_ButcherTableau', 'alpha, beta, c_sol, c_error')
 
 
 _RungeKuttaState = collections.namedtuple('_RungeKuttaState', 'y1, f1, t0, t1, dt, interp_coeff')
@@ -22,14 +18,16 @@ _RungeKuttaState = collections.namedtuple('_RungeKuttaState', 'y1, f1, t0, t1, d
 #         interpolation between `t0` and `t1`.
 
 
-class _DistributeGradients(torch.autograd.Function):
+class _UncheckedAssign(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, k, *fs):
-        return k
+    def forward(ctx, scratch, value, index):
+        ctx.index = index
+        scratch.data[index] = value  # sneak past the version checker
+        return scratch
 
     @staticmethod
-    def backward(ctx, grad_k):
-        return (grad_k, *grad_k.unbind(dim=-1))
+    def backward(ctx, grad_scratch):
+        return grad_scratch, grad_scratch[ctx.index], None
 
 
 def _runge_kutta_step(func, y0, f0, t0, dt, tableau):
@@ -51,25 +49,15 @@ def _runge_kutta_step(func, y0, f0, t0, dt, tableau):
     """
 
     # Little bit of black magic coming up.
-    # We copy all the func evaluations into this buffer k, as that means we can do the subsequent matrix-vector products
-    # faster, as it all happens in PyTorch.
-    # However we need to make sure that gradients flow correctly, and by default, if computing gradients wrt t, then it
-    # will throw an error about in-place modification of k, for the `matmul`. The tensor `k` has indeed been modified
-    # in-place, but only in places which won't affect the computation.
-    # So we sneak in the copy by going via torch.no_grad(), and then fix the gradients after the fact (without
-    # modifying k, so the version doesn't increment) with _DistributeGradients.
-    k = torch.empty(*f0.shape, tableau.length + 1, dtype=f0.dtype, device=f0.device)
-    with torch.no_grad():
-        k[..., 0] = f0  # sneak past the version checker
-    fs = [f0]
+    # We use an unchecked assign to put data into k without increments its _version counter, so that the backward
+    # doesn't throw an error about in-place correctness. We know that it's actually correct.
+    k = torch.empty(*f0.shape, len(tableau.alpha) + 1, dtype=f0.dtype, device=f0.device)
+    k = _UncheckedAssign.apply(k, f0, (..., 0))
     for i, (alpha_i, beta_i) in enumerate(zip(tableau.alpha, tableau.beta)):
         ti = t0 + alpha_i * dt
         yi = y0 + k[..., :i + 1].matmul(beta_i * dt).view_as(f0)
         f = func(ti, yi)
-        fs.append(f)
-        with torch.no_grad():
-            k[..., i + 1] = f  # sneak past the version checker
-    k = _DistributeGradients.apply(k, *fs)  # then fix the gradients we broke
+        k = _UncheckedAssign.apply(k, f, (..., i + 1))
 
     if not (tableau.c_sol[-1] == 0 and (tableau.c_sol[:-1] == tableau.beta[-1]).all()):
         # This property (true for Dormand-Prince) lets us save a few FLOPs.

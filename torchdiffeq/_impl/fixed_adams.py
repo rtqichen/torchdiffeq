@@ -3,7 +3,7 @@ import sys
 import torch
 import warnings
 from .solvers import FixedGridODESolver
-from .misc import _error_tol, _scaled_dot_product
+from .misc import _error_tol
 from . import rk_common
 
 _BASHFORTH_COEFFICIENTS = [
@@ -145,21 +145,36 @@ _DIVISOR = [
     31384184832000, 62768369664000, 32011868528640000, 64023737057280000, 51090942171709440000, 102181884343418880000
 ]
 
+_BASHFORTH_DIVISOR = [torch.tensor([b / divisor for b in bashforth])
+                      for bashforth, divisor in zip(_BASHFORTH_COEFFICIENTS, _DIVISOR)]
+_MOULTON_DIVISOR = [torch.tensor([m / divisor for m in moulton])
+                    for moulton, divisor in zip(_MOULTON_COEFFICIENTS, _DIVISOR)]
+
 _MIN_ORDER = 4
 _MAX_ORDER = 12
 _MAX_ITERS = 4
 
 
+# TODO: replace this with PyTorch operations
+def _dot_product(x, y):
+    return sum(xi * yi for xi, yi in zip(x, y))
+
+
 class AdamsBashforthMoulton(FixedGridODESolver):
+    order = 4
+
     def __init__(self, func, y0, rtol=1e-3, atol=1e-4, implicit=True, max_iters=_MAX_ITERS, max_order=_MAX_ORDER,
                  **kwargs):
         super(AdamsBashforthMoulton, self).__init__(func, y0, **kwargs)
+        assert max_order <= _MAX_ORDER, "max_order must be at most {}".format(_MAX_ORDER)
+        if max_order < _MIN_ORDER:
+            warnings.warn("max_order is below {}, so the solver reduces to `rk4`.".format(max_order))
 
-        self.rtol = rtol
-        self.atol = atol
+        self.rtol = torch.as_tensor(rtol, dtype=y0.dtype, device=y0.device)
+        self.atol = torch.as_tensor(atol, dtype=y0.dtype, device=y0.device)
         self.implicit = implicit
         self.max_iters = max_iters
-        self.max_order = int(min(max_order, _MAX_ORDER))
+        self.max_order = int(max_order)
         self.prev_f = collections.deque(maxlen=self.max_order - 1)
         self.prev_t = None
 
@@ -171,8 +186,8 @@ class AdamsBashforthMoulton(FixedGridODESolver):
     def _has_converged(self, y0, y1):
         """Checks that each element is within the error tolerance."""
         error_tol = _error_tol(self.rtol, self.atol, y0, y1)
-        error = tuple(torch.abs(y0_ - y1_) for y0_, y1_ in zip(y0, y1))
-        return all((error_ < error_tol_).all() for error_, error_tol_ in zip(error, error_tol))
+        error = torch.abs(y0 - y1)
+        return (error < error_tol).all()
 
     def _step_func(self, func, t, dt, y):
         self._update_history(t, func(t, y))
@@ -183,20 +198,18 @@ class AdamsBashforthMoulton(FixedGridODESolver):
             return dy
         else:
             # Adams-Bashforth predictor.
-            bashforth_coeffs = _BASHFORTH_COEFFICIENTS[order]
-            ab_div = _DIVISOR[order]
-            dy = tuple(dt * _scaled_dot_product(1 / ab_div, bashforth_coeffs, f_) for f_ in zip(*self.prev_f))
+            bashforth_coeffs = _BASHFORTH_DIVISOR[order]
+            dy = _dot_product(bashforth_coeffs, self.prev_f)
 
             # Adams-Moulton corrector.
             if self.implicit:
-                moulton_coeffs = _MOULTON_COEFFICIENTS[order + 1]
-                am_div = _DIVISOR[order + 1]
-                delta = tuple(dt * _scaled_dot_product(1 / am_div, moulton_coeffs[1:], f_) for f_ in zip(*self.prev_f))
+                moulton_coeffs = _MOULTON_DIVISOR[order + 1]
+                delta = dt * _dot_product(moulton_coeffs[1:], self.prev_f)
                 converged = False
                 for _ in range(self.max_iters):
                     dy_old = dy
-                    f = func(t + dt, tuple(y_ + dy_ for y_, dy_ in zip(y, dy)))
-                    dy = tuple(dt * (moulton_coeffs[0] / am_div) * f_ + delta_ for f_, delta_ in zip(f, delta))
+                    f = func(t + dt, y + dy)
+                    dy = dt * (moulton_coeffs[0]) * f + delta
                     converged = self._has_converged(dy_old, dy)
                     if converged:
                         break
@@ -205,10 +218,6 @@ class AdamsBashforthMoulton(FixedGridODESolver):
                     self.prev_f.pop()
                 self._update_history(t, f)
             return dy
-
-    @property
-    def order(self):
-        return 4
 
 
 class AdamsBashforth(AdamsBashforthMoulton):

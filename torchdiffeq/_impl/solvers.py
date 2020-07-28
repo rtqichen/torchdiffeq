@@ -10,8 +10,14 @@ from .misc import (_compute_error_ratio,
                    _optimal_step_size)
 
 
-# TODO: this is assuming instance attributes y0 and dtype
 class AdaptiveStepsizeODESolver(metaclass=abc.ABCMeta):
+    def __init__(self, dtype, y0, **unused_kwargs):
+        _handle_unused_kwargs(self, unused_kwargs)
+        del unused_kwargs
+
+        self.y0 = y0
+        self.dtype = dtype
+
     def _before_integrate(self, t):
         pass
 
@@ -32,7 +38,7 @@ class AdaptiveStepsizeODESolver(metaclass=abc.ABCMeta):
 class FixedGridODESolver(metaclass=abc.ABCMeta):
     order: int
 
-    def __init__(self, func, y0, step_size=None, grid_constructor=None, eps=0, **unused_kwargs):
+    def __init__(self, func, y0, step_size=None, grid_constructor=None, eps=0., **unused_kwargs):
         unused_kwargs.pop('rtol', None)
         unused_kwargs.pop('atol', None)
         _handle_unused_kwargs(self, unused_kwargs)
@@ -40,7 +46,7 @@ class FixedGridODESolver(metaclass=abc.ABCMeta):
 
         self.func = func
         self.y0 = y0
-        self.eps = eps
+        self.eps = torch.as_tensor(eps, dtype=y0.dtype, device=y0.device)
 
         if step_size is None:
             if grid_constructor is None:
@@ -106,9 +112,8 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
     mid: torch.Tensor
 
     def __init__(self, func, y0, rtol, atol, first_step=None, safety=0.9, ifactor=10.0, dfactor=0.2,
-                 max_num_steps=2 ** 31 - 1, grid_points=None, eps=0., dtype=torch.float64, **unused_kwargs):
-        _handle_unused_kwargs(self, unused_kwargs)
-        del unused_kwargs
+                 max_num_steps=2 ** 31 - 1, grid_points=None, eps=0., dtype=torch.float64, **kwargs):
+        super(RKAdaptiveStepsizeODESolver, self).__init__(dtype=dtype, y0=y0, **kwargs)
 
         # We use mixed-precision. y has its original dtype (probably float32), whilst all 'time'-like objects use
         # `dtype` (defaulting to float64).
@@ -116,9 +121,8 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
         device = y0.device
 
         self.func = lambda t, y: func(t.type_as(y), y)
-        self.y0 = y0
-        self.rtol = rtol
-        self.atol = atol
+        self.rtol = torch.as_tensor(rtol, dtype=dtype, device=device)
+        self.atol = torch.as_tensor(atol, dtype=dtype, device=device)
         self.first_step = None if first_step is None else torch.as_tensor(first_step, dtype=dtype, device=device)
         self.safety = torch.as_tensor(safety, dtype=dtype, device=device)
         self.ifactor = torch.as_tensor(ifactor, dtype=dtype, device=device)

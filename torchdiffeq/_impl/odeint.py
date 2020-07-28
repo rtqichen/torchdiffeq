@@ -1,4 +1,4 @@
-from .tsit5 import Tsit5Solver
+import torch
 from .dopri5 import Dopri5Solver
 from .bosh3 import Bosh3Solver
 from .adaptive_heun import AdaptiveHeunSolver
@@ -9,16 +9,19 @@ from .dopri8 import Dopri8Solver
 from .misc import _check_inputs, _flat_to_shape
 
 SOLVERS = {
-    'explicit_adams': AdamsBashforth,
-    'fixed_adams': AdamsBashforthMoulton,
-    'adams': VariableCoefficientAdamsBashforth,
+    'dopri8': Dopri8Solver,
     'dopri5': Dopri5Solver,
     'bosh3': Bosh3Solver,
+    'adaptive_heun': AdaptiveHeunSolver,
+    'adaptive_adams': VariableCoefficientAdamsBashforth,
     'euler': Euler,
     'midpoint': Midpoint,
     'rk4': RK4,
-    'adaptive_heun': AdaptiveHeunSolver,
-    'dopri8': Dopri8Solver,
+    'explicit_adams': AdamsBashforth,
+    'implicit_adams': AdamsBashforthMoulton,
+    # Backward compatibility
+    'fixed_adams': AdamsBashforthMoulton,
+    'adams': VariableCoefficientAdamsBashforth,
 }
 
 
@@ -76,5 +79,5 @@ def odeint(func, y0, t, rtol=1e-7, atol=1e-12, method=None, options=None):
     solution = solver.integrate(t)
 
     if not tensor_input:
-        solution = _flat_to_shape(solution, tuple([len(t), *shape] for shape in shapes))
+        solution = _flat_to_shape(solution, (len(t),), shapes)
     return solution

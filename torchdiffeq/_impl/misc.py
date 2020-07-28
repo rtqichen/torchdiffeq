@@ -3,20 +3,6 @@ import torch
 import warnings
 
 
-def _possibly_nonzero(x):
-    return isinstance(x, torch.Tensor) or x != 0
-
-
-def _scaled_dot_product(scale, xs, ys):
-    """Calculate a scaled, vector inner product between lists of Tensors."""
-    # Using _possibly_nonzero lets us avoid wasted computation.
-    return sum([(scale * x) * y for x, y in zip(xs, ys) if _possibly_nonzero(x) or _possibly_nonzero(y)])
-
-
-def _error_tol(rtol, atol, y0, y1):
-    return atol + rtol * torch.max(y0.abs(), y1.abs())
-
-
 def _handle_unused_kwargs(solver, unused_kwargs):
     if len(unused_kwargs) > 0:
         warnings.warn('{}: Unexpected arguments {}'.format(solver.__class__.__name__, unused_kwargs))
@@ -86,6 +72,10 @@ def _select_initial_step(func, t0, y0, order, rtol, atol, f0=None):
     return torch.min(100 * h0, h1).type_as(t0)
 
 
+def _error_tol(rtol, atol, y0, y1):
+    return atol + rtol * torch.max(y0.abs(), y1.abs())
+
+
 def _compute_error_ratio(error_estimate, error_tol):
     error_ratio = error_estimate / error_tol
     mean_sq_error_ratio = error_ratio.pow(2).mean()
@@ -116,12 +106,13 @@ def _assert_increasing(name, t):
     assert (t[1:] > t[:-1]).all(), '{} must be strictly increasing or decreasing'.format(name)
 
 
-def _flat_to_shape(tensor, shapes):
+def _flat_to_shape(tensor, length, shapes):
     tensor_list = []
     total = 0
     for shape in shapes:
         next_total = total + shape.numel()
-        tensor_list.append(tensor[total:next_total].view(*shape))
+        # It's important that this be view((...)), not view(...). Else when length=(), shape=() it fails.
+        tensor_list.append(tensor[..., total:next_total].view((*length, *shape)))
         total = next_total
     return tuple(tensor_list)
 
@@ -133,7 +124,7 @@ class _TupleFunc(torch.nn.Module):
         self.shapes = shapes
 
     def forward(self, t, y):
-        f = self.base_func(t, _flat_to_shape(y, self.shapes))
+        f = self.base_func(t, _flat_to_shape(y, (), self.shapes))
         return torch.cat([f_.reshape(-1) for f_ in f])
 
 
@@ -165,7 +156,7 @@ def _check_inputs(func, y0, t, options):
         func = _ReverseFunc(func)
         try:
             grid_points = options['grid_points']
-        except KeyError:
+        except (KeyError, TypeError):
             pass
         else:
             options = options.copy()
@@ -177,7 +168,7 @@ def _check_inputs(func, y0, t, options):
 
     try:
         grid_points = options['grid_points']
-    except KeyError:
+    except (KeyError, TypeError):
         pass
     else:
         assert torch.is_tensor(grid_points), 'grid_points must be a torch.Tensor'
