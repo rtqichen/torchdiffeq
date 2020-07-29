@@ -75,7 +75,7 @@ def odeint(func, y0, t, rtol=1e-7, atol=1e-12, method=None, options=None):
 
     tensor_input, shapes, func, y0, t, rtol, atol, options = _check_inputs(func, y0, t, rtol, atol, options)
 
-    solver = SOLVERS[method](func, y0, rtol=rtol, atol=atol, **options)
+    solver = SOLVERS[method](func=func, y0=y0, rtol=rtol, atol=atol, **options)
     solution = solver.integrate(t)
 
     if not tensor_input:

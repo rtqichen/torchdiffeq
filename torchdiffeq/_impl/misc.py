@@ -95,13 +95,14 @@ def _compute_error_ratio(error_estimate, error_tol, norm):
     return norm(error_estimate / error_tol)
 
 
-def _optimal_step_size(last_step, mean_error_ratio, safety, ifactor, dfactor, order):
+def _optimal_step_size(last_step, error_ratio, safety, ifactor, dfactor, order):
     """Calculate the optimal size for the next step."""
-    if mean_error_ratio == 0:
+    error_ratio = max(error_ratio)
+    if error_ratio == 0:
         return last_step * ifactor
-    if mean_error_ratio < 1:
+    if error_ratio < 1:
         dfactor = torch.ones((), dtype=last_step.dtype, device=last_step.device)
-    error_ratio = torch.sqrt(mean_error_ratio).type_as(last_step)
+    error_ratio = torch.sqrt(error_ratio).type_as(last_step)
     exponent = torch.tensor(order, dtype=last_step.dtype, device=last_step.device).reciprocal()
     factor = torch.min(ifactor, torch.max(safety / error_ratio ** exponent, dfactor))
     return last_step * factor

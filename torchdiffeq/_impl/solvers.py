@@ -206,7 +206,7 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
                 self.next_grid_index += 1
         f_next = f1 if accept_step else f0
         interp_coeff = self._interp_fit(y0, y1, k, dt) if accept_step else interp_coeff
-        dt_next = _optimal_step_size(dt, mean_sq_error_ratio, self.safety, self.ifactor, self.dfactor, self.order)
+        dt_next = _optimal_step_size(dt, error_ratio, self.safety, self.ifactor, self.dfactor, self.order)
         rk_state = _RungeKuttaState(y_next, f_next, t0, t_next, dt_next, interp_coeff)
         return rk_state
 
