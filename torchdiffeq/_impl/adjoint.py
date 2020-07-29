@@ -34,6 +34,8 @@ class OdeintAdjointMethod(torch.autograd.Function):
         t, y, *adjoint_params = ctx.saved_tensors
         adjoint_params = tuple(adjoint_params)
 
+        y_numel = y[0].numel()  # [0] because y is of shape (len(t), *y0.shape)
+
         # We assume that any grid points are given to us ordered in the same direction as for the forward pass (for
         # compatibility with setting adjoint_options = options), so we need to flip them around here.
         try:
@@ -44,7 +46,13 @@ class OdeintAdjointMethod(torch.autograd.Function):
             adjoint_options = adjoint_options.copy()
             adjoint_options['grid_points'] = grid_points.flip(0)
 
-        y_numel = y[0].numel()  # [0] because y is of shape (len(t), *y0.shape)
+        if 'norm' not in adjoint_options:
+            def _adjoint_norm(tensor):
+                numel_1 = y_numel + 1
+                numel_2 = 2 * y_numel + 1
+                adj_t, y, adj_y, adj_params = tensor[0], tensor[1:numel_1], tensor[numel_1:numel_2], tensor[numel_2:]
+                return [adj_t.pow(2).mean(), y.pow(2).mean(), adj_y.pow(2).mean(), adj_params.pow(2).mean()]
+            adjoint_options['norm'] = _adjoint_norm
 
         # TODO: use a nn.Module and call odeint_adjoint to implement higher order derivatives.
         def augmented_dynamics(t, y_aug):
@@ -145,7 +153,7 @@ def odeint_adjoint(func, y0, t, rtol=1e-6, atol=1e-12, method=None, options=None
     if adjoint_params is None:
         adjoint_params = tuple(func.parameters())
 
-    tensor_input, shapes, func, y0, t, options = _check_inputs(func, y0, t, options)
+    tensor_input, shapes, func, y0, t, rtol, atol, options = _check_inputs(func, y0, t, rtol, atol, options)
 
     solution = OdeintAdjointMethod.apply(func, y0, t, rtol, atol, method, options, adjoint_rtol, adjoint_atol,
                                          adjoint_method, adjoint_options, t.requires_grad, *adjoint_params)

@@ -72,7 +72,7 @@ def compute_implicit_phi(explicit_phi, f_n, k):
 
 
 class VariableCoefficientAdamsBashforth(AdaptiveStepsizeODESolver):
-    def __init__(self, func, y0, rtol, atol, implicit=True, first_step=None, max_order=_MAX_ORDER, safety=0.9,
+    def __init__(self, func, y0, rtol, atol, first_step=None, max_order=_MAX_ORDER, safety=0.9,
                  ifactor=10.0, dfactor=0.2, dtype=torch.float64, **kwargs):
         super(VariableCoefficientAdamsBashforth, self).__init__(dtype=dtype, y0=y0, **kwargs)
 
@@ -85,7 +85,6 @@ class VariableCoefficientAdamsBashforth(AdaptiveStepsizeODESolver):
         self.func = lambda t, y: func(t.type_as(y), y)
         self.rtol = torch.as_tensor(rtol, dtype=dtype, device=device)
         self.atol = torch.as_tensor(atol, dtype=dtype, device=device)
-        self.implicit = implicit
         self.first_step = None if first_step is None else torch.as_tensor(first_step, dtype=torch.float64, device=y0.device)
         self.max_order = int(max_order)
         self.safety = torch.as_tensor(safety, dtype=torch.float64, device=y0.device)
@@ -137,8 +136,8 @@ class VariableCoefficientAdamsBashforth(AdaptiveStepsizeODESolver):
         # Error estimation.
         local_error = dt_cast * (g[order] - g[order - 1]) * implicit_phi_p[order]
         tolerance = _error_tol(self.rtol, self.atol, y0, y_next)
-        error_k = _compute_error_ratio(local_error, tolerance)
-        accept_step = error_k <= 1
+        error_k = _compute_error_ratio(local_error, tolerance, self.norm)
+        accept_step = max(error_k) <= 1
 
         if not accept_step:
             # Retry with adjusted step size if step is rejected.
@@ -155,16 +154,18 @@ class VariableCoefficientAdamsBashforth(AdaptiveStepsizeODESolver):
             next_order = min(order + 1, 3, self.max_order)
         else:
             error_km1 = _compute_error_ratio(
-                dt_cast * (g[order - 1] - g[order - 2]) * implicit_phi_p[order - 1], tolerance
+                dt_cast * (g[order - 1] - g[order - 2]) * implicit_phi_p[order - 1], tolerance, self.norm
             )
             error_km2 = _compute_error_ratio(
-                dt_cast * (g[order - 2] - g[order - 3]) * implicit_phi_p[order - 2], tolerance
+                dt_cast * (g[order - 2] - g[order - 3]) * implicit_phi_p[order - 2], tolerance, self.norm
             )
-            if (error_km1 + error_km2) < error_k:
+            if min(error_km1 + error_km2) < max(error_k):
                 next_order = order - 1
             elif order < self.max_order:
-                error_kp1 = _compute_error_ratio(dt_cast * _gamma_star[order] * implicit_phi_p[order], tolerance)
-                if error_kp1 < error_k:
+                error_kp1 = _compute_error_ratio(
+                    dt_cast * _gamma_star[order] * implicit_phi_p[order], tolerance, self.norm
+                )
+                if max(error_kp1) < max(error_k):
                     next_order = order + 1
 
         # Keep step size constant if increasing order. Else use adaptive step size.

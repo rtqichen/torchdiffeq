@@ -5,18 +5,20 @@ from .interp import _interp_evaluate, _interp_fit
 from .rk_common import _ButcherTableau, _RungeKuttaState, _runge_kutta_step
 from .misc import (_compute_error_ratio,
                    _error_tol,
+                   _l2_norm_squared,
                    _handle_unused_kwargs,
                    _select_initial_step,
                    _optimal_step_size)
 
 
 class AdaptiveStepsizeODESolver(metaclass=abc.ABCMeta):
-    def __init__(self, dtype, y0, **unused_kwargs):
+    def __init__(self, dtype, y0, norm=_l2_norm_squared, **unused_kwargs):
         _handle_unused_kwargs(self, unused_kwargs)
         del unused_kwargs
 
         self.y0 = y0
         self.dtype = dtype
+        self.norm = norm
 
     def _before_integrate(self, t):
         pass
@@ -38,15 +40,17 @@ class AdaptiveStepsizeODESolver(metaclass=abc.ABCMeta):
 class FixedGridODESolver(metaclass=abc.ABCMeta):
     order: int
 
-    def __init__(self, func, y0, step_size=None, grid_constructor=None, eps=0., **unused_kwargs):
+    def __init__(self, func, y0, step_size=None, grid_constructor=None, **unused_kwargs):
         unused_kwargs.pop('rtol', None)
         unused_kwargs.pop('atol', None)
+        unused_kwargs.pop('norm', None)
         _handle_unused_kwargs(self, unused_kwargs)
         del unused_kwargs
 
         self.func = func
         self.y0 = y0
-        self.eps = torch.as_tensor(eps, dtype=y0.dtype, device=y0.device)
+        self.dtype = y0.dtype
+        self.device = y0.device
 
         if step_size is None:
             if grid_constructor is None:
@@ -185,8 +189,8 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
         #                     Error Ratio                      #
         ########################################################
         error_tol = _error_tol(self.rtol, self.atol, y0, y1)
-        mean_sq_error_ratio = _compute_error_ratio(y1_error, error_tol)
-        accept_step = mean_sq_error_ratio <= 1
+        error_ratio = _compute_error_ratio(y1_error, error_tol, self.norm)
+        accept_step = max(error_ratio) <= 1
 
         ########################################################
         #                   Update RK State                    #

@@ -8,8 +8,7 @@ def _handle_unused_kwargs(solver, unused_kwargs):
         warnings.warn('{}: Unexpected arguments {}'.format(solver.__class__.__name__, unused_kwargs))
 
 
-def _norm(x):
-    """Compute RMS norm."""
+def _rms_norm(x):
     return x.norm() / math.sqrt(x.numel())
 
 
@@ -51,8 +50,8 @@ def _select_initial_step(func, t0, y0, order, rtol, atol, f0=None):
 
     scale = atol + y0.abs() * rtol
 
-    d0 = _norm(y0 / scale)
-    d1 = _norm(f0 / scale)
+    d0 = _rms_norm(y0 / scale)
+    d1 = _rms_norm(f0 / scale)
 
     if d0 < 1e-5 or d1 < 1e-5:
         h0 = torch.tensor(1e-6, dtype=y0.dtype, device=y0.device)
@@ -62,7 +61,7 @@ def _select_initial_step(func, t0, y0, order, rtol, atol, f0=None):
     y1 = y0 + h0 * f0
     f1 = func(t0 + h0, y1)
 
-    d2 = _norm((f1 - f0) / scale) / h0
+    d2 = _rms_norm((f1 - f0) / scale) / h0
 
     if d1 <= 1e-15 and d2 <= 1e-15:
         h1 = torch.max(torch.tensor(1e-6, dtype=y0.dtype, device=y0.device), h0 * 1e-3)
@@ -76,10 +75,24 @@ def _error_tol(rtol, atol, y0, y1):
     return atol + rtol * torch.max(y0.abs(), y1.abs())
 
 
-def _compute_error_ratio(error_estimate, error_tol):
-    error_ratio = error_estimate / error_tol
-    mean_sq_error_ratio = error_ratio.pow(2).mean()
-    return mean_sq_error_ratio
+def _l2_norm_squared(tensor):
+    return [tensor.pow(2).mean()]
+
+
+def _tuple_l2_norm_squared(shapes):
+    def _tupled_norm(tensor):
+        total = 0
+        out = []
+        for shape in shapes:
+            next_total = total + shape.numel()
+            out.append(tensor[total:next_total].pow(2).mean())
+            total = next_total
+        return out
+    return _tupled_norm
+
+
+def _compute_error_ratio(error_estimate, error_tol, norm):
+    return norm(error_estimate / error_tol)
 
 
 def _optimal_step_size(last_step, mean_error_ratio, safety, ifactor, dfactor, order):
@@ -92,6 +105,17 @@ def _optimal_step_size(last_step, mean_error_ratio, safety, ifactor, dfactor, or
     exponent = torch.tensor(order, dtype=last_step.dtype, device=last_step.device).reciprocal()
     factor = torch.min(ifactor, torch.max(safety / error_ratio ** exponent, dfactor))
     return last_step * factor
+
+
+def _tuple_tol(name, tol, shapes):
+    try:
+        iter(tol)
+    except TypeError:
+        return tol
+    tol = tuple(tol)
+    assert len(tol) == len(shapes), "If using tupled {} it must have the same length as the tuple y0".format(name)
+    tol = [torch.as_tensor(tol_).repeat(shape.numel()) for tol_, shape in zip(tol, shapes)]
+    return torch.cat(tol)
 
 
 def _decreasing(t):
@@ -137,15 +161,25 @@ class _ReverseFunc(torch.nn.Module):
         return -self.base_func(-t, y)
 
 
-def _check_inputs(func, y0, t, options):
+def _check_inputs(func, y0, t, rtol, atol, options):
+    # TODO: deprecate tupled input?
     tensor_input = True
     shapes = []
     if not torch.is_tensor(y0):
         assert isinstance(y0, tuple), 'y0 must be either a torch.Tensor or a tuple'
         tensor_input = False
         shapes = [y0_.shape for y0_ in y0]
+        rtol = _tuple_tol('rtol', rtol, shapes)
+        atol = _tuple_tol('atol', atol, shapes)
         y0 = torch.cat([y0_.reshape(-1) for y0_ in y0])
         func = _TupleFunc(func, shapes)
+    if 'norm' not in options:
+        if tensor_input:
+            options['norm'] = _l2_norm_squared
+        else:
+            options['norm'] = _tuple_l2_norm_squared(shapes)
+    # ~TODO
+
     if not torch.is_floating_point(y0):
         raise TypeError('`y0` must be a floating point Tensor but is a {}'.format(y0.type()))
 
@@ -175,4 +209,10 @@ def _check_inputs(func, y0, t, options):
         _assert_one_dimensional('grid_points', grid_points)
         _assert_increasing('grid_points', grid_points)
 
-    return tensor_input, shapes, func, y0, t, options
+    # TODO: deprecate inputs on different devices?
+    if t.device != y0.device:
+        warnings.warn("t is not on the same device as y0. Coercing to y0.device.")
+        t = t.to(y0.device)
+    # ~TODO
+
+    return tensor_input, shapes, func, y0, t, rtol, atol, options
