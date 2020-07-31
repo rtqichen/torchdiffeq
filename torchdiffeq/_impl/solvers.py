@@ -5,20 +5,47 @@ from .interp import _interp_evaluate, _interp_fit
 from .rk_common import _ButcherTableau, _RungeKuttaState, _runge_kutta_step
 from .misc import (_compute_error_ratio,
                    _error_tol,
-                   _l2_norm_squared,
                    _handle_unused_kwargs,
                    _select_initial_step,
                    _optimal_step_size)
 
 
+# Backward compatibility: support tupled input
+def _l2_norm_squared(tensor):
+    return [tensor.pow(2).mean()]
+# ~Backward compatibility
+
+
+# Backward compatibility: support tupled input
+def _tuple_l2_norm_squared(shapes):
+    def _tupled_norm(tensor):
+        total = 0
+        out = []
+        for shape in shapes:
+            next_total = total + shape.numel()
+            out.append(tensor[total:next_total].pow(2).mean())
+            total = next_total
+        return out
+    return _tupled_norm
+# ~Backward compatibility
+
+
 class AdaptiveStepsizeODESolver(metaclass=abc.ABCMeta):
-    def __init__(self, dtype, y0, norm=_l2_norm_squared, **unused_kwargs):
+    def __init__(self, dtype, y0, _shapes, **unused_kwargs):
         _handle_unused_kwargs(self, unused_kwargs)
         del unused_kwargs
 
+        # Backward compatibility: support tupled input
+        if _shapes is None:
+            norm = _l2_norm_squared
+        else:
+            norm = _tuple_l2_norm_squared(_shapes)
+        self._shapes = _shapes
+        self._norm = norm
+        # ~Backward compatibility
+
         self.y0 = y0
         self.dtype = dtype
-        self.norm = norm
 
     def _before_integrate(self, t):
         pass
@@ -43,7 +70,7 @@ class FixedGridODESolver(metaclass=abc.ABCMeta):
     def __init__(self, func, y0, step_size=None, grid_constructor=None, **unused_kwargs):
         unused_kwargs.pop('rtol', None)
         unused_kwargs.pop('atol', None)
-        unused_kwargs.pop('norm', None)
+        unused_kwargs.pop('_shapes', None)
         _handle_unused_kwargs(self, unused_kwargs)
         del unused_kwargs
 
@@ -147,7 +174,8 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
     def _before_integrate(self, t):
         f0 = self.func(t[0], self.y0)
         if self.first_step is None:
-            first_step = _select_initial_step(self.func, t[0], self.y0, self.order - 1, self.rtol, self.atol, f0=f0)
+            first_step = _select_initial_step(self.func, t[0], self.y0, self.order - 1, self.rtol, self.atol,
+                                              self._shapes, f0=f0)
         else:
             first_step = self.first_step
         self.rk_state = _RungeKuttaState(self.y0, f0, t[0], t[0], first_step, [self.y0] * 5)
@@ -189,7 +217,7 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
         #                     Error Ratio                      #
         ########################################################
         error_tol = _error_tol(self.rtol, self.atol, y0, y1)
-        error_ratio = _compute_error_ratio(y1_error, error_tol, self.norm)
+        error_ratio = _compute_error_ratio(y1_error, error_tol, self._norm)
         accept_step = max(error_ratio) <= 1
 
         ########################################################

@@ -1,4 +1,3 @@
-import torch
 from .dopri5 import Dopri5Solver
 from .bosh3 import Bosh3Solver
 from .adaptive_heun import AdaptiveHeunSolver
@@ -25,7 +24,11 @@ SOLVERS = {
 }
 
 
-def odeint(func, y0, t, rtol=1e-7, atol=1e-12, method=None, options=None):
+# Backward compatibility: make adjoints compute exactly the same as before.
+# This is the purpose of the _shapes argument: _optimal_step_size and _select_initial_step depend subtly on whether or
+# not tupled input is passed; this argument forces behaviour to be as if we'd passed in a tuple of those shapes instead.
+# It's used in the adjoint.
+def odeint(func, y0, t, rtol=1e-7, atol=1e-12, method=None, options=None, _shapes=None):
     """Integrate a system of ordinary differential equations.
 
     Solves the initial value problem for a non-stiff system of first order ODEs:
@@ -63,19 +66,15 @@ def odeint(func, y0, t, rtol=1e-7, atol=1e-12, method=None, options=None):
         ValueError: if an invalid `method` is provided.
     """
 
-    if options is None:
-        options = {}
-    elif method is None:
-        raise ValueError('cannot supply `options` without specifying `method`')
-    if method is None:
-        method = 'dopri5'
-    if method not in SOLVERS:
-        raise ValueError('Invalid method "{}". Must be one of {}'.format(
-                         method, '{"' + '", "'.join(SOLVERS.keys()) + '"}.'))
+    tensor_input, shapes, func, y0, t, rtol, atol, method, options = _check_inputs(func, y0, t, rtol, atol, method,
+                                                                                   options, SOLVERS)
 
-    tensor_input, shapes, func, y0, t, rtol, atol, options = _check_inputs(func, y0, t, rtol, atol, options)
+    if _shapes is not None:
+        assert shapes is None, "internal error"
+    else:
+        _shapes = shapes
 
-    solver = SOLVERS[method](func=func, y0=y0, rtol=rtol, atol=atol, **options)
+    solver = SOLVERS[method](func=func, y0=y0, rtol=rtol, atol=atol, _shapes=_shapes, **options)
     solution = solver.integrate(t)
 
     if not tensor_input:

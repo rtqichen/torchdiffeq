@@ -102,7 +102,7 @@ class VariableCoefficientAdamsBashforth(AdaptiveStepsizeODESolver):
         prev_f.appendleft(f0)
         phi.appendleft(f0)
         if self.first_step is None:
-            first_step = _select_initial_step(self.func, t[0], self.y0, 2, self.rtol, self.atol, f0=f0)
+            first_step = _select_initial_step(self.func, t[0], self.y0, 2, self.rtol, self.atol, self._shapes, f0=f0)
         else:
             first_step = self.first_step
 
@@ -136,7 +136,7 @@ class VariableCoefficientAdamsBashforth(AdaptiveStepsizeODESolver):
         # Error estimation.
         local_error = dt_cast * (g[order] - g[order - 1]) * implicit_phi_p[order]
         tolerance = _error_tol(self.rtol, self.atol, y0, y_next)
-        error_k = _compute_error_ratio(local_error, tolerance, self.norm)
+        error_k = _compute_error_ratio(local_error, tolerance, self._norm)
         accept_step = max(error_k) <= 1
 
         if not accept_step:
@@ -154,16 +154,16 @@ class VariableCoefficientAdamsBashforth(AdaptiveStepsizeODESolver):
             next_order = min(order + 1, 3, self.max_order)
         else:
             error_km1 = _compute_error_ratio(
-                dt_cast * (g[order - 1] - g[order - 2]) * implicit_phi_p[order - 1], tolerance, self.norm
+                dt_cast * (g[order - 1] - g[order - 2]) * implicit_phi_p[order - 1], tolerance, self._norm
             )
             error_km2 = _compute_error_ratio(
-                dt_cast * (g[order - 2] - g[order - 3]) * implicit_phi_p[order - 2], tolerance, self.norm
+                dt_cast * (g[order - 2] - g[order - 3]) * implicit_phi_p[order - 2], tolerance, self._norm
             )
             if min(error_km1 + error_km2) < max(error_k):
                 next_order = order - 1
             elif order < self.max_order:
                 error_kp1 = _compute_error_ratio(
-                    dt_cast * _gamma_star[order] * implicit_phi_p[order], tolerance, self.norm
+                    dt_cast * _gamma_star[order] * implicit_phi_p[order], tolerance, self._norm
                 )
                 if max(error_kp1) < max(error_k):
                     next_order = order + 1

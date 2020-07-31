@@ -15,8 +15,6 @@ For these solvers, `rtol` and `atol` correspond to the tolerances for accepting/
 
 - `dtype=torch.float64`: what dtype to use for timelike quantities. Setting this to `torch.float32` will improve speed but may produce underflow errors more easily.
 
-- `norm`: What norm to compute the accept/reject error criterion with respect to. Defaults to the L2 norm if using tensor input, and a mixed L^inf/L2 norm if using tupled input; each tensor has its L2 norm computed, and the maximum is taken over the tuple.
-
 **Fixed solvers (euler, midpoint, rk4, implicit_adams, explicit_adams):**<br>
 
 - `step_size=None`: How large each discrete step should be. If not passed then this defaults to stepping between the values of `t`. Note that if using `t` just to specify the start and end of the regions of integration, then it is very important to specify this argument! It is mutually exclusive with the `grid_constructor` argument, below.

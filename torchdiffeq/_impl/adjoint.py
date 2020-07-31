@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
-from .odeint import odeint
-from .misc import _check_inputs, _flat_to_shape
+from .odeint import SOLVERS, odeint
+from .misc import _check_inputs, _flat_to_shape, _tuple_tol
 
 
 class OdeintAdjointMethod(torch.autograd.Function):
@@ -31,6 +31,9 @@ class OdeintAdjointMethod(torch.autograd.Function):
         adjoint_options = ctx.adjoint_options
         t_requires_grad = ctx.t_requires_grad
 
+        if adjoint_options is None:
+            adjoint_options = {}
+
         t, y, *adjoint_params = ctx.saved_tensors
         adjoint_params = tuple(adjoint_params)
 
@@ -40,19 +43,11 @@ class OdeintAdjointMethod(torch.autograd.Function):
         # compatibility with setting adjoint_options = options), so we need to flip them around here.
         try:
             grid_points = adjoint_options['grid_points']
-        except (KeyError, TypeError):
+        except KeyError:
             pass
         else:
             adjoint_options = adjoint_options.copy()
             adjoint_options['grid_points'] = grid_points.flip(0)
-
-        if 'norm' not in adjoint_options:
-            def _adjoint_norm(tensor):
-                numel_1 = y_numel + 1
-                numel_2 = 2 * y_numel + 1
-                adj_t, y, adj_y, adj_params = tensor[0], tensor[1:numel_1], tensor[numel_1:numel_2], tensor[numel_2:]
-                return [adj_t.pow(2).mean(), y.pow(2).mean(), adj_y.pow(2).mean(), adj_params.pow(2).mean()]
-            adjoint_options['norm'] = _adjoint_norm
 
         # TODO: use a nn.Module and call odeint_adjoint to implement higher order derivatives.
         def augmented_dynamics(t, y_aug):
@@ -94,6 +89,19 @@ class OdeintAdjointMethod(torch.autograd.Function):
             aug_state.extend([torch.zeros_like(param) for param in adjoint_params])  # vjp_params
             aug_state = torch.cat([x.reshape(-1) for x in aug_state])
 
+            # Backward compatibility: despite the adjoint computation now operating on a single tensor rather than a
+            # tuple of tensors, for speed, we make odeint() behave _exactly_ as if we had still passed a tuple.
+            _shapes = (1, y[-1].numel(), grad_y[-1].numel())
+            param_numel = sum(param.numel() for param in adjoint_params)
+            if param_numel != 0:
+                _shapes = _shapes + (param_numel,)
+            _shapes = tuple(torch.Size([s]) for s in _shapes)
+            # Since we're passing the _shapes parameter to emulate tupled input, we need to duplicate what occurs for
+            # such input; in particular how rtol and atol are handled.
+            adjoint_rtol = _tuple_tol('rtol', adjoint_rtol, _shapes)
+            adjoint_atol = _tuple_tol('rtol', adjoint_atol, _shapes)
+            # ~Backward comaptibility
+
             time_vjps = []
             for i in range(len(t) - 1, 0, -1):
                 if t_requires_grad:
@@ -108,7 +116,8 @@ class OdeintAdjointMethod(torch.autograd.Function):
                 aug_state = odeint(
                     augmented_dynamics, aug_state,
                     t[i - 1:i + 1].flip(0),
-                    rtol=adjoint_rtol, atol=adjoint_atol, method=adjoint_method, options=adjoint_options
+                    rtol=adjoint_rtol, atol=adjoint_atol, method=adjoint_method, options=adjoint_options,
+                    _shapes=_shapes
                 )
                 aug_state = aug_state[1]  # extract just the t[i - 1] value
                 aug_state[1:y_numel + 1] = y[i - 1].reshape(-1)  # update to use our forward-pass estimate of the state
@@ -130,7 +139,7 @@ class OdeintAdjointMethod(torch.autograd.Function):
                 adj_params.append(adj_param)
                 total_numel = next_total_numel
 
-            return (None, adj_y, time_vjps, None, None, None, None, None, None, None, None, None, *adj_params)
+        return (None, adj_y, time_vjps, None, None, None, None, None, None, None, None, None, *adj_params)
 
 
 def odeint_adjoint(func, y0, t, rtol=1e-6, atol=1e-12, method=None, options=None, adjoint_rtol=None, adjoint_atol=None,
@@ -153,7 +162,8 @@ def odeint_adjoint(func, y0, t, rtol=1e-6, atol=1e-12, method=None, options=None
     if adjoint_params is None:
         adjoint_params = tuple(func.parameters())
 
-    tensor_input, shapes, func, y0, t, rtol, atol, options = _check_inputs(func, y0, t, rtol, atol, options)
+    tensor_input, shapes, func, y0, t, rtol, atol, method, options = _check_inputs(func, y0, t, rtol, atol, method,
+                                                                                   options, SOLVERS)
 
     solution = OdeintAdjointMethod.apply(func, y0, t, rtol, atol, method, options, adjoint_rtol, adjoint_atol,
                                          adjoint_method, adjoint_options, t.requires_grad, *adjoint_params)
