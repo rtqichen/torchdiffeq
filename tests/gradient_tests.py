@@ -31,8 +31,6 @@ class TestGradient(unittest.TestCase):
         self.assertTrue(torch.autograd.gradcheck(func, (y0, t_points)))
 
     def test_dopri5(self):
-        import torch
-        torch.autograd.set_detect_anomaly(True)
         f, y0, t_points, _ = construct_problem(TEST_DEVICE)
 
         func = lambda y0, t_points: torchdiffeq.odeint(f, y0, t_points, method='dopri5')
