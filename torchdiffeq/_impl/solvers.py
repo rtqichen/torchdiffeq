@@ -146,7 +146,7 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
                  max_num_steps=2 ** 31 - 1, grid_points=None, eps=0., dtype=torch.float64, **kwargs):
         super(RKAdaptiveStepsizeODESolver, self).__init__(dtype=dtype, y0=y0, **kwargs)
 
-        # We use mixed-precision. y has its original dtype (probably float32), whilst all 'time'-like objects use
+        # We use mixed precision. y has its original dtype (probably float32), whilst all 'time'-like objects use
         # `dtype` (defaulting to float64).
         dtype = torch.promote_types(dtype, y0.dtype)
         device = y0.device
@@ -164,12 +164,12 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
         self.eps = torch.as_tensor(eps, dtype=dtype, device=device)
         self.dtype = dtype
 
-        # Copy from class to instance to set dtype and device
-        self.tableau = _ButcherTableau(alpha=self.tableau.alpha.to(device=device, dtype=y0.dtype),
-                                       beta=[b.to(device=device, dtype=y0.dtype) for b in self.tableau.beta],
-                                       c_sol=self.tableau.c_sol.to(device=device, dtype=y0.dtype),
-                                       c_error=self.tableau.c_error.to(device=device, dtype=y0.dtype))
-        self.mid = self.mid.to(device=device, dtype=y0.dtype)
+        # Copy from class to instance to set device
+        self.tableau = _ButcherTableau(alpha=self.tableau.alpha.to(device=device),
+                                       beta=[b.to(device=device) for b in self.tableau.beta],
+                                       c_sol=self.tableau.c_sol.to(device=device),
+                                       c_error=self.tableau.c_error.to(device=device))
+        self.mid = self.mid.to(device=device)
 
     def _before_integrate(self, t):
         f0 = self.func(t[0], self.y0)
@@ -193,6 +193,15 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
     def _adaptive_step(self, rk_state):
         """Take an adaptive Runge-Kutta step to integrate the ODE."""
         y0, f0, _, t0, dt, interp_coeff = rk_state
+        # dtypes: self.y0.dtype (probably float32); self.dtype (probably float64)
+        # used for state and timelike objects respectively.
+        # Then:
+        # y0.dtype == self.y0.dtype
+        # f0.dtype == self.y0.dtype
+        # t0.dtype == self.dtype
+        # dt.dtype == self.dtype
+        # for coeff in interp_coeff: coeff.dtype == self.y0.dtype
+
 
         ########################################################
         #                      Assertions                      #
@@ -212,6 +221,10 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
             eps = 0
 
         y1, f1, y1_error, k = _runge_kutta_step(self.func, y0, f0, t0, dt, tableau=self.tableau)
+        # y1.dtype == self.y0.dtype
+        # f1.dtype == self.y0.dtype
+        # y1_error.dtype == self.dtype
+        # k.dtype == self.y0.dtype
 
         ########################################################
         #                     Error Ratio                      #
@@ -219,6 +232,8 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
         error_tol = _error_tol(self.rtol, self.atol, y0, y1)
         error_ratio = _compute_error_ratio(y1_error, error_tol, self._norm)
         accept_step = max(error_ratio) <= 1
+        # error_tol.dtype == self.dtype
+        # for e in error_ratio: e.dtype == self.dtype
 
         ########################################################
         #                   Update RK State                    #
@@ -240,8 +255,7 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
 
     def _interp_fit(self, y0, y1, k, dt):
         """Fit an interpolating polynomial to the results of a Runge-Kutta step."""
-        dt = dt.type_as(y0)
-        y_mid = y0 + k.matmul(dt * self.mid).view_as(y0)
+        y_mid = y0 + k.matmul(dt * self.mid).view_as(y0).type_as(y0)  # mid is float64 so cast back
         f0 = k[..., 0]
         f1 = k[..., -1]
         return _interp_fit(y0, y1, y_mid, f0, f1, dt)

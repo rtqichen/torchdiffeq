@@ -18,9 +18,10 @@ SOLVERS = {
     'rk4': RK4,
     'explicit_adams': AdamsBashforth,
     'implicit_adams': AdamsBashforthMoulton,
-    # Backward compatibility
+    # Backward compatibility: use the same names as before
     'fixed_adams': AdamsBashforthMoulton,
     'adams': VariableCoefficientAdamsBashforth,
+    # ~Backwards compatibility
 }
 
 
@@ -28,7 +29,7 @@ SOLVERS = {
 # This is the purpose of the _shapes argument: _optimal_step_size and _select_initial_step depend subtly on whether or
 # not tupled input is passed; this argument forces behaviour to be as if we'd passed in a tuple of those shapes instead.
 # It's used in the adjoint.
-def odeint(func, y0, t, rtol=1e-7, atol=1e-12, method=None, options=None, _shapes=None):
+def odeint(func, y0, t, rtol=1e-7, atol=1e-9, method=None, options=None, _shapes=None):
     """Integrate a system of ordinary differential equations.
 
     Solves the initial value problem for a non-stiff system of first order ODEs:
@@ -65,7 +66,6 @@ def odeint(func, y0, t, rtol=1e-7, atol=1e-12, method=None, options=None, _shape
     Raises:
         ValueError: if an invalid `method` is provided.
     """
-
     tensor_input, shapes, func, y0, t, rtol, atol, method, options = _check_inputs(func, y0, t, rtol, atol, method,
                                                                                    options, SOLVERS)
 

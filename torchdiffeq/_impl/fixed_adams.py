@@ -145,9 +145,9 @@ _DIVISOR = [
     31384184832000, 62768369664000, 32011868528640000, 64023737057280000, 51090942171709440000, 102181884343418880000
 ]
 
-_BASHFORTH_DIVISOR = [torch.tensor([b / divisor for b in bashforth])
+_BASHFORTH_DIVISOR = [torch.tensor([b / divisor for b in bashforth], dtype=torch.float64)
                       for bashforth, divisor in zip(_BASHFORTH_COEFFICIENTS, _DIVISOR)]
-_MOULTON_DIVISOR = [torch.tensor([m / divisor for m in moulton])
+_MOULTON_DIVISOR = [torch.tensor([m / divisor for m in moulton], dtype=torch.float64)
                     for moulton, divisor in zip(_MOULTON_COEFFICIENTS, _DIVISOR)]
 
 _MIN_ORDER = 4
@@ -155,7 +155,7 @@ _MAX_ORDER = 12
 _MAX_ITERS = 4
 
 
-# TODO: replace this with PyTorch operations
+# TODO: replace this with PyTorch operations (a little hard because y is a deque being used as a circular buffer)
 def _dot_product(x, y):
     return sum(xi * yi for xi, yi in zip(x, y))
 
@@ -168,7 +168,7 @@ class AdamsBashforthMoulton(FixedGridODESolver):
         super(AdamsBashforthMoulton, self).__init__(func, y0, **kwargs)
         assert max_order <= _MAX_ORDER, "max_order must be at most {}".format(_MAX_ORDER)
         if max_order < _MIN_ORDER:
-            warnings.warn("max_order is below {}, so the solver reduces to `rk4`.".format(max_order))
+            warnings.warn("max_order is below {}, so the solver reduces to `rk4`.".format(_MIN_ORDER))
 
         self.rtol = torch.as_tensor(rtol, dtype=y0.dtype, device=y0.device)
         self.atol = torch.as_tensor(atol, dtype=y0.dtype, device=y0.device)
@@ -177,6 +177,9 @@ class AdamsBashforthMoulton(FixedGridODESolver):
         self.max_order = int(max_order)
         self.prev_f = collections.deque(maxlen=self.max_order - 1)
         self.prev_t = None
+
+        self.bashforth = [x.to(y0.device) for x in _BASHFORTH_DIVISOR]
+        self.moulton = [x.to(y0.device) for x in _MOULTON_DIVISOR]
 
     def _update_history(self, t, f):
         if self.prev_t is None or self.prev_t != t:
@@ -198,13 +201,13 @@ class AdamsBashforthMoulton(FixedGridODESolver):
             return dy
         else:
             # Adams-Bashforth predictor.
-            bashforth_coeffs = _BASHFORTH_DIVISOR[order]
-            dy = _dot_product(bashforth_coeffs, self.prev_f)
+            bashforth_coeffs = self.bashforth[order]
+            dy = _dot_product(dt * bashforth_coeffs, self.prev_f).type_as(y)  # bashforth is float64 so cast back
 
             # Adams-Moulton corrector.
             if self.implicit:
-                moulton_coeffs = _MOULTON_DIVISOR[order + 1]
-                delta = dt * _dot_product(moulton_coeffs[1:], self.prev_f)
+                moulton_coeffs = self.moulton[order + 1]
+                delta = dt * _dot_product(moulton_coeffs[1:], self.prev_f).type_as(y)  # moulton is float64 so cast back
                 converged = False
                 for _ in range(self.max_iters):
                     dy_old = dy

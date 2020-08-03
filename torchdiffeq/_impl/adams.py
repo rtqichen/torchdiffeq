@@ -3,7 +3,6 @@ import torch
 from .solvers import AdaptiveStepsizeODESolver
 from .misc import (_compute_error_ratio,
                    _error_tol,
-                   _handle_unused_kwargs,
                    _optimal_step_size,
                    _select_initial_step)
 
