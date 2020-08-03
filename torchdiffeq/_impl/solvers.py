@@ -13,21 +13,19 @@ from .misc import (_compute_error_ratio,
 
 
 class AdaptiveStepsizeODESolver(metaclass=abc.ABCMeta):
-    def __init__(self, dtype, y0, _shapes, **unused_kwargs):
+    def __init__(self, dtype, y0, shapes, **unused_kwargs):
         _handle_unused_kwargs(self, unused_kwargs)
         del unused_kwargs
 
-        # Backward compatibility: support tupled input
-        if _shapes is None:
-            norm = _l2_norm_squared
-        else:
-            norm = _tuple_l2_norm_squared(_shapes)
-        self._shapes = _shapes
-        self._norm = norm
-        # ~Backward compatibility
-
         self.y0 = y0
         self.dtype = dtype
+
+        if shapes is None:
+            norm = _l2_norm_squared
+        else:
+            norm = _tuple_l2_norm_squared(shapes)
+        self.shapes = shapes
+        self.norm = norm
 
     def _before_integrate(self, t):
         pass
@@ -52,7 +50,7 @@ class FixedGridODESolver(metaclass=abc.ABCMeta):
     def __init__(self, func, y0, step_size=None, grid_constructor=None, **unused_kwargs):
         unused_kwargs.pop('rtol', None)
         unused_kwargs.pop('atol', None)
-        unused_kwargs.pop('_shapes', None)
+        unused_kwargs.pop('shapes', None)
         _handle_unused_kwargs(self, unused_kwargs)
         del unused_kwargs
 
@@ -157,7 +155,7 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
         f0 = self.func(t[0], self.y0)
         if self.first_step is None:
             first_step = _select_initial_step(self.func, t[0], self.y0, self.order - 1, self.rtol, self.atol,
-                                              self._shapes, f0=f0)
+                                              self.shapes, f0=f0)
         else:
             first_step = self.first_step
         self.rk_state = _RungeKuttaState(self.y0, f0, t[0], t[0], first_step, [self.y0] * 5)
@@ -203,6 +201,7 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
             eps = 0
 
         y1, f1, y1_error, k = _runge_kutta_step(self.func, y0, f0, t0, dt, tableau=self.tableau)
+        # dtypes:
         # y1.dtype == self.y0.dtype
         # f1.dtype == self.y0.dtype
         # y1_error.dtype == self.dtype
@@ -212,8 +211,9 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
         #                     Error Ratio                      #
         ########################################################
         error_tol = _error_tol(self.rtol, self.atol, y0, y1)
-        error_ratio = _compute_error_ratio(y1_error, error_tol, self._norm)
+        error_ratio = _compute_error_ratio(y1_error, error_tol, self.norm)
         accept_step = max(error_ratio) <= 1
+        # dtypes:
         # error_tol.dtype == self.dtype
         # for e in error_ratio: e.dtype == self.dtype
 

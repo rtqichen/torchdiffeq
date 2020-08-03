@@ -8,13 +8,10 @@ def _handle_unused_kwargs(solver, unused_kwargs):
         warnings.warn('{}: Unexpected arguments {}'.format(solver.__class__.__name__, unused_kwargs))
 
 
-# Backward compatibility: support tupled input
 def _l2_norm_squared(tensor):
     return [tensor.pow(2).mean()]
-# ~Backward compatibility
 
 
-# Backward compatibility: support tupled input
 def _tuple_l2_norm_squared(shapes):
     def _tupled_norm(tensor):
         total = 0
@@ -25,7 +22,6 @@ def _tuple_l2_norm_squared(shapes):
             total = next_total
         return out
     return _tupled_norm
-# ~Backward compatibility
 
 
 def _rms_norm(x):
@@ -69,8 +65,8 @@ def _select_initial_step(func, t0, y0, order, rtol, atol, shapes, f0=None):
     if f0 is None:
         f0 = func(t0, y0)
 
-    # Backward compatibility: support tupled input
-    # This whole function is a little messy because of it, unfortunately.
+    # This whole function is unfortunately rather messy because of the possibility of tupled input.
+
     if shapes is None:
         rtol = (rtol,)
         atol = (atol,)
@@ -158,7 +154,6 @@ def _assert_increasing(name, t):
     assert (t[1:] > t[:-1]).all(), '{} must be strictly increasing or decreasing'.format(name)
 
 
-# Backward compatibility: support tupled input
 def _tuple_tol(name, tol, shapes):
     try:
         iter(tol)
@@ -168,10 +163,8 @@ def _tuple_tol(name, tol, shapes):
     assert len(tol) == len(shapes), "If using tupled {} it must have the same length as the tuple y0".format(name)
     tol = [torch.as_tensor(tol_).expand(shape.numel()) for tol_, shape in zip(tol, shapes)]
     return torch.cat(tol)
-# ~Backward compatibility
 
 
-# Backward compatibility: support tupled input
 def _flat_to_shape(tensor, length, shapes):
     tensor_list = []
     total = 0
@@ -181,10 +174,8 @@ def _flat_to_shape(tensor, length, shapes):
         tensor_list.append(tensor[..., total:next_total].view((*length, *shape)))
         total = next_total
     return tuple(tensor_list)
-# ~Backward compatibility
 
 
-# Backward compatibility: support tupled input
 class _TupleFunc(torch.nn.Module):
     def __init__(self, base_func, shapes):
         super(_TupleFunc, self).__init__()
@@ -194,7 +185,6 @@ class _TupleFunc(torch.nn.Module):
     def forward(self, t, y):
         f = self.base_func(t, _flat_to_shape(y, (), self.shapes))
         return torch.cat([f_.reshape(-1) for f_ in f])
-# ~Backward compatibility
 
 
 class _ReverseFunc(torch.nn.Module):
@@ -217,7 +207,6 @@ def _check_inputs(func, y0, t, rtol, atol, method, options, SOLVERS):
         raise ValueError('Invalid method "{}". Must be one of {}'.format(
             method, '{"' + '", "'.join(SOLVERS.keys()) + '"}.'))
 
-    # Backward compatibility: Allow tupled input
     tensor_input = True
     shapes = None
     if not torch.is_tensor(y0):
@@ -228,7 +217,6 @@ def _check_inputs(func, y0, t, rtol, atol, method, options, SOLVERS):
         atol = _tuple_tol('atol', atol, shapes)
         y0 = torch.cat([y0_.reshape(-1) for y0_ in y0])
         func = _TupleFunc(func, shapes)
-    # ~Backward compatibility
 
     if not torch.is_floating_point(y0):
         raise TypeError('`y0` must be a floating point Tensor but is a {}'.format(y0.type()))
