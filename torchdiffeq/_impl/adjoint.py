@@ -56,13 +56,15 @@ class OdeintAdjointMethod(torch.autograd.Function):
             # ignore gradients wrt time and parameters
 
             with torch.enable_grad():
-                t = t.detach()
+                t = t.detach().requires_grad_(True)
                 # There's no point spending a lot of time resolving dL/dt unless we need it. (Which can be quite a lot
                 # of time if there's piecewise structure in time.)
                 if t_requires_grad:
-                    t = t.requires_grad_(True)
+                    t_ = t
+                else:
+                    t_ = t.detach()
                 y = y.detach().requires_grad_(True)
-                func_eval = func(t, y)
+                func_eval = func(t_, y)
 
                 # Workaround for PyTorch bug #39784
                 _t = torch.as_strided(t, (), ())
@@ -84,7 +86,7 @@ class OdeintAdjointMethod(torch.autograd.Function):
 
         with torch.no_grad():
             # [-1] because y and grad_y are both of shape (len(t), *y0.shape)
-            aug_state = [torch.zeros((), dtype=t.dtype, device=t.device), y[-1], grad_y[-1]]  # vjp_t, y, vjp_y
+            aug_state = [torch.zeros((), dtype=y.dtype, device=y.device), y[-1], grad_y[-1]]  # vjp_t, y, vjp_y
             aug_state.extend([torch.zeros_like(param) for param in adjoint_params])  # vjp_params
 
             time_vjps = []

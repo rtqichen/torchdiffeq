@@ -61,6 +61,8 @@ def _select_initial_step(func, t0, y0, order, rtol, atol, shapes, f0=None):
 
     dtype = y0.dtype
     device = y0.device
+    t_dtype = t0.dtype
+    t0 = t0.to(dtype)
 
     if f0 is None:
         f0 = func(t0, y0)
@@ -68,8 +70,8 @@ def _select_initial_step(func, t0, y0, order, rtol, atol, shapes, f0=None):
     # This whole function is unfortunately rather messy because of the possibility of tupled input.
 
     if shapes is None:
-        rtol = (rtol,)
-        atol = (atol,)
+        rtol = (rtol.to(dtype),)
+        atol = (atol.to(dtype),)
         y0 = (y0,)
         f0 = (f0,)
     else:
@@ -79,15 +81,15 @@ def _select_initial_step(func, t0, y0, order, rtol, atol, shapes, f0=None):
         try:
             iter(rtol)
         except TypeError:
-            rtol = tuple(rtol for _ in range(len(shapes)))
+            rtol = tuple(rtol.to(dtype) for _ in range(len(shapes)))
         else:
-            rtol = _flat_to_shape(rtol, (), shapes)
+            rtol = _flat_to_shape(rtol.to(dtype), (), shapes)
         try:
             iter(atol)
         except TypeError:
-            atol = tuple(atol for _ in range(len(shapes)))
+            atol = tuple(atol.to(dtype) for _ in range(len(shapes)))
         else:
-            atol = _flat_to_shape(atol, (), shapes)
+            atol = _flat_to_shape(atol.to(dtype), (), shapes)
         y0 = _flat_to_shape(y0, (), shapes)
         f0 = _flat_to_shape(f0, (), shapes)
 
@@ -118,7 +120,7 @@ def _select_initial_step(func, t0, y0, order, rtol, atol, shapes, f0=None):
         h1 = torch.max(torch.tensor(1e-6, dtype=dtype, device=device), h0 * 1e-3)
     else:
         h1 = (0.01 / max(d1 + d2)) ** (1. / float(order + 1))
-    return torch.min(100 * h0, h1).type_as(t0)
+    return torch.min(100 * h0, h1).to(t_dtype)
 
 
 def _error_tol(rtol, atol, y0, y1):

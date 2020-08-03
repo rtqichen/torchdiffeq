@@ -145,11 +145,11 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
         self.dtype = dtype
 
         # Copy from class to instance to set device
-        self.tableau = _ButcherTableau(alpha=self.tableau.alpha.to(device=device),
-                                       beta=[b.to(device=device) for b in self.tableau.beta],
-                                       c_sol=self.tableau.c_sol.to(device=device),
-                                       c_error=self.tableau.c_error.to(device=device))
-        self.mid = self.mid.to(device=device)
+        self.tableau = _ButcherTableau(alpha=self.tableau.alpha.to(device=device, dtype=y0.dtype),
+                                       beta=[b.to(device=device, dtype=y0.dtype) for b in self.tableau.beta],
+                                       c_sol=self.tableau.c_sol.to(device=device, dtype=y0.dtype),
+                                       c_error=self.tableau.c_error.to(device=device, dtype=y0.dtype))
+        self.mid = self.mid.to(device=device, dtype=y0.dtype)
 
     def _before_integrate(self, t):
         f0 = self.func(t[0], self.y0)
@@ -237,7 +237,8 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
 
     def _interp_fit(self, y0, y1, k, dt):
         """Fit an interpolating polynomial to the results of a Runge-Kutta step."""
-        y_mid = y0 + k.matmul(dt * self.mid).view_as(y0).type_as(y0)  # mid is float64 so cast back
+        dt = dt.type_as(y0)
+        y_mid = y0 + k.matmul(dt * self.mid).view_as(y0)
         f0 = k[..., 0]
         f1 = k[..., -1]
         return _interp_fit(y0, y1, y_mid, f0, f1, dt)
