@@ -102,6 +102,8 @@ def _select_initial_step(func, t0, y0, order, rtol, atol, shapes, f0=None):
         h0 = torch.tensor(1e-6, dtype=dtype, device=device)
     else:
         h0 = 0.01 * max(d0_ / d1_ for d0_, d1_ in zip(d0, d1))
+    if not torch.isfinite(h0):
+        h0 = torch.tensor(1e-6, dtype=dtype, device=device)
 
     y1 = tuple(y0_ + h0 * f0_ for y0_, f0_ in zip(y0, f0))
     if shapes is None:
