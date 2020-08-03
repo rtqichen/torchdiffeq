@@ -7,27 +7,9 @@ from .misc import (_compute_error_ratio,
                    _error_tol,
                    _handle_unused_kwargs,
                    _select_initial_step,
-                   _optimal_step_size)
-
-
-# Backward compatibility: support tupled input
-def _l2_norm_squared(tensor):
-    return [tensor.pow(2).mean()]
-# ~Backward compatibility
-
-
-# Backward compatibility: support tupled input
-def _tuple_l2_norm_squared(shapes):
-    def _tupled_norm(tensor):
-        total = 0
-        out = []
-        for shape in shapes:
-            next_total = total + shape.numel()
-            out.append(tensor[total:next_total].pow(2).mean())
-            total = next_total
-        return out
-    return _tupled_norm
-# ~Backward compatibility
+                   _optimal_step_size,
+                   _l2_norm_squared,
+                   _tuple_l2_norm_squared)
 
 
 class AdaptiveStepsizeODESolver(metaclass=abc.ABCMeta):

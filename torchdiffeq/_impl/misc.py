@@ -8,6 +8,26 @@ def _handle_unused_kwargs(solver, unused_kwargs):
         warnings.warn('{}: Unexpected arguments {}'.format(solver.__class__.__name__, unused_kwargs))
 
 
+# Backward compatibility: support tupled input
+def _l2_norm_squared(tensor):
+    return [tensor.pow(2).mean()]
+# ~Backward compatibility
+
+
+# Backward compatibility: support tupled input
+def _tuple_l2_norm_squared(shapes):
+    def _tupled_norm(tensor):
+        total = 0
+        out = []
+        for shape in shapes:
+            next_total = total + shape.numel()
+            out.append(tensor[total:next_total].pow(2).mean())
+            total = next_total
+        return out
+    return _tupled_norm
+# ~Backward compatibility
+
+
 def _rms_norm(x):
     return x.norm() / math.sqrt(x.numel())
 
