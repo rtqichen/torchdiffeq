@@ -56,7 +56,11 @@ class OdeintAdjointMethod(torch.autograd.Function):
             # ignore gradients wrt time and parameters
 
             with torch.enable_grad():
-                t = t.detach().requires_grad_(True)
+                t = t.detach()
+                # There's no point spending a lot of time resolving dL/dt unless we need it. (Which can be quite a lot
+                # of time if there's piecewise structure in time.)
+                if t_requires_grad:
+                    t = t.requires_grad_(True)
                 y = y.detach().requires_grad_(True)
                 func_eval = func(t, y)
 
