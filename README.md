@@ -65,16 +65,15 @@ Adaptive-step:
  - `dopri5` Runge-Kutta 4(5) of Dormand-Prince **[default]**.
  - `bosh3` Runge-Kutta 2(3) of Bogacki-Shampine
  - `adaptive_heun` Runge-Kutta 1(2)
- - `adaptive_adams` Adaptive-order implicit Adams.
 
 Fixed-step:
  - `euler` Euler method.
  - `midpoint` Midpoint method.
  - `rk4` Fourth-order Runge-Kutta with 3/8 rule.
- - `explicit_adams` Explicit Adams.
- - `implicit_adams` Implicit Adams.
+ - `explicit_adams` Explicit Adams-Bashforth.
+ - `implicit_adams` Implicit Adams-Bashforth-Moulton.
  
-For most problems, good choices are the default `dopri5`, or to use `rk4` with `options=dict(step_size=...)` set appropriately small. Changing the solver, and adjusting the tolerances (adaptive solvers) or step size (fixed solvers), will allow for trade-offs between speed and accuracy.
+For most problems, good choices are the default `dopri5`, or to use `rk4` with `options=dict(step_size=...)` set appropriately small. Adjusting the tolerances (adaptive solvers) or step size (fixed solvers), will allow for trade-offs between speed and accuracy.
 
 #### Frequently Asked Questions
 Take a look at our [FAQ](FAQ.md) for frequently asked questions.

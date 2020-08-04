@@ -1,219 +1,68 @@
 import unittest
-import torch
 import torchdiffeq
 
-import problems
-
-error_tol = 1e-4
-large_error_tol = 1e-3
-
-torch.set_default_dtype(torch.float64)
-TEST_DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
-
-def max_abs(tensor):
-    return torch.max(torch.abs(tensor))
+from problems import construct_problem, PROBLEMS, DTYPES, DEVICES, METHODS, ADAPTIVE_METHODS
 
 
 def rel_error(true, estimate):
-    return max_abs((true - estimate) / true)
+    return ((true - estimate) / true).abs().max()
 
 
 class TestSolverError(unittest.TestCase):
+    def test_odeint(self):
+        for reverse in (False, True):
+            for dtype in DTYPES:
+                for device in DEVICES:
+                    for method in METHODS:
+                        kwargs = dict(rtol=1e-12, atol=1e-14) if method == 'dopri8' else dict()
+                        problems = PROBLEMS if method in ADAPTIVE_METHODS else ('constant',)
+                        for ode in problems:
+                            if ode == 'linear':
+                                eps = 2e-3
+                            elif method == 'adaptive_heun':
+                                eps = 1e-3
+                            elif method == 'bosh3':
+                                eps = 3e-3
+                            else:
+                                eps = 1e-4
 
-    def test_euler(self):
-        f, y0, t_points, sol = problems.construct_problem(TEST_DEVICE)
-
-        y = torchdiffeq.odeint(f, y0, t_points, method='euler')
-        self.assertLess(rel_error(sol, y), error_tol)
-
-    def test_midpoint(self):
-        f, y0, t_points, sol = problems.construct_problem(TEST_DEVICE)
-
-        y = torchdiffeq.odeint(f, y0, t_points, method='midpoint')
-        self.assertLess(rel_error(sol, y), error_tol)
-
-    def test_rk4(self):
-        f, y0, t_points, sol = problems.construct_problem(TEST_DEVICE)
-
-        y = torchdiffeq.odeint(f, y0, t_points, method='rk4')
-        self.assertLess(rel_error(sol, y), error_tol)
-
-    def test_explicit_adams(self):
-        f, y0, t_points, sol = problems.construct_problem(TEST_DEVICE)
-
-        y = torchdiffeq.odeint(f, y0, t_points, method='explicit_adams')
-        self.assertLess(rel_error(sol, y), error_tol)
-
-    def test_adams(self):
-        for ode in problems.PROBLEMS.keys():
-            f, y0, t_points, sol = problems.construct_problem(TEST_DEVICE, ode=ode)
-            y = torchdiffeq.odeint(f, y0, t_points, method='adams')
-            with self.subTest(ode=ode):
-                self.assertLess(rel_error(sol, y), error_tol)
-
-    def test_dopri5(self):
-        for ode in problems.PROBLEMS.keys():
-            f, y0, t_points, sol = problems.construct_problem(TEST_DEVICE, ode=ode)
-            y = torchdiffeq.odeint(f, y0, t_points, method='dopri5')
-            with self.subTest(ode=ode):
-                self.assertLess(rel_error(sol, y), error_tol)
-
-    def test_bosh3(self):
-        for ode in problems.PROBLEMS.keys():
-            f, y0, t_points, sol = problems.construct_problem(TEST_DEVICE, ode=ode)
-            y = torchdiffeq.odeint(f, y0, t_points, method='bosh3')
-            with self.subTest(ode=ode):
-                # Seems less accurate so we increase the tolerance
-                self.assertLess(rel_error(sol, y), large_error_tol)
-
-    def test_adaptive_heun(self):
-        for ode in problems.PROBLEMS.keys():
-            f, y0, t_points, sol = problems.construct_problem(TEST_DEVICE, ode=ode)
-            y = torchdiffeq.odeint(f, y0, t_points, method='adaptive_heun')
-            with self.subTest(ode=ode):
-                self.assertLess(rel_error(sol, y), error_tol)
-
-    def test_dopri8(self):
-        for ode in problems.PROBLEMS.keys():
-            f, y0, t_points, sol = problems.construct_problem(TEST_DEVICE, ode=ode)
-            y = torchdiffeq.odeint(f, y0, t_points, method='dopri8', rtol=1e-12, atol=1e-14)
-            with self.subTest(ode=ode):
-                self.assertLess(rel_error(sol, y), error_tol)
+                            with self.subTest(reverse=reverse, dtype=dtype, device=device, ode=ode, method=method):
+                                f, y0, t_points, sol = construct_problem(dtype=dtype, device=device, ode=ode,
+                                                                         reverse=reverse)
+                                y = torchdiffeq.odeint(f, y0, t_points, method=method, **kwargs)
+                                self.assertLess(rel_error(sol, y), eps)
                 
     def test_adjoint(self):
-        for ode in problems.PROBLEMS.keys():
-            f, y0, t_points, sol = problems.construct_problem(TEST_DEVICE, reverse=True)
+        for reverse in (False, True):
+            for dtype in DTYPES:
+                for device in DEVICES:
+                    for ode in PROBLEMS:
+                        if ode == 'linear':
+                            eps = 2e-3
+                        else:
+                            eps = 1e-4
 
-            y = torchdiffeq.odeint_adjoint(f, y0, t_points, method='dopri5')
-            with self.subTest(ode=ode):
-                self.assertLess(rel_error(sol, y), error_tol)
-
-
-class TestSolverBackwardsInTimeError(unittest.TestCase):
-
-    def test_euler(self):
-        f, y0, t_points, sol = problems.construct_problem(TEST_DEVICE, reverse=True)
-
-        y = torchdiffeq.odeint(f, y0, t_points, method='euler')
-        self.assertLess(rel_error(sol, y), error_tol)
-
-    def test_midpoint(self):
-        f, y0, t_points, sol = problems.construct_problem(TEST_DEVICE, reverse=True)
-
-        y = torchdiffeq.odeint(f, y0, t_points, method='midpoint')
-        self.assertLess(rel_error(sol, y), error_tol)
-
-    def test_rk4(self):
-        f, y0, t_points, sol = problems.construct_problem(TEST_DEVICE, reverse=True)
-
-        y = torchdiffeq.odeint(f, y0, t_points, method='rk4')
-        self.assertLess(rel_error(sol, y), error_tol)
-
-    def test_explicit_adams(self):
-        f, y0, t_points, sol = problems.construct_problem(TEST_DEVICE, reverse=True)
-
-        y = torchdiffeq.odeint(f, y0, t_points, method='explicit_adams')
-        self.assertLess(rel_error(sol, y), error_tol)
-
-    def test_adams(self):
-        for ode in problems.PROBLEMS.keys():
-            f, y0, t_points, sol = problems.construct_problem(TEST_DEVICE, reverse=True)
-
-            y = torchdiffeq.odeint(f, y0, t_points, method='adams')
-            with self.subTest(ode=ode):
-                self.assertLess(rel_error(sol, y), error_tol)
-
-    def test_dopri5(self):
-        for ode in problems.PROBLEMS.keys():
-            f, y0, t_points, sol = problems.construct_problem(TEST_DEVICE, reverse=True)
-
-            y = torchdiffeq.odeint(f, y0, t_points, method='dopri5')
-            with self.subTest(ode=ode):
-                self.assertLess(rel_error(sol, y), error_tol)
-
-    def test_bosh3(self):
-        for ode in problems.PROBLEMS.keys():
-            f, y0, t_points, sol = problems.construct_problem(TEST_DEVICE, reverse=True)
-
-            y = torchdiffeq.odeint(f, y0, t_points, method='bosh3')
-            with self.subTest(ode=ode):
-                self.assertLess(rel_error(sol, y), error_tol)
-
-    def test_adaptive_heun(self):
-        for ode in problems.PROBLEMS.keys():
-            f, y0, t_points, sol = problems.construct_problem(TEST_DEVICE, reverse=True)
-
-            y = torchdiffeq.odeint(f, y0, t_points, method='adaptive_heun')
-            with self.subTest(ode=ode):
-                self.assertLess(rel_error(sol, y), error_tol)
-                
-    def test_dopri8(self):
-        for ode in problems.PROBLEMS.keys():
-            f, y0, t_points, sol = problems.construct_problem(TEST_DEVICE, reverse=True)
-
-            y = torchdiffeq.odeint(f, y0, t_points, method='dopri8')
-            with self.subTest(ode=ode):
-                self.assertLess(rel_error(sol, y), error_tol)                
-
-    def test_adjoint(self):
-        for ode in problems.PROBLEMS.keys():
-            f, y0, t_points, sol = problems.construct_problem(TEST_DEVICE, reverse=True)
-
-            y = torchdiffeq.odeint_adjoint(f, y0, t_points, method='dopri5')
-            with self.subTest(ode=ode):
-                self.assertLess(rel_error(sol, y), error_tol)
+                        with self.subTest(reverse=reverse, dtype=dtype, device=device, ode=ode):
+                            f, y0, t_points, sol = construct_problem(dtype=dtype, device=device, ode=ode,
+                                                                     reverse=reverse)
+                            y = torchdiffeq.odeint_adjoint(f, y0, t_points)
+                            self.assertLess(rel_error(sol, y), eps)
 
 
 class TestNoIntegration(unittest.TestCase):
+    def test_odeint(self):
+        for reverse in (False, True):
+            for dtype in DTYPES:
+                for device in DEVICES:
+                    for method in METHODS:
+                        for ode in PROBLEMS:
 
-    def test_midpoint(self):
-        f, y0, t_points, sol = problems.construct_problem(TEST_DEVICE, reverse=True)
+                            with self.subTest(reverse=reverse, dtype=dtype, device=device, ode=ode, method=method):
+                                f, y0, t_points, sol = construct_problem(dtype=dtype, device=device, ode=ode,
+                                                                         reverse=reverse)
+                                y = torchdiffeq.odeint(f, y0, t_points[0:1], method=method)
+                                self.assertLess((sol[0] - y).abs().max(), 1e-12)
 
-        y = torchdiffeq.odeint(f, y0, t_points[0:1], method='midpoint')
-        self.assertLess(max_abs(sol[0] - y), error_tol)
-
-    def test_rk4(self):
-        f, y0, t_points, sol = problems.construct_problem(TEST_DEVICE, reverse=True)
-
-        y = torchdiffeq.odeint(f, y0, t_points[0:1], method='rk4')
-        self.assertLess(max_abs(sol[0] - y), error_tol)
-
-    def test_explicit_adams(self):
-        f, y0, t_points, sol = problems.construct_problem(TEST_DEVICE, reverse=True)
-
-        y = torchdiffeq.odeint(f, y0, t_points[0:1], method='explicit_adams')
-        self.assertLess(max_abs(sol[0] - y), error_tol)
-
-    def test_adams(self):
-        f, y0, t_points, sol = problems.construct_problem(TEST_DEVICE, reverse=True)
-
-        y = torchdiffeq.odeint(f, y0, t_points[0:1], method='adams')
-        self.assertLess(max_abs(sol[0] - y), error_tol)
-
-    def test_dopri5(self):
-        f, y0, t_points, sol = problems.construct_problem(TEST_DEVICE, reverse=True)
-
-        y = torchdiffeq.odeint(f, y0, t_points[0:1], method='dopri5')
-        self.assertLess(max_abs(sol[0] - y), error_tol)
-
-    def test_bosh3(self):
-        f, y0, t_points, sol = problems.construct_problem(TEST_DEVICE, reverse=True)
-
-        y = torchdiffeq.odeint(f, y0, t_points[0:1], method='bosh3')
-        self.assertLess(max_abs(sol[0] - y), error_tol)
-
-    def test_adaptive_heun(self):
-        f, y0, t_points, sol = problems.construct_problem(TEST_DEVICE, reverse=True)
-
-        y = torchdiffeq.odeint(f, y0, t_points[0:1], method='adaptive_heun')
-        self.assertLess(max_abs(sol[0] - y), error_tol)
-
-    def test_dopri8(self):
-        f, y0, t_points, sol = problems.construct_problem(TEST_DEVICE, reverse=True)
-
-        y = torchdiffeq.odeint(f, y0, t_points[0:1], method='dopri8')
-        self.assertLess(max_abs(sol[0] - y), error_tol)
 
 if __name__ == '__main__':
     unittest.main()

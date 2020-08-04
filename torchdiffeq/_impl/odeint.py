@@ -3,7 +3,6 @@ from .bosh3 import Bosh3Solver
 from .adaptive_heun import AdaptiveHeunSolver
 from .fixed_grid import Euler, Midpoint, RK4
 from .fixed_adams import AdamsBashforth, AdamsBashforthMoulton
-from .adams import VariableCoefficientAdamsBashforth
 from .dopri8 import Dopri8Solver
 from .misc import _check_inputs, _flat_to_shape
 
@@ -12,15 +11,13 @@ SOLVERS = {
     'dopri5': Dopri5Solver,
     'bosh3': Bosh3Solver,
     'adaptive_heun': AdaptiveHeunSolver,
-    'adaptive_adams': VariableCoefficientAdamsBashforth,
     'euler': Euler,
     'midpoint': Midpoint,
     'rk4': RK4,
     'explicit_adams': AdamsBashforth,
     'implicit_adams': AdamsBashforthMoulton,
-    # Backward compatibility: use the same names as before
+    # Backward compatibility: use the same name as before
     'fixed_adams': AdamsBashforthMoulton,
-    'adams': VariableCoefficientAdamsBashforth,
     # ~Backwards compatibility
 }
 

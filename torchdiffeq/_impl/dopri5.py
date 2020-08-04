@@ -2,28 +2,6 @@ import torch
 from .rk_common import _ButcherTableau
 from .solvers import RKAdaptiveStepsizeODESolver
 
-# TODO
-# _DORMAND_PRINCE_SHAMPINE_TABLEAU = _ButcherTableau(
-#     alpha=[1 / 5, 3 / 10, 4 / 5, 8 / 9, 1., 1.],
-#     beta=[
-#         [1 / 5],
-#         [3 / 40, 9 / 40],
-#         [44 / 45, -56 / 15, 32 / 9],
-#         [19372 / 6561, -25360 / 2187, 64448 / 6561, -212 / 729],
-#         [9017 / 3168, -355 / 33, 46732 / 5247, 49 / 176, -5103 / 18656],
-#         [35 / 384, 0, 500 / 1113, 125 / 192, -2187 / 6784, 11 / 84],
-#     ],
-#     c_sol=[35 / 384, 0, 500 / 1113, 125 / 192, -2187 / 6784, 11 / 84, 0],
-#     c_error=[
-#         35 / 384 - 1951 / 21600,
-#         0,
-#         500 / 1113 - 22642 / 50085,
-#         125 / 192 - 451 / 720,
-#         -2187 / 6784 - -12231 / 42400,
-#         11 / 84 - 649 / 6300,
-#         -1. / 60.,
-#     ],
-# )
 
 _DORMAND_PRINCE_SHAMPINE_TABLEAU = _ButcherTableau(
     alpha=torch.tensor([1 / 5, 3 / 10, 4 / 5, 8 / 9, 1., 1.], dtype=torch.float64),

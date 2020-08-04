@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from .odeint import SOLVERS, odeint
-from .misc import _check_inputs, _flat_to_shape, _tuple_tol
+from .misc import _check_inputs, _flat_to_shape
 
 
 class OdeintAdjointMethod(torch.autograd.Function):
@@ -56,15 +56,13 @@ class OdeintAdjointMethod(torch.autograd.Function):
             # ignore gradients wrt time and parameters
 
             with torch.enable_grad():
-                t = t.detach().requires_grad_(True)
-                # There's no point spending a lot of time resolving dL/dt unless we need it. (Which can be quite a lot
-                # of time if there's piecewise structure in time.)
-                if t_requires_grad:
-                    t_ = t
-                else:
-                    t_ = t.detach()
+                t_ = t.detach()
+                t = t_.requires_grad_(True)
                 y = y.detach().requires_grad_(True)
-                func_eval = func(t_, y)
+
+                # If using an adaptive solver we don't want to waste time resolving dL/dt unless we need it, so
+                # turning off gradients wrt t here means we won't compute that if we don't need it.
+                func_eval = func(t if t_requires_grad else t_, y)
 
                 # Workaround for PyTorch bug #39784
                 _t = torch.as_strided(t, (), ())

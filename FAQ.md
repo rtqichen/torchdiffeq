@@ -11,7 +11,6 @@
   - `dopri5` Runge-Kutta 4(5) of Dormand-Prince **[default]**.
   - `bosh3` Runge-Kutta 2(3) of Bogacki-Shampine
   - `adaptive_heun` Runge-Kutta 1(2)
-  - `adaptive_adams` Adaptive-order implicit Adams.
 
 - Fixed-step:
   - `euler` Euler method.

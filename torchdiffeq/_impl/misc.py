@@ -203,7 +203,7 @@ class _ReverseFunc(torch.nn.Module):
 def _check_inputs(func, y0, t, rtol, atol, method, options, SOLVERS):
     if options is None:
         options = {}
-    elif method is None:
+    elif method is None and len(options) > 0:
         raise ValueError('cannot supply `options` without specifying `method`')
     if method is None:
         method = 'dopri5'
@@ -250,6 +250,15 @@ def _check_inputs(func, y0, t, rtol, atol, method, options, SOLVERS):
         assert torch.is_tensor(grid_points), 'grid_points must be a torch.Tensor'
         _assert_one_dimensional('grid_points', grid_points)
         _assert_increasing('grid_points', grid_points)
+        assert not grid_points.requires_grad, "grid_points cannot require gradient"
+
+    # Especially important because in principle this could otherwise cause a memory leak in adjoint:
+    # ctx->adjoint_options->rtol/atol->grad_fn=ctx
+    # then there's a reference cycle, which because it goes through C++ doesn't get picked up by the GC.
+    if torch.is_tensor(rtol):
+        assert not rtol.requires_grad, "rtol cannot require gradient"
+    if torch.is_tensor(atol):
+        assert not atol.requires_grad, "atol cannot require gradient"
 
     # Backward compatibility: Allow t and y0 to be on different devices
     if t.device != y0.device:
