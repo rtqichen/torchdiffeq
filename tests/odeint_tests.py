@@ -1,4 +1,5 @@
 import unittest
+import torch
 import torchdiffeq
 
 from problems import construct_problem, PROBLEMS, DTYPES, DEVICES, METHODS, ADAPTIVE_METHODS
@@ -14,6 +15,8 @@ class TestSolverError(unittest.TestCase):
             for dtype in DTYPES:
                 for device in DEVICES:
                     for method in METHODS:
+                        if dtype == torch.float32 and method == 'dopri8':
+                            continue
                         kwargs = dict(rtol=1e-12, atol=1e-14) if method == 'dopri8' else dict()
                         problems = PROBLEMS if method in ADAPTIVE_METHODS else ('constant',)
                         for ode in problems:
@@ -29,7 +32,7 @@ class TestSolverError(unittest.TestCase):
                             with self.subTest(reverse=reverse, dtype=dtype, device=device, ode=ode, method=method):
                                 f, y0, t_points, sol = construct_problem(dtype=dtype, device=device, ode=ode,
                                                                          reverse=reverse)
-                                y = torchdiffeq.odeint(f, y0, t_points, method=method, **kwargs)
+                                y = torchdiffeq.odeint(f, y0.detach(), t_points.detach(), method=method, **kwargs)
                                 self.assertLess(rel_error(sol, y), eps)
                 
     def test_adjoint(self):

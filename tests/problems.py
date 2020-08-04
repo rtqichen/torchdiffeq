@@ -56,7 +56,7 @@ DEVICES = ['cpu']
 if torch.cuda.is_available():
     DEVICES.append('cuda:0')
 FIXED_METHODS = ('euler', 'midpoint', 'rk4', 'explicit_adams', 'implicit_adams')
-ADAPTIVE_METHODS = ('dopri5', 'bosh3', 'adaptive_heun')  # TODO: add in adaptive adams and tsit5 if/when they're fixed
+ADAPTIVE_METHODS = ('dopri5', 'bosh3', 'adaptive_heun', 'dopri8')  # TODO: add in adaptive adams and tsit5 if/when they're fixed
 METHODS = FIXED_METHODS + ADAPTIVE_METHODS
 
 
