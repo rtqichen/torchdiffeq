@@ -8,50 +8,30 @@ def _handle_unused_kwargs(solver, unused_kwargs):
         warnings.warn('{}: Unexpected arguments {}'.format(solver.__class__.__name__, unused_kwargs))
 
 
-def _l2_norm_squared(tensor):
-    return [tensor.pow(2).mean()]
+def _l2_norm(tensor):
+    return tensor.norm(p=2)
 
 
-def _tuple_l2_norm_squared(shapes):
-    def _tupled_norm(tensor):
+def _mixed_linf_l2_norm(shapes):
+    def _norm(tensor):
         total = 0
         out = []
         for shape in shapes:
             next_total = total + shape.numel()
-            out.append(tensor[total:next_total].pow(2).mean())
+            out.append(_l2_norm(tensor[total:next_total]))
             total = next_total
-        return out
-    return _tupled_norm
+        return max(out)
+    return _norm
 
 
 def _rms_norm(x):
-    return x.norm() / math.sqrt(x.numel())
+    return x.norm(p=2) / math.sqrt(x.numel())
 
 
-def _select_initial_step(func, t0, y0, order, rtol, atol, shapes, f0=None):
+def _select_initial_step(func, t0, y0, order, rtol, atol, norm, f0=None):
     """Empirically select a good initial step.
 
     The algorithm is described in [1]_.
-
-    Parameters
-    ----------
-    func : callable
-        Right-hand side of the system.
-    t0 : torch.Tensor, shape ()
-        Initial value of the independent variable.
-    y0 : torch.Tensor or tuple of torch.Tensor
-        Initial value of the dependent variable.
-    order : float
-        Method order.
-    rtol : torch.Tensor
-        Desired relative tolerance.
-    atol : torch.Tensor
-        Desired absolute tolerance.
-
-    Returns
-    -------
-    h_abs : torch.Tensor
-        Absolute value of the suggested initial step.
 
     References
     ----------
@@ -67,75 +47,35 @@ def _select_initial_step(func, t0, y0, order, rtol, atol, shapes, f0=None):
     if f0 is None:
         f0 = func(t0, y0)
 
-    # This whole function is unfortunately rather messy because of the possibility of tupled input.
+    scale = atol + torch.abs(y0) * rtol
 
-    if shapes is None:
-        rtol = (rtol.to(dtype),)
-        atol = (atol.to(dtype),)
-        y0 = (y0,)
-        f0 = (f0,)
-    else:
-        # rtol and atol can either be iterable or not.
-        # If they're iterable then put them in shape.
-        # If they're not expand then out to be of the appropriate length as scalars.
-        try:
-            iter(rtol)
-        except TypeError:
-            rtol = tuple(rtol.to(dtype) for _ in range(len(shapes)))
-        else:
-            rtol = _flat_to_shape(rtol.to(dtype), (), shapes)
-        try:
-            iter(atol)
-        except TypeError:
-            atol = tuple(atol.to(dtype) for _ in range(len(shapes)))
-        else:
-            atol = _flat_to_shape(atol.to(dtype), (), shapes)
-        y0 = _flat_to_shape(y0, (), shapes)
-        f0 = _flat_to_shape(f0, (), shapes)
+    d0 = norm(y0 / scale) / math.sqrt(y0.numel())
+    d1 = norm(f0 / scale) / math.sqrt(y0.numel())
 
-    scale = tuple(atol_ + torch.abs(y0_) * rtol_ for y0_, atol_, rtol_ in zip(y0, atol, rtol))
-
-    d0 = tuple(_rms_norm(y0_ / scale_) for y0_, scale_ in zip(y0, scale))
-    d1 = tuple(_rms_norm(f0_ / scale_) for f0_, scale_ in zip(f0, scale))
-
-    if max(d0) < 1e-5 or max(d1) < 1e-5:
+    if d0 < 1e-5 or d1 < 1e-5:
         h0 = torch.tensor(1e-6, dtype=dtype, device=device)
     else:
-        h0 = 0.01 * max(d0_ / d1_ for d0_, d1_ in zip(d0, d1))
-    if not torch.isfinite(h0):
-        h0 = torch.tensor(1e-6, dtype=dtype, device=device)
+        h0 = 0.01 * d0 / d1
 
-    y1 = tuple(y0_ + h0 * f0_ for y0_, f0_ in zip(y0, f0))
-    if shapes is None:
-        y1 = y1[0]
-    else:
-        y1 = torch.cat([yi.reshape(-1) for yi in y1])
+    y1 = y0 + h0 * f0
     f1 = func(t0 + h0, y1)
-    if shapes is None:
-        f1 = (f1,)
-    else:
-        f1 = _flat_to_shape(f1, (), shapes)
 
-    d2 = tuple(_rms_norm((f1_ - f0_) / scale_) / h0 for f1_, f0_, scale_ in zip(f1, f0, scale))
+    d2 = norm((f1 - f0) / scale) / h0
 
-    if max(d1) <= 1e-15 and max(d2) <= 1e-15:
+    if d1 <= 1e-15 and d2 <= 1e-15:
         h1 = torch.max(torch.tensor(1e-6, dtype=dtype, device=device), h0 * 1e-3)
     else:
-        h1 = (0.01 / max(d1 + d2)) ** (1. / float(order + 1))
+        h1 = (0.01 / max(d1, d2)) ** (1. / float(order + 1))
     return torch.min(100 * h0, h1).to(t_dtype)
 
 
-def _error_tol(rtol, atol, y0, y1):
-    return atol + rtol * torch.max(y0.abs(), y1.abs())
-
-
-def _compute_error_ratio(error_estimate, error_tol, norm):
+def _compute_error_ratio(error_estimate, rtol, atol, y0, y1, norm):
+    error_tol = atol + rtol * torch.max(y0.abs(), y1.abs())
     return norm(error_estimate / error_tol)
 
 
 def _optimal_step_size(last_step, error_ratio, safety, ifactor, dfactor, order):
     """Calculate the optimal size for the next step."""
-    error_ratio = max(error_ratio)
     if error_ratio == 0:
         return last_step * ifactor
     if error_ratio < 1:
@@ -156,6 +96,11 @@ def _assert_one_dimensional(name, t):
 
 def _assert_increasing(name, t):
     assert (t[1:] > t[:-1]).all(), '{} must be strictly increasing or decreasing'.format(name)
+
+
+def _assert_floating(name, t):
+    if not torch.is_floating_point(t):
+        raise TypeError('`{}` must be a floating point Tensor but is a {}'.format(name, t.type()))
 
 
 def _tuple_tol(name, tol, shapes):
@@ -201,6 +146,17 @@ class _ReverseFunc(torch.nn.Module):
 
 
 def _check_inputs(func, y0, t, rtol, atol, method, options, SOLVERS):
+    # Normalise to tensor (non-tupled) input
+    shapes = None
+    if not torch.is_tensor(y0):
+        assert isinstance(y0, tuple), 'y0 must be either a torch.Tensor or a tuple'
+        shapes = [y0_.shape for y0_ in y0]
+        rtol = _tuple_tol('rtol', rtol, shapes)
+        atol = _tuple_tol('atol', atol, shapes)
+        y0 = torch.cat([y0_.reshape(-1) for y0_ in y0])
+        func = _TupleFunc(func, shapes)
+
+    # Normalise method and options
     if options is None:
         options = {}
     elif method is None and len(options) > 0:
@@ -211,50 +167,43 @@ def _check_inputs(func, y0, t, rtol, atol, method, options, SOLVERS):
         raise ValueError('Invalid method "{}". Must be one of {}'.format(
             method, '{"' + '", "'.join(SOLVERS.keys()) + '"}.'))
 
-    tensor_input = True
-    shapes = None
-    if not torch.is_tensor(y0):
-        assert isinstance(y0, tuple), 'y0 must be either a torch.Tensor or a tuple'
-        tensor_input = False
-        shapes = [y0_.shape for y0_ in y0]
-        rtol = _tuple_tol('rtol', rtol, shapes)
-        atol = _tuple_tol('atol', atol, shapes)
-        y0 = torch.cat([y0_.reshape(-1) for y0_ in y0])
-        func = _TupleFunc(func, shapes)
-
-    if not torch.is_floating_point(y0):
-        raise TypeError('`y0` must be a floating point Tensor but is a {}'.format(y0.type()))
-
-    assert torch.is_tensor(t), 't must be a torch.Tensor'
-    _assert_one_dimensional('t', t)
-    if _decreasing(t):
-        t = -t
-        func = _ReverseFunc(func)
-        try:
-            grid_points = options['grid_points']
-        except (KeyError, TypeError):
-            pass
-        else:
-            options = options.copy()
-            options['grid_points'] = -grid_points
-
-    _assert_increasing('t', t)
-    if not torch.is_floating_point(t):
-        raise TypeError('`t` must be a floating point Tensor but is a {}'.format(t.type()))
-
     try:
         grid_points = options['grid_points']
-    except (KeyError, TypeError):
+    except KeyError:
         pass
     else:
         assert torch.is_tensor(grid_points), 'grid_points must be a torch.Tensor'
         _assert_one_dimensional('grid_points', grid_points)
         _assert_increasing('grid_points', grid_points)
         assert not grid_points.requires_grad, "grid_points cannot require gradient"
+        _assert_floating('grid_points', grid_points)
 
-    # Especially important because in principle this could otherwise cause a memory leak in adjoint:
-    # ctx->adjoint_options->rtol/atol->grad_fn=ctx
-    # then there's a reference cycle, which because it goes through C++ doesn't get picked up by the GC.
+    if 'norm' not in options:
+        if shapes is None:
+            # L2 norm over a single input
+            options['norm'] = _l2_norm
+        else:
+            # Mixed Linf/L2 norm over tupled input (chosen mostly just for backward compatibility reasons)
+            options['norm'] = _mixed_linf_l2_norm(shapes)
+
+    # Normalise time
+    assert torch.is_tensor(t), 't must be a torch.Tensor'
+    _assert_one_dimensional('t', t)
+    _assert_floating('t', t)
+    if _decreasing(t):
+        t = -t
+        func = _ReverseFunc(func)
+        try:
+            grid_points = options['grid_points']
+        except KeyError:
+            pass
+        else:
+            options = options.copy()
+            options['grid_points'] = -grid_points
+    _assert_increasing('t', t)
+
+    # Miscellaneous
+    _assert_floating('y0', y0)
     if torch.is_tensor(rtol):
         assert not rtol.requires_grad, "rtol cannot require gradient"
     if torch.is_tensor(atol):
@@ -266,4 +215,4 @@ def _check_inputs(func, y0, t, rtol, atol, method, options, SOLVERS):
         t = t.to(y0.device)
     # ~Backward compatibility
 
-    return tensor_input, shapes, func, y0, t, rtol, atol, method, options
+    return shapes, func, y0, t, rtol, atol, method, options

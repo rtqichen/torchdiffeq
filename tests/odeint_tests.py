@@ -32,7 +32,7 @@ class TestSolverError(unittest.TestCase):
                             with self.subTest(reverse=reverse, dtype=dtype, device=device, ode=ode, method=method):
                                 f, y0, t_points, sol = construct_problem(dtype=dtype, device=device, ode=ode,
                                                                          reverse=reverse)
-                                y = torchdiffeq.odeint(f, y0.detach(), t_points.detach(), method=method, **kwargs)
+                                y = torchdiffeq.odeint(f, y0, t_points, method=method, **kwargs)
                                 self.assertLess(rel_error(sol, y), eps)
                 
     def test_adjoint(self):

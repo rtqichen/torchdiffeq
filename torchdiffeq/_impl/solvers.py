@@ -4,27 +4,19 @@ import torch
 from .interp import _interp_evaluate, _interp_fit
 from .rk_common import _ButcherTableau, _RungeKuttaState, _runge_kutta_step
 from .misc import (_compute_error_ratio,
-                   _error_tol,
                    _handle_unused_kwargs,
                    _select_initial_step,
-                   _optimal_step_size,
-                   _l2_norm_squared,
-                   _tuple_l2_norm_squared)
+                   _optimal_step_size)
 
 
 class AdaptiveStepsizeODESolver(metaclass=abc.ABCMeta):
-    def __init__(self, dtype, y0, shapes, **unused_kwargs):
+    def __init__(self, dtype, y0, norm, **unused_kwargs):
         _handle_unused_kwargs(self, unused_kwargs)
         del unused_kwargs
 
         self.y0 = y0
         self.dtype = dtype
 
-        if shapes is None:
-            norm = _l2_norm_squared
-        else:
-            norm = _tuple_l2_norm_squared(shapes)
-        self.shapes = shapes
         self.norm = norm
 
     def _before_integrate(self, t):
@@ -50,7 +42,7 @@ class FixedGridODESolver(metaclass=abc.ABCMeta):
     def __init__(self, func, y0, step_size=None, grid_constructor=None, **unused_kwargs):
         unused_kwargs.pop('rtol', None)
         unused_kwargs.pop('atol', None)
-        unused_kwargs.pop('shapes', None)
+        unused_kwargs.pop('norm', None)
         _handle_unused_kwargs(self, unused_kwargs)
         del unused_kwargs
 
@@ -155,7 +147,7 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
         f0 = self.func(t[0], self.y0)
         if self.first_step is None:
             first_step = _select_initial_step(self.func, t[0], self.y0, self.order - 1, self.rtol, self.atol,
-                                              self.shapes, f0=f0)
+                                              self.norm, f0=f0)
         else:
             first_step = self.first_step
         self.rk_state = _RungeKuttaState(self.y0, f0, t[0], t[0], first_step, [self.y0] * 5)
@@ -210,12 +202,10 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
         ########################################################
         #                     Error Ratio                      #
         ########################################################
-        error_tol = _error_tol(self.rtol, self.atol, y0, y1)
-        error_ratio = _compute_error_ratio(y1_error, error_tol, self.norm)
-        accept_step = max(error_ratio) <= 1
+        error_ratio = _compute_error_ratio(y1_error, self.rtol, self.atol, y0, y1, self.norm)
+        accept_step = error_ratio <= 1
         # dtypes:
-        # error_tol.dtype == self.dtype
-        # for e in error_ratio: e.dtype == self.dtype
+        # error_ratio.dtype == self.dtype
 
         ########################################################
         #                   Update RK State                    #

@@ -19,6 +19,8 @@ For these solvers, `rtol` and `atol` correspond to the tolerances for accepting/
 
 - `eps=0.`: A small perturbation either side of each value in `grid_points` to evaluate at. If the vector field is discontinuous then this ensures that evaluations are performed the correct size of the discontinuity. If used it usually best to just set this to a small number like `1e-5`.
 
+- `norm`: What norm to compute the accept/reject criterion with respect to. Given tensor input, this defaults to an averaged L2 norm. Given tupled input, it computes an averaged L2 norm over each tensor, and then takes a max over the tuple, producing a mixed Linf/L2 norm. If passed this should be a function consuming a single tensor of shape the same as `y0` (given tensor input) or a single tensor of shape `(sum(y.numel() for y in y0),)` (given tupled input), and return a scalar tensor corresponding to its norm.
+
 **Fixed solvers (euler, midpoint, rk4, explicit_adams, implicit_adams):**<br>
 
 - `step_size=None`: How large each discrete step should be. If not passed then this defaults to stepping between the values of `t`. Note that if using `t` just to specify the start and end of the regions of integration, then it is very important to specify this argument! It is mutually exclusive with the `grid_constructor` argument, below.

@@ -59,12 +59,11 @@ def odeint(func, y0, t, rtol=1e-7, atol=1e-9, method=None, options=None):
     Raises:
         ValueError: if an invalid `method` is provided.
     """
-    tensor_input, shapes, func, y0, t, rtol, atol, method, options = _check_inputs(func, y0, t, rtol, atol, method,
-                                                                                   options, SOLVERS)
+    shapes, func, y0, t, rtol, atol, method, options = _check_inputs(func, y0, t, rtol, atol, method, options, SOLVERS)
 
-    solver = SOLVERS[method](func=func, y0=y0, rtol=rtol, atol=atol, shapes=shapes, **options)
+    solver = SOLVERS[method](func=func, y0=y0, rtol=rtol, atol=atol, **options)
     solution = solver.integrate(t)
 
-    if not tensor_input:
+    if shapes is not None:
         solution = _flat_to_shape(solution, (len(t),), shapes)
     return solution

@@ -1,15 +1,16 @@
 import torch
 import torch.nn as nn
 from .odeint import SOLVERS, odeint
-from .misc import _check_inputs, _flat_to_shape
+from .misc import _check_inputs, _flat_to_shape, _mixed_linf_l2_norm
 
 
 class OdeintAdjointMethod(torch.autograd.Function):
 
     @staticmethod
-    def forward(ctx, func, y0, t, rtol, atol, method, options, adjoint_rtol, adjoint_atol, adjoint_method,
+    def forward(ctx, shapes, func, y0, t, rtol, atol, method, options, adjoint_rtol, adjoint_atol, adjoint_method,
                 adjoint_options, t_requires_grad, *adjoint_params):
 
+        ctx.shapes = shapes
         ctx.func = func
         ctx.adjoint_rtol = adjoint_rtol
         ctx.adjoint_atol = adjoint_atol
@@ -24,6 +25,7 @@ class OdeintAdjointMethod(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_y):
+        shapes = ctx.shapes
         func = ctx.func
         adjoint_rtol = ctx.adjoint_rtol
         adjoint_atol = ctx.adjoint_atol
@@ -31,11 +33,11 @@ class OdeintAdjointMethod(torch.autograd.Function):
         adjoint_options = ctx.adjoint_options
         t_requires_grad = ctx.t_requires_grad
 
-        if adjoint_options is None:
-            adjoint_options = {}
-
         t, y, *adjoint_params = ctx.saved_tensors
         adjoint_params = tuple(adjoint_params)
+
+        if adjoint_options is None:
+            adjoint_options = {}
 
         # We assume that any grid points are given to us ordered in the same direction as for the forward pass (for
         # compatibility with setting adjoint_options = options), so we need to flip them around here.
@@ -46,6 +48,15 @@ class OdeintAdjointMethod(torch.autograd.Function):
         else:
             adjoint_options = adjoint_options.copy()
             adjoint_options['grid_points'] = grid_points.flip(0)
+
+        # Backward compatibility: use a mixed Linf/L2 norm over the input, where we treat t, each element of y, and each
+        # element of adj_y separately over the Linf, but consider all the parameters together.
+        if 'norm' not in adjoint_options:
+            # adj_t, y, adj_y, adj_params
+            # Note that this relies on the augmented state being defined in this order!
+            adjoint_shapes = [1] + shapes + shapes + [sum(param.numel() for param in adjoint_params)]
+            adjoint_options['norm'] = _mixed_linf_l2_norm(adjoint_shapes)
+        # ~Backward compatibility
 
         # TODO: use a nn.Module and call odeint_adjoint to implement higher order derivatives.
         def augmented_dynamics(t, y_aug):
@@ -116,7 +127,7 @@ class OdeintAdjointMethod(torch.autograd.Function):
             adj_y = aug_state[2]
             adj_params = aug_state[3:]
 
-        return (None, adj_y, time_vjps, None, None, None, None, None, None, None, None, None, *adj_params)
+        return (None, None, adj_y, time_vjps, None, None, None, None, None, None, None, None, None, *adj_params)
 
 
 def odeint_adjoint(func, y0, t, rtol=1e-6, atol=1e-12, method=None, options=None, adjoint_rtol=None, adjoint_atol=None,
@@ -128,6 +139,7 @@ def odeint_adjoint(func, y0, t, rtol=1e-6, atol=1e-12, method=None, options=None
         raise ValueError('func must be an instance of nn.Module to specify the adjoint parameters; alternatively they '
                          'can be specified explicitly via the `adjoint_params` argument.')
 
+    # Must come before _check_inputs as we don't want to use normalised input (in particular any changes to options)
     if adjoint_rtol is None:
         adjoint_rtol = rtol
     if adjoint_atol is None:
@@ -139,12 +151,12 @@ def odeint_adjoint(func, y0, t, rtol=1e-6, atol=1e-12, method=None, options=None
     if adjoint_params is None:
         adjoint_params = tuple(func.parameters())
 
-    tensor_input, shapes, func, y0, t, rtol, atol, method, options = _check_inputs(func, y0, t, rtol, atol, method,
-                                                                                   options, SOLVERS)
+    # Normalise to non-tupled input
+    shapes, func, y0, t, rtol, atol, method, options = _check_inputs(func, y0, t, rtol, atol, method, options, SOLVERS)
 
-    solution = OdeintAdjointMethod.apply(func, y0, t, rtol, atol, method, options, adjoint_rtol, adjoint_atol,
+    solution = OdeintAdjointMethod.apply(shapes, func, y0, t, rtol, atol, method, options, adjoint_rtol, adjoint_atol,
                                          adjoint_method, adjoint_options, t.requires_grad, *adjoint_params)
 
-    if not tensor_input:
+    if shapes is not None:
         solution = _flat_to_shape(solution, (len(t),), shapes)
     return solution
