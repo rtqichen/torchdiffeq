@@ -23,7 +23,6 @@ class AdaptiveStepsizeODESolver(object):
         raise NotImplementedError
 
     def integrate(self, t):
-        _assert_increasing(t)
         solution = [self.y0]
         t = t.to(self.y0[0].device, torch.float64)
         self.before_integrate(t)
@@ -82,7 +81,6 @@ class FixedGridODESolver(object):
         pass
 
     def integrate(self, t):
-        _assert_increasing(t)
         t = t.type_as(self.y0[0])
         time_grid = self.grid_constructor(self.func, self.y0, t)
         assert time_grid[0] == t[0] and time_grid[-1] == t[-1]

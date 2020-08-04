@@ -1,3 +1,4 @@
+import bisect
 import torch
 from .misc import _scaled_dot_product, _convert_to_tensor, _is_finite, _select_initial_step, _handle_unused_kwargs
 from .solvers import AdaptiveStepsizeODESolver
@@ -67,7 +68,7 @@ class Tsit5Solver(AdaptiveStepsizeODESolver):
 
     def __init__(
         self, func, y0, rtol, atol, first_step=None, safety=0.9, ifactor=10.0, dfactor=0.2, max_num_steps=2**31 - 1,
-        **unused_kwargs
+        grid_points=(), eps=0., **unused_kwargs
     ):
         _handle_unused_kwargs(self, unused_kwargs)
         del unused_kwargs
@@ -81,6 +82,9 @@ class Tsit5Solver(AdaptiveStepsizeODESolver):
         self.ifactor = _convert_to_tensor(ifactor, dtype=torch.float64, device=y0[0].device)
         self.dfactor = _convert_to_tensor(dfactor, dtype=torch.float64, device=y0[0].device)
         self.max_num_steps = _convert_to_tensor(max_num_steps, dtype=torch.int32, device=y0[0].device)
+        self.grid_points = tuple(_convert_to_tensor(point, dtype=torch.float64, device=y0[0].device)
+                                 for point in grid_points)
+        self.eps = _convert_to_tensor(eps, dtype=torch.float64, device=y0[0].device)
 
     def before_integrate(self, t):
         if self.first_step is None:
@@ -92,6 +96,7 @@ class Tsit5Solver(AdaptiveStepsizeODESolver):
             self.func(t[0].type_as(self.y0[0]), self.y0), t[0], t[0], first_step,
             tuple(map(lambda x: [x] * 7, self.y0))
         )
+        self.next_grid_index = min(bisect.bisect(self.grid_points, t[0]), len(self.grid_points) - 1)
 
     def advance(self, next_t):
         """Interpolate through the next time point, integrating as necessary."""
@@ -111,6 +116,18 @@ class Tsit5Solver(AdaptiveStepsizeODESolver):
         assert t0 + dt > t0, 'underflow in dt {}'.format(dt.item())
         for y0_ in y0:
             assert _is_finite(torch.abs(y0_)), 'non-finite values in state `y`: {}'.format(y0_)
+
+        ########################################################
+        #     Make step, respecting prescribed grid points     #
+        ########################################################
+        on_grid = len(self.grid_points) and t0 < self.grid_points[self.next_grid_index] < t0 + dt
+        if on_grid:
+            dt = self.grid_points[self.next_grid_index] - t0
+            eps = min(0.5 * dt, self.eps)
+            dt = dt - eps
+        else:
+            eps = 0
+
         y1, f1, y1_error, k = _runge_kutta_step(self.func, y0, f0, t0, dt, tableau=_TSITOURAS_TABLEAU)
 
         ########################################################
@@ -130,9 +147,16 @@ class Tsit5Solver(AdaptiveStepsizeODESolver):
         ########################################################
         #                   Update RK State                    #
         ########################################################
+        t_next = t0 + dt + 2 * eps if accept_step else t0
         y_next = y1 if accept_step else y0
+        if on_grid and accept_step:
+            if eps != 0:
+                # We've just passed a discontinuity in f; we should update f1 to match the side of the discontinuity
+                # we're now on.
+                f1 = self.func(t_next.type_as(y_next[0]), y_next)
+            if self.next_grid_index != len(self.grid_points) - 1:
+                self.next_grid_index += 1
         f_next = f1 if accept_step else f0
-        t_next = t0 + dt if accept_step else t0
         dt_next = _optimal_step_size(dt, mean_error_ratio, self.safety, self.ifactor, self.dfactor)
         k_next = k if accept_step else self.rk_state.interp_coeff
         rk_state = _RungeKuttaState(y_next, f_next, t0, t_next, dt_next, k_next)
