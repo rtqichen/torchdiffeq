@@ -56,8 +56,12 @@ def _decreasing(t):
     return (t[1:] < t[:-1]).all()
 
 
-def _assert_increasing(t):
-    assert (t[1:] > t[:-1]).all(), 't must be strictly increasing or decreasing'
+def _assert_one_dimensional(name, t):
+    assert t.ndimension() == 1, "{} must be one dimensional".format(name)
+
+
+def _assert_increasing(name, t):
+    assert (t[1:] > t[:-1]).all(), '{} must be strictly increasing or decreasing'.format(name)
 
 
 def _is_iterable(inputs):
@@ -170,7 +174,7 @@ def _optimal_step_size(last_step, mean_error_ratio, safety=0.9, ifactor=10.0, df
     return last_step / factor
 
 
-def _check_inputs(func, y0, t):
+def _check_inputs(func, y0, t, options):
     tensor_input = False
     if torch.is_tensor(y0):
         tensor_input = True
@@ -185,6 +189,25 @@ def _check_inputs(func, y0, t):
         t = -t
         _base_reverse_func = func
         func = lambda t, y: tuple(-f_ for f_ in _base_reverse_func(-t, y))
+        try:
+            grid_points = options['grid_points']
+        except KeyError:
+            pass
+        else:
+            options = options.copy()
+            options['grid_points'] = -grid_points
+
+    assert torch.is_tensor(t), 't must be a torch.Tensor'
+    _assert_one_dimensional('t', t)
+    _assert_increasing('t', t)
+    try:
+        grid_points = options['grid_points']
+    except KeyError:
+        pass
+    else:
+        assert torch.is_tensor(grid_points), 'grid_points must be a torch.Tensor'
+        _assert_one_dimensional('grid_points', grid_points)
+        _assert_increasing('grid_points', grid_points)
 
     for y0_ in y0:
         if not torch.is_floating_point(y0_):
@@ -192,4 +215,4 @@ def _check_inputs(func, y0, t):
     if not torch.is_floating_point(t):
         raise TypeError('`t` must be a floating point Tensor but is a {}'.format(t.type()))
 
-    return tensor_input, func, y0, t
+    return tensor_input, func, y0, t, options
