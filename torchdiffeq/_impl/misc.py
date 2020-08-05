@@ -161,6 +161,8 @@ def _check_inputs(func, y0, t, rtol, atol, method, options, SOLVERS):
     # Normalise method and options
     if options is None:
         options = {}
+    else:
+        options = options.copy()
     if method is None:
         method = 'dopri5'
     if method not in SOLVERS:
@@ -197,7 +199,6 @@ def _check_inputs(func, y0, t, rtol, atol, method, options, SOLVERS):
         except KeyError:
             pass
         else:
-            options = options.copy()
             options['grid_points'] = -grid_points
 
     # Can only do after having normalised time

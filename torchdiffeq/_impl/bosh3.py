@@ -1,6 +1,6 @@
 import torch
-from .rk_common import _ButcherTableau
-from .solvers import RKAdaptiveStepsizeODESolver
+from .rk_common import _ButcherTableau, RKAdaptiveStepsizeODESolver
+
 
 _BOGACKI_SHAMPINE_TABLEAU = _ButcherTableau(
     alpha=torch.tensor([1/2, 3/4,  1.], dtype=torch.float64),

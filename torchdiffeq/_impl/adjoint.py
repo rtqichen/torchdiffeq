@@ -43,6 +43,8 @@ class OdeintAdjointMethod(torch.autograd.Function):
 
             if adjoint_options is None:
                 adjoint_options = {}
+            else:
+                adjoint_options = adjoint_options.copy()
 
             # We assume that any grid points are given to us ordered in the same direction as for the forward pass (for
             # compatibility with setting adjoint_options = options), so we need to flip them around here.
@@ -51,7 +53,6 @@ class OdeintAdjointMethod(torch.autograd.Function):
             except KeyError:
                 pass
             else:
-                adjoint_options = adjoint_options.copy()
                 adjoint_options['grid_points'] = grid_points.flip(0)
 
             # Backward compatibility: by default use a mixed L-infinity/RMS norm over the input, where we treat t, each
@@ -155,9 +156,10 @@ def odeint_adjoint(func, y0, t, rtol=1e-6, atol=1e-12, method=None, options=None
 
     # We need this in order to access the variables inside this module,
     # since we have no other way of getting variables along the execution path.
-    if adjoint_params is not None and not isinstance(func, nn.Module):
+    if adjoint_params is None and not isinstance(func, nn.Module):
         raise ValueError('func must be an instance of nn.Module to specify the adjoint parameters; alternatively they '
-                         'can be specified explicitly via the `adjoint_params` argument.')
+                         'can be specified explicitly via the `adjoint_params` argument. If there are no parameters '
+                         'then it is allowable to set `adjoint_params=()`.')
 
     # Must come before we default adjoint_options to options; using the same norm for both wouldn't make any sense.
     try:

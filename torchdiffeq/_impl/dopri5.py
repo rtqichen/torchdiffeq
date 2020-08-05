@@ -1,6 +1,5 @@
 import torch
-from .rk_common import _ButcherTableau
-from .solvers import RKAdaptiveStepsizeODESolver
+from .rk_common import _ButcherTableau, RKAdaptiveStepsizeODESolver
 
 
 _DORMAND_PRINCE_SHAMPINE_TABLEAU = _ButcherTableau(

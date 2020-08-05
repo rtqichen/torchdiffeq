@@ -1,6 +1,5 @@
 import torch
-from .rk_common import _ButcherTableau
-from .solvers import RKAdaptiveStepsizeODESolver
+from .rk_common import _ButcherTableau, RKAdaptiveStepsizeODESolver
 
 
 _ADAPTIVE_HEUN_TABLEAU = _ButcherTableau(
