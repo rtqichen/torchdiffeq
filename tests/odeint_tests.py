@@ -20,12 +20,12 @@ class TestSolverError(unittest.TestCase):
                         kwargs = dict(rtol=1e-12, atol=1e-14) if method == 'dopri8' else dict()
                         problems = PROBLEMS if method in ADAPTIVE_METHODS else ('constant',)
                         for ode in problems:
-                            if ode == 'linear':
-                                eps = 2e-3
-                            elif method == 'adaptive_heun':
-                                eps = 1e-3
+                            if method == 'adaptive_heun':
+                                eps = 4e-3
                             elif method == 'bosh3':
                                 eps = 3e-3
+                            elif ode == 'linear':
+                                eps = 2e-3
                             else:
                                 eps = 1e-4
 

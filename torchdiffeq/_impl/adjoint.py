@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from .odeint import SOLVERS, odeint
-from .misc import _check_inputs, _flat_to_shape, _mixed_linf_l2_norm
+from .misc import _check_inputs, _flat_to_shape, _mixed_linf_rms_norm
 
 
 class OdeintAdjointMethod(torch.autograd.Function):
@@ -25,80 +25,103 @@ class OdeintAdjointMethod(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_y):
-        shapes = ctx.shapes
-        func = ctx.func
-        adjoint_rtol = ctx.adjoint_rtol
-        adjoint_atol = ctx.adjoint_atol
-        adjoint_method = ctx.adjoint_method
-        adjoint_options = ctx.adjoint_options
-        t_requires_grad = ctx.t_requires_grad
-
-        t, y, *adjoint_params = ctx.saved_tensors
-        adjoint_params = tuple(adjoint_params)
-
-        if adjoint_options is None:
-            adjoint_options = {}
-
-        # We assume that any grid points are given to us ordered in the same direction as for the forward pass (for
-        # compatibility with setting adjoint_options = options), so we need to flip them around here.
-        try:
-            grid_points = adjoint_options['grid_points']
-        except KeyError:
-            pass
-        else:
-            adjoint_options = adjoint_options.copy()
-            adjoint_options['grid_points'] = grid_points.flip(0)
-
-        # Backward compatibility: use a mixed Linf/L2 norm over the input, where we treat t, each element of y, and each
-        # element of adj_y separately over the Linf, but consider all the parameters together.
-        if 'norm' not in adjoint_options:
-            # adj_t, y, adj_y, adj_params
-            # Note that this relies on the augmented state being defined in this order!
-            adjoint_shapes = [1] + shapes + shapes + [sum(param.numel() for param in adjoint_params)]
-            adjoint_options['norm'] = _mixed_linf_l2_norm(adjoint_shapes)
-        # ~Backward compatibility
-
-        # TODO: use a nn.Module and call odeint_adjoint to implement higher order derivatives.
-        def augmented_dynamics(t, y_aug):
-            # Dynamics of the original system augmented with
-            # the adjoint wrt y, and an integrator wrt t and args.
-            y = y_aug[1]
-            adj_y = y_aug[2]
-            # ignore gradients wrt time and parameters
-
-            with torch.enable_grad():
-                t_ = t.detach()
-                t = t_.requires_grad_(True)
-                y = y.detach().requires_grad_(True)
-
-                # If using an adaptive solver we don't want to waste time resolving dL/dt unless we need it, so
-                # turning off gradients wrt t here means we won't compute that if we don't need it.
-                func_eval = func(t if t_requires_grad else t_, y)
-
-                # Workaround for PyTorch bug #39784
-                _t = torch.as_strided(t, (), ())
-                _y = torch.as_strided(y, (), ())
-                _params = tuple(torch.as_strided(param, (), ()) for param in adjoint_params)
-
-                vjp_t, vjp_y, *vjp_params = torch.autograd.grad(
-                    func_eval, (t, y) + adjoint_params, -adj_y,
-                    allow_unused=True, retain_graph=True
-                )
-
-            # autograd.grad returns None if no gradient, set to zero.
-            vjp_t = torch.zeros_like(t) if vjp_t is None else vjp_t
-            vjp_y = torch.zeros_like(y) if vjp_y is None else vjp_y
-            vjp_params = [torch.zeros_like(param) if vjp_param is None else vjp_param
-                          for param, vjp_param in zip(adjoint_params, vjp_params)]
-
-            return (vjp_t, func_eval, vjp_y, *vjp_params)
-
         with torch.no_grad():
+            shapes = ctx.shapes
+            func = ctx.func
+            adjoint_rtol = ctx.adjoint_rtol
+            adjoint_atol = ctx.adjoint_atol
+            adjoint_method = ctx.adjoint_method
+            adjoint_options = ctx.adjoint_options
+            t_requires_grad = ctx.t_requires_grad
+
+            t, y, *adjoint_params = ctx.saved_tensors
+            adjoint_params = tuple(adjoint_params)
+
+            ##################################
+            #     Set up adjoint_options     #
+            ##################################
+
+            if adjoint_options is None:
+                adjoint_options = {}
+
+            # We assume that any grid points are given to us ordered in the same direction as for the forward pass (for
+            # compatibility with setting adjoint_options = options), so we need to flip them around here.
+            try:
+                grid_points = adjoint_options['grid_points']
+            except KeyError:
+                pass
+            else:
+                adjoint_options = adjoint_options.copy()
+                adjoint_options['grid_points'] = grid_points.flip(0)
+
+            # Backward compatibility: by default use a mixed L-infinity/RMS norm over the input, where we treat t, each
+            # element of y, and each element of adj_y separately over the Linf, but consider all the parameters
+            # together.
+            if 'norm' not in adjoint_options:
+                if shapes is None:
+                    shapes = [y[-1].shape]  # [-1] because y has shape (len(t), *y0.shape)
+                # adj_t, y, adj_y, adj_params, corresponding to the order in aug_state below
+                adjoint_shapes = [torch.Size(())] + shapes + shapes + [torch.Size([sum(param.numel()
+                                                                                       for param in adjoint_params)])]
+                adjoint_options['norm'] = _mixed_linf_rms_norm(adjoint_shapes)
+            # ~Backward compatibility
+
+            ##################################
+            #      Set up initial state      #
+            ##################################
+
             # [-1] because y and grad_y are both of shape (len(t), *y0.shape)
             aug_state = [torch.zeros((), dtype=y.dtype, device=y.device), y[-1], grad_y[-1]]  # vjp_t, y, vjp_y
             aug_state.extend([torch.zeros_like(param) for param in adjoint_params])  # vjp_params
 
-            time_vjps = []
+            ##################################
+            #    Set up backward ODE func    #
+            ##################################
+
+            # TODO: use a nn.Module and call odeint_adjoint to implement higher order derivatives.
+            def augmented_dynamics(t, y_aug):
+                # Dynamics of the original system augmented with
+                # the adjoint wrt y, and an integrator wrt t and args.
+                y = y_aug[1]
+                adj_y = y_aug[2]
+                # ignore gradients wrt time and parameters
+
+                with torch.enable_grad():
+                    t_ = t.detach()
+                    t = t_.requires_grad_(True)
+                    y = y.detach().requires_grad_(True)
+
+                    # If using an adaptive solver we don't want to waste time resolving dL/dt unless we need it (which
+                    # doesn't necessarily even exist if there is piecewise structure in time), so turning off gradients
+                    # wrt t here means we won't compute that if we don't need it.
+                    func_eval = func(t if t_requires_grad else t_, y)
+
+                    # Workaround for PyTorch bug #39784
+                    _t = torch.as_strided(t, (), ())
+                    _y = torch.as_strided(y, (), ())
+                    _params = tuple(torch.as_strided(param, (), ()) for param in adjoint_params)
+
+                    vjp_t, vjp_y, *vjp_params = torch.autograd.grad(
+                        func_eval, (t, y) + adjoint_params, -adj_y,
+                        allow_unused=True, retain_graph=True
+                    )
+
+                # autograd.grad returns None if no gradient, set to zero.
+                vjp_t = torch.zeros_like(t) if vjp_t is None else vjp_t
+                vjp_y = torch.zeros_like(y) if vjp_y is None else vjp_y
+                vjp_params = [torch.zeros_like(param) if vjp_param is None else vjp_param
+                              for param, vjp_param in zip(adjoint_params, vjp_params)]
+
+                return (vjp_t, func_eval, vjp_y, *vjp_params)
+
+            ##################################
+            #       Solve adjoint ODE        #
+            ##################################
+
+            if t_requires_grad:
+                time_vjps = torch.empty(len(t), dtype=t.dtype, device=t.device)
+            else:
+                time_vjps = None
             for i in range(len(t) - 1, 0, -1):
                 if t_requires_grad:
                     # Compute the effect of moving the current time measurement point.
@@ -106,7 +129,7 @@ class OdeintAdjointMethod(torch.autograd.Function):
                     func_eval = func(t[i], y[i])
                     dLd_cur_t = func_eval.reshape(-1).dot(grad_y[i].reshape(-1))
                     aug_state[0] -= dLd_cur_t
-                    time_vjps.append(dLd_cur_t)
+                    time_vjps[i] = dLd_cur_t
 
                 # Run the augmented system backwards in time.
                 aug_state = odeint(
@@ -119,10 +142,7 @@ class OdeintAdjointMethod(torch.autograd.Function):
                 aug_state[2] += grad_y[i - 1]  # update any gradients wrt state at this time point
 
             if t_requires_grad:
-                time_vjps.append(aug_state[0])
-                time_vjps = torch.stack(time_vjps[::-1])
-            else:
-                time_vjps = None
+                time_vjps[0] = aug_state[0]
 
             adj_y = aug_state[2]
             adj_params = aug_state[3:]
@@ -138,6 +158,18 @@ def odeint_adjoint(func, y0, t, rtol=1e-6, atol=1e-12, method=None, options=None
     if adjoint_params is not None and not isinstance(func, nn.Module):
         raise ValueError('func must be an instance of nn.Module to specify the adjoint parameters; alternatively they '
                          'can be specified explicitly via the `adjoint_params` argument.')
+
+    # Must come before we default adjoint_options to options; using the same norm for both wouldn't make any sense.
+    try:
+        options['norm']
+    except (TypeError, KeyError):
+        pass
+    else:
+        try:
+            adjoint_options['norm']
+        except (TypeError, KeyError):
+            raise ValueError("If specifying a custom `norm` for the forward pass, then must also specify a `norm` "
+                             "for the adjoint (backward) pass.")
 
     # Must come before _check_inputs as we don't want to use normalised input (in particular any changes to options)
     if adjoint_rtol is None:

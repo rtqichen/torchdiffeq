@@ -3,7 +3,7 @@ import sys
 import torch
 import warnings
 from .solvers import FixedGridODESolver
-from .misc import _error_tol
+from .misc import _compute_error_ratio, _linf_norm
 from .rk_common import rk4_alt_step_func
 
 _BASHFORTH_COEFFICIENTS = [
@@ -188,9 +188,8 @@ class AdamsBashforthMoulton(FixedGridODESolver):
 
     def _has_converged(self, y0, y1):
         """Checks that each element is within the error tolerance."""
-        error_tol = _error_tol(self.rtol, self.atol, y0, y1)
-        error = torch.abs(y0 - y1)
-        return (error < error_tol).all()
+        error_ratio = _compute_error_ratio(torch.abs(y0 - y1), self.rtol, self.atol, y0, y1, _linf_norm)
+        return error_ratio < 1
 
     def _step_func(self, func, t, dt, y):
         self._update_history(t, func(t, y))

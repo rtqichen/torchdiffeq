@@ -1,4 +1,3 @@
-import math
 import torch
 import warnings
 
@@ -8,24 +7,25 @@ def _handle_unused_kwargs(solver, unused_kwargs):
         warnings.warn('{}: Unexpected arguments {}'.format(solver.__class__.__name__, unused_kwargs))
 
 
-def _l2_norm(tensor):
-    return tensor.norm(p=2)
+def _rms_norm(tensor):
+    return tensor.pow(2).mean().sqrt()
 
 
-def _mixed_linf_l2_norm(shapes):
+def _mixed_linf_rms_norm(shapes):
     def _norm(tensor):
         total = 0
         out = []
         for shape in shapes:
             next_total = total + shape.numel()
-            out.append(_l2_norm(tensor[total:next_total]))
+            out.append(_rms_norm(tensor[total:next_total]))
             total = next_total
+        assert total == tensor.numel(), "Shapes do not total to the full size of the tensor."
         return max(out)
     return _norm
 
 
-def _rms_norm(x):
-    return x.norm(p=2) / math.sqrt(x.numel())
+def _linf_norm(tensor):
+    return tensor.max()
 
 
 def _select_initial_step(func, t0, y0, order, rtol, atol, norm, f0=None):
@@ -36,7 +36,7 @@ def _select_initial_step(func, t0, y0, order, rtol, atol, norm, f0=None):
     References
     ----------
     .. [1] E. Hairer, S. P. Norsett G. Wanner, "Solving Ordinary Differential
-           Equations I: Nonstiff Problems", Sec. II.4.
+           Equations I: Nonstiff Problems", Sec. II.4, 2nd edition.
     """
 
     dtype = y0.dtype
@@ -49,8 +49,8 @@ def _select_initial_step(func, t0, y0, order, rtol, atol, norm, f0=None):
 
     scale = atol + torch.abs(y0) * rtol
 
-    d0 = norm(y0 / scale) / math.sqrt(y0.numel())
-    d1 = norm(f0 / scale) / math.sqrt(y0.numel())
+    d0 = norm(y0 / scale)
+    d1 = norm(f0 / scale)
 
     if d0 < 1e-5 or d1 < 1e-5:
         h0 = torch.tensor(1e-6, dtype=dtype, device=device)
@@ -66,6 +66,7 @@ def _select_initial_step(func, t0, y0, order, rtol, atol, norm, f0=None):
         h1 = torch.max(torch.tensor(1e-6, dtype=dtype, device=device), h0 * 1e-3)
     else:
         h1 = (0.01 / max(d1, d2)) ** (1. / float(order + 1))
+
     return torch.min(100 * h0, h1).to(t_dtype)
 
 
@@ -80,7 +81,7 @@ def _optimal_step_size(last_step, error_ratio, safety, ifactor, dfactor, order):
         return last_step * ifactor
     if error_ratio < 1:
         dfactor = torch.ones((), dtype=last_step.dtype, device=last_step.device)
-    error_ratio = error_ratio.sqrt().type_as(last_step)
+    error_ratio = error_ratio.type_as(last_step)
     exponent = torch.tensor(order, dtype=last_step.dtype, device=last_step.device).reciprocal()
     factor = torch.min(ifactor, torch.max(safety / error_ratio ** exponent, dfactor))
     return last_step * factor
@@ -159,13 +160,11 @@ def _check_inputs(func, y0, t, rtol, atol, method, options, SOLVERS):
     # Normalise method and options
     if options is None:
         options = {}
-    elif method is None and len(options) > 0:
-        raise ValueError('cannot supply `options` without specifying `method`')
     if method is None:
         method = 'dopri5'
     if method not in SOLVERS:
-        raise ValueError('Invalid method "{}". Must be one of {}'.format(
-            method, '{"' + '", "'.join(SOLVERS.keys()) + '"}.'))
+        raise ValueError('Invalid method "{}". Must be one of {}'.format(method,
+                                                                         '{"' + '", "'.join(SOLVERS.keys()) + '"}.'))
 
     try:
         grid_points = options['grid_points']
@@ -181,10 +180,10 @@ def _check_inputs(func, y0, t, rtol, atol, method, options, SOLVERS):
     if 'norm' not in options:
         if shapes is None:
             # L2 norm over a single input
-            options['norm'] = _l2_norm
+            options['norm'] = _rms_norm
         else:
             # Mixed Linf/L2 norm over tupled input (chosen mostly just for backward compatibility reasons)
-            options['norm'] = _mixed_linf_l2_norm(shapes)
+            options['norm'] = _mixed_linf_rms_norm(shapes)
 
     # Normalise time
     assert torch.is_tensor(t), 't must be a torch.Tensor'
