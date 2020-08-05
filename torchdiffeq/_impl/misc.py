@@ -156,6 +156,7 @@ def _check_inputs(func, y0, t, rtol, atol, method, options, SOLVERS):
         atol = _tuple_tol('atol', atol, shapes)
         y0 = torch.cat([y0_.reshape(-1) for y0_ in y0])
         func = _TupleFunc(func, shapes)
+    _assert_floating('y0', y0)
 
     # Normalise method and options
     if options is None:
@@ -173,7 +174,6 @@ def _check_inputs(func, y0, t, rtol, atol, method, options, SOLVERS):
     else:
         assert torch.is_tensor(grid_points), 'grid_points must be a torch.Tensor'
         _assert_one_dimensional('grid_points', grid_points)
-        _assert_increasing('grid_points', grid_points)
         assert not grid_points.requires_grad, "grid_points cannot require gradient"
         _assert_floating('grid_points', grid_points)
 
@@ -199,10 +199,17 @@ def _check_inputs(func, y0, t, rtol, atol, method, options, SOLVERS):
         else:
             options = options.copy()
             options['grid_points'] = -grid_points
-    _assert_increasing('t', t)
 
-    # Miscellaneous
-    _assert_floating('y0', y0)
+    # Can only do after having normalised time
+    _assert_increasing('t', t)
+    try:
+        grid_points = options['grid_points']
+    except KeyError:
+        pass
+    else:
+        _assert_increasing('grid_points', grid_points)
+
+    # Tol checking
     if torch.is_tensor(rtol):
         assert not rtol.requires_grad, "rtol cannot require gradient"
     if torch.is_tensor(atol):
