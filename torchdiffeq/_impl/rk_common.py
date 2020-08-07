@@ -1,11 +1,12 @@
 import bisect
 import collections
 import torch
+from .event_handling import find_event
 from .interp import _interp_evaluate, _interp_fit
 from .misc import (_compute_error_ratio,
                    _select_initial_step,
                    _optimal_step_size)
-from .solvers import AdaptiveStepsizeODESolver
+from .solvers import AdaptiveStepsizeEventODESolver
 
 
 _ButcherTableau = collections.namedtuple('_ButcherTableau', 'alpha, beta, c_sol, c_error')
@@ -103,7 +104,7 @@ def rk4_alt_step_func(func, t, dt, y, k1=None):
     return (k1 + 3 * (k2 + k3) + k4) * dt * 0.125
 
 
-class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
+class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeEventODESolver):
     order: int
     tableau: _ButcherTableau
     mid: torch.Tensor
@@ -156,6 +157,20 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
             n_steps += 1
         return _interp_evaluate(self.rk_state.interp_coeff, self.rk_state.t0, self.rk_state.t1, next_t)
 
+    def _advance_until_event(self, stopping_fn):
+        """Returns state(t) such that stopping_fn(t, state(t)) == 0."""
+        if stopping_fn(self.rk_state.t1, self.rk_state.y1) == 0:
+            return self.rk_state.y1
+
+        n_steps = 0
+        sign0 = torch.sign(stopping_fn(self.rk_state.t1, self.rk_state.y1))
+        while sign0 + torch.sign(stopping_fn(self.rk_state.t1, self.rk_state.y1)) != 0:
+            assert n_steps < self.max_num_steps, 'max_num_steps exceeded ({}>={})'.format(n_steps, self.max_num_steps)
+            self.rk_state = self._adaptive_step(self.rk_state)
+            n_steps += 1
+        interp_fn = lambda t: _interp_evaluate(self.rk_state.interp_coeff, self.rk_state.t0, self.rk_state.t1, t)
+        return find_event(interp_fn, self.rk_state.t0, self.rk_state.t1, stopping_fn, self.atol)
+
     def _adaptive_step(self, rk_state):
         """Take an adaptive Runge-Kutta step to integrate the ODE."""
         y0, f0, _, t0, dt, interp_coeff = rk_state
@@ -167,7 +182,6 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
         # t0.dtype == self.dtype
         # dt.dtype == self.dtype
         # for coeff in interp_coeff: coeff.dtype == self.y0.dtype
-
 
         ########################################################
         #                      Assertions                      #

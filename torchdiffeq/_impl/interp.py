@@ -37,6 +37,7 @@ def _interp_evaluate(coefficients, t0, t1, t):
 
     assert (t0 <= t) & (t <= t1), 'invalid interpolation, fails `t0 <= t <= t1`: {}, {}, {}'.format(t0, t, t1)
     x = (t - t0) / (t1 - t0)
+    x = x.to(coefficients[0].dtype)
 
     total = coefficients[0] + x * coefficients[1]
     x_power = x

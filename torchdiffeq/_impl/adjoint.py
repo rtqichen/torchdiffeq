@@ -7,7 +7,7 @@ from .misc import _check_inputs, _flat_to_shape, _mixed_linf_rms_norm
 class OdeintAdjointMethod(torch.autograd.Function):
 
     @staticmethod
-    def forward(ctx, shapes, func, y0, t, rtol, atol, method, options, adjoint_rtol, adjoint_atol, adjoint_method,
+    def forward(ctx, shapes, func, y0, t, rtol, atol, method, options, stopping_fn, adjoint_rtol, adjoint_atol, adjoint_method,
                 adjoint_options, t_requires_grad, *adjoint_params):
 
         ctx.shapes = shapes
@@ -17,14 +17,22 @@ class OdeintAdjointMethod(torch.autograd.Function):
         ctx.adjoint_method = adjoint_method
         ctx.adjoint_options = adjoint_options
         ctx.t_requires_grad = t_requires_grad
+        ctx.event_mode = stopping_fn is not None
 
         with torch.no_grad():
-            y = odeint(func, y0, t, rtol=rtol, atol=atol, method=method, options=options)
+            ans = odeint(func, y0, t, rtol=rtol, atol=atol, method=method, options=options, stopping_fn=stopping_fn)
+
+            if stopping_fn is None:
+                y = ans
+            else:
+                event_t, y = ans
+                ctx.event_t = event_t
+
         ctx.save_for_backward(t, y, *adjoint_params)
-        return y
+        return ans
 
     @staticmethod
-    def backward(ctx, grad_y):
+    def backward(ctx, *grad_y):
         with torch.no_grad():
             shapes = ctx.shapes
             func = ctx.func
@@ -36,6 +44,17 @@ class OdeintAdjointMethod(torch.autograd.Function):
 
             t, y, *adjoint_params = ctx.saved_tensors
             adjoint_params = tuple(adjoint_params)
+
+            # Backprop as if integrating up to event time.
+            # Does NOT backpropagate through the event time.
+            event_mode = ctx.event_mode
+            if event_mode:
+                event_t = ctx.event_t
+                _t = t
+                t = torch.cat([t[0].reshape(-1), event_t.reshape(-1)])
+                grad_y = grad_y[1]
+            else:
+                grad_y = grad_y[0]
 
             ##################################
             #     Set up adjoint_options     #
@@ -145,14 +164,18 @@ class OdeintAdjointMethod(torch.autograd.Function):
             if t_requires_grad:
                 time_vjps[0] = aug_state[0]
 
+            # Only compute gradient wrt initial time when in event handling mode.
+            if event_mode:
+                time_vjps = torch.cat([time_vjps[0].reshape(-1), torch.zeros_like(_t[1:])])
+
             adj_y = aug_state[2]
             adj_params = aug_state[3:]
 
-        return (None, None, adj_y, time_vjps, None, None, None, None, None, None, None, None, None, *adj_params)
+        return (None, None, adj_y, time_vjps, None, None, None, None, None, None, None, None, None, None, *adj_params)
 
 
-def odeint_adjoint(func, y0, t, rtol=1e-6, atol=1e-12, method=None, options=None, adjoint_rtol=None, adjoint_atol=None,
-                   adjoint_method=None, adjoint_options=None, adjoint_params=None):
+def odeint_adjoint(func, y0, t, *, rtol=1e-6, atol=1e-12, method=None, options=None, stopping_fn=None,
+                   adjoint_rtol=None, adjoint_atol=None, adjoint_method=None, adjoint_options=None, adjoint_params=None):
 
     # We need this in order to access the variables inside this module,
     # since we have no other way of getting variables along the execution path.
@@ -186,9 +209,9 @@ def odeint_adjoint(func, y0, t, rtol=1e-6, atol=1e-12, method=None, options=None
         adjoint_params = tuple(func.parameters())
 
     # Normalise to non-tupled input
-    shapes, func, y0, t, rtol, atol, method, options = _check_inputs(func, y0, t, rtol, atol, method, options, SOLVERS)
+    shapes, func, y0, t, rtol, atol, method, options, stopping_fn, decreasing_time = _check_inputs(func, y0, t, rtol, atol, method, options, stopping_fn, SOLVERS)
 
-    solution = OdeintAdjointMethod.apply(shapes, func, y0, t, rtol, atol, method, options, adjoint_rtol, adjoint_atol,
+    solution = OdeintAdjointMethod.apply(shapes, func, y0, t, rtol, atol, method, options, stopping_fn, adjoint_rtol, adjoint_atol,
                                          adjoint_method, adjoint_options, t.requires_grad, *adjoint_params)
 
     if shapes is not None:

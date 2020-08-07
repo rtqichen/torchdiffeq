@@ -165,7 +165,7 @@ class AdamsBashforthMoulton(FixedGridODESolver):
 
     def __init__(self, func, y0, rtol=1e-3, atol=1e-4, implicit=True, max_iters=_MAX_ITERS, max_order=_MAX_ORDER,
                  **kwargs):
-        super(AdamsBashforthMoulton, self).__init__(func, y0, **kwargs)
+        super(AdamsBashforthMoulton, self).__init__(func, y0, rtol=rtol, atol=rtol, **kwargs)
         assert max_order <= _MAX_ORDER, "max_order must be at most {}".format(_MAX_ORDER)
         if max_order < _MIN_ORDER:
             warnings.warn("max_order is below {}, so the solver reduces to `rk4`.".format(_MIN_ORDER))
@@ -192,12 +192,12 @@ class AdamsBashforthMoulton(FixedGridODESolver):
         return error_ratio < 1
 
     def _step_func(self, func, t, dt, y):
-        self._update_history(t, func(t, y))
+        f0 = func(t, y)
+        self._update_history(t, f0)
         order = min(len(self.prev_f), self.max_order - 1)
         if order < _MIN_ORDER - 1:
             # Compute using RK4.
-            dy = rk4_alt_step_func(func, t, dt, y, k1=self.prev_f[0])
-            return dy
+            return rk4_alt_step_func(func, t, dt, y, k1=self.prev_f[0]), f0
         else:
             # Adams-Bashforth predictor.
             bashforth_coeffs = self.bashforth[order]
@@ -219,7 +219,7 @@ class AdamsBashforthMoulton(FixedGridODESolver):
                     warnings.warn('Functional iteration did not converge. Solution may be incorrect.', file=sys.stderr)
                     self.prev_f.pop()
                 self._update_history(t, f)
-            return dy
+            return dy, f0
 
 
 class AdamsBashforth(AdamsBashforthMoulton):

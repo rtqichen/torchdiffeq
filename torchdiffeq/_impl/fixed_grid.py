@@ -11,7 +11,8 @@ class Euler(FixedGridODESolver):
         self.eps = torch.as_tensor(eps, dtype=self.dtype, device=self.device)
 
     def _step_func(self, func, t, dt, y):
-        return dt * func(t + self.eps, y)
+        f0 = func(t + self.eps, y)
+        return dt * f0, f0
 
 
 class Midpoint(FixedGridODESolver):
@@ -23,8 +24,9 @@ class Midpoint(FixedGridODESolver):
 
     def _step_func(self, func, t, dt, y):
         half_dt = 0.5 * dt
-        y_mid = y + func(t + self.eps, y) * half_dt
-        return dt * func(t + half_dt, y_mid)
+        f0 = func(t + self.eps, y)
+        y_mid = y + f0 * half_dt
+        return dt * func(t + half_dt, y_mid), f0
 
 
 class RK4(FixedGridODESolver):
@@ -35,4 +37,5 @@ class RK4(FixedGridODESolver):
         self.eps = torch.as_tensor(eps, dtype=self.dtype, device=self.device)
 
     def _step_func(self, func, t, dt, y):
-        return rk4_alt_step_func(func, t + self.eps, dt - 2 * self.eps, y)
+        f0 = func(t + self.eps, y)
+        return rk4_alt_step_func(func, t + self.eps, dt - 2 * self.eps, y, k1=f0), f0

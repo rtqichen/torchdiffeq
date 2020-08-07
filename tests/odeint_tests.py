@@ -20,10 +20,8 @@ class TestSolverError(unittest.TestCase):
                         kwargs = dict(rtol=1e-12, atol=1e-14) if method == 'dopri8' else dict()
                         problems = PROBLEMS if method in ADAPTIVE_METHODS else ('constant',)
                         for ode in problems:
-                            if method == 'adaptive_heun':
+                            if method in ['adaptive_heun', 'bosh3']:
                                 eps = 4e-3
-                            elif method == 'bosh3':
-                                eps = 3e-3
                             elif ode == 'linear':
                                 eps = 2e-3
                             else:
@@ -34,7 +32,7 @@ class TestSolverError(unittest.TestCase):
                                                                          reverse=reverse)
                                 y = torchdiffeq.odeint(f, y0, t_points, method=method, **kwargs)
                                 self.assertLess(rel_error(sol, y), eps)
-                
+
     def test_adjoint(self):
         for reverse in (False, True):
             for dtype in DTYPES:

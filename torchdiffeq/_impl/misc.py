@@ -75,6 +75,7 @@ def _compute_error_ratio(error_estimate, rtol, atol, y0, y1, norm):
     return norm(error_estimate / error_tol)
 
 
+@torch.no_grad()
 def _optimal_step_size(last_step, error_ratio, safety, ifactor, dfactor, order):
     """Calculate the optimal size for the next step."""
     if error_ratio == 0:
@@ -137,16 +138,27 @@ class _TupleFunc(torch.nn.Module):
         return torch.cat([f_.reshape(-1) for f_ in f])
 
 
-class _ReverseFunc(torch.nn.Module):
-    def __init__(self, base_func):
-        super(_ReverseFunc, self).__init__()
+class _TupleScalarFunc(torch.nn.Module):
+    def __init__(self, base_func, shapes):
+        super(_TupleScalarFunc, self).__init__()
         self.base_func = base_func
+        self.shapes = shapes
 
     def forward(self, t, y):
-        return -self.base_func(-t, y)
+        return self.base_func(t, _flat_to_shape(y, (), self.shapes))
 
 
-def _check_inputs(func, y0, t, rtol, atol, method, options, SOLVERS):
+class _ReverseFunc(torch.nn.Module):
+    def __init__(self, base_func, mul=1.0):
+        super(_ReverseFunc, self).__init__()
+        self.base_func = base_func
+        self.mul = mul
+
+    def forward(self, t, y):
+        return self.mul * self.base_func(-t, y)
+
+
+def _check_inputs(func, y0, t, rtol, atol, method, options, stopping_fn, SOLVERS):
     # Normalise to tensor (non-tupled) input
     shapes = None
     if not torch.is_tensor(y0):
@@ -156,6 +168,8 @@ def _check_inputs(func, y0, t, rtol, atol, method, options, SOLVERS):
         atol = _tuple_tol('atol', atol, shapes)
         y0 = torch.cat([y0_.reshape(-1) for y0_ in y0])
         func = _TupleFunc(func, shapes)
+        if stopping_fn is not None:
+            stopping_fn = _TupleScalarFunc(stopping_fn, shapes)
     _assert_floating('y0', y0)
 
     # Normalise method and options
@@ -191,9 +205,13 @@ def _check_inputs(func, y0, t, rtol, atol, method, options, SOLVERS):
     assert torch.is_tensor(t), 't must be a torch.Tensor'
     _assert_one_dimensional('t', t)
     _assert_floating('t', t)
+    decreasing_time = False
     if _decreasing(t):
+        decreasing_time = True
         t = -t
-        func = _ReverseFunc(func)
+        func = _ReverseFunc(func, mul=-1.0)
+        if stopping_fn is not None:
+            stopping_fn = _ReverseFunc(stopping_fn)
         try:
             grid_points = options['grid_points']
         except KeyError:
@@ -222,4 +240,4 @@ def _check_inputs(func, y0, t, rtol, atol, method, options, SOLVERS):
         t = t.to(y0.device)
     # ~Backward compatibility
 
-    return shapes, func, y0, t, rtol, atol, method, options
+    return shapes, func, y0, t, rtol, atol, method, options, stopping_fn, decreasing_time
