@@ -1,25 +1,24 @@
-from .tsit5 import Tsit5Solver
 from .dopri5 import Dopri5Solver
 from .bosh3 import Bosh3Solver
 from .adaptive_heun import AdaptiveHeunSolver
 from .fixed_grid import Euler, Midpoint, RK4
 from .fixed_adams import AdamsBashforth, AdamsBashforthMoulton
-from .adams import VariableCoefficientAdamsBashforth
 from .dopri8 import Dopri8Solver
-from .misc import _check_inputs
+from .misc import _check_inputs, _flat_to_shape
 
 SOLVERS = {
-    'explicit_adams': AdamsBashforth,
-    'fixed_adams': AdamsBashforthMoulton,
-    'adams': VariableCoefficientAdamsBashforth,
-    'tsit5': Tsit5Solver,
+    'dopri8': Dopri8Solver,
     'dopri5': Dopri5Solver,
     'bosh3': Bosh3Solver,
+    'adaptive_heun': AdaptiveHeunSolver,
     'euler': Euler,
     'midpoint': Midpoint,
     'rk4': RK4,
-    'adaptive_heun': AdaptiveHeunSolver,
-    'dopri8': Dopri8Solver,
+    'explicit_adams': AdamsBashforth,
+    'implicit_adams': AdamsBashforthMoulton,
+    # Backward compatibility: use the same name as before
+    'fixed_adams': AdamsBashforthMoulton,
+    # ~Backwards compatibility
 }
 
 
@@ -60,24 +59,11 @@ def odeint(func, y0, t, rtol=1e-7, atol=1e-9, method=None, options=None):
     Raises:
         ValueError: if an invalid `method` is provided.
     """
+    shapes, func, y0, t, rtol, atol, method, options = _check_inputs(func, y0, t, rtol, atol, method, options, SOLVERS)
 
-    if options is None:
-        options = {}
-    elif method is None:
-        raise ValueError('cannot supply `options` without specifying `method`')
-
-    tensor_input, func, y0, t, options = _check_inputs(func, y0, t, options)
-        
-    if method is None:
-        method = 'dopri5'
-        
-    if method not in SOLVERS:
-        raise ValueError('Invalid method "{}". Must be one of {}'.format(
-                         method, '{"' + '", "'.join(SOLVERS.keys()) + '"}.'))
-
-    solver = SOLVERS[method](func, y0, rtol=rtol, atol=atol, **options)
+    solver = SOLVERS[method](func=func, y0=y0, rtol=rtol, atol=atol, **options)
     solution = solver.integrate(t)
 
-    if tensor_input:
-        solution = solution[0]
+    if shapes is not None:
+        solution = _flat_to_shape(solution, (len(t),), shapes)
     return solution

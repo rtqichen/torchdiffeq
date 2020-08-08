@@ -51,32 +51,39 @@ class LinearODE(torch.nn.Module):
 
 
 PROBLEMS = {'constant': ConstantODE, 'linear': LinearODE, 'sine': SineODE}
+DTYPES = (torch.float32, torch.float64)
+DEVICES = ['cpu']
+if torch.cuda.is_available():
+    DEVICES.append('cuda:0')
+FIXED_METHODS = ('euler', 'midpoint', 'rk4', 'explicit_adams', 'implicit_adams')
+ADAPTIVE_METHODS = ('dopri5', 'bosh3', 'adaptive_heun', 'dopri8')  # TODO: add in adaptive adams and tsit5 if/when they're fixed
+METHODS = FIXED_METHODS + ADAPTIVE_METHODS
 
 
-def construct_problem(device, npts=10, ode='constant', reverse=False):
+def construct_problem(device, npts=10, ode='constant', reverse=False, dtype=torch.float64):
 
-    f = PROBLEMS[ode]().to(device)
+    f = PROBLEMS[ode]().to(dtype=dtype, device=device)
 
-    t_points = torch.linspace(1, 8, npts).to(device).requires_grad_(True)
+    t_points = torch.linspace(1, 8, npts, dtype=dtype, device=device, requires_grad=True)
     sol = f.y_exact(t_points)
 
     def _flip(x, dim):
         indices = [slice(None)] * x.dim()
-        indices[dim] = torch.arange(x.size(dim) - 1, -1, -1, dtype=torch.long, device=x.device)
+        indices[dim] = torch.arange(x.size(dim) - 1, -1, -1, dtype=torch.long, device=device)
         return x[tuple(indices)]
 
     if reverse:
         t_points = _flip(t_points, 0).clone().detach()
         sol = _flip(sol, 0).clone().detach()
 
-    return f, sol[0].detach(), t_points, sol
+    return f, sol[0].detach().requires_grad_(True), t_points, sol
 
 
 if __name__ == '__main__':
-    f = SineODE('cpu')
-    t_points = torch.linspace(1, 8, 100).to('cpu').requires_grad_(True)
+    f = SineODE().cpu()
+    t_points = torch.linspace(1, 8, 100, device='cpu')
     sol = f.y_exact(t_points)
 
     import matplotlib.pyplot as plt
-    plt.plot(t_points.detach().cpu().numpy(), sol.detach().cpu().numpy())
+    plt.plot(t_points, sol)
     plt.show()
