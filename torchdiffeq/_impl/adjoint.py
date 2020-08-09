@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from .odeint import SOLVERS, odeint
-from .misc import _check_inputs, _flat_to_shape, _mixed_linf_rms_norm
+from .misc import _check_inputs, _flat_to_shape, _rms_norm, _mixed_linf_rms_norm, _wrap_norm
 
 
 class OdeintAdjointMethod(torch.autograd.Function):
@@ -161,18 +161,6 @@ def odeint_adjoint(func, y0, t, rtol=1e-7, atol=1e-9, method=None, options=None,
                          'can be specified explicitly via the `adjoint_params` argument. If there are no parameters '
                          'then it is allowable to set `adjoint_params=()`.')
 
-    # Must come before we default adjoint_options to options; using the same norm for both wouldn't make any sense.
-    try:
-        options['norm']
-    except (TypeError, KeyError):
-        pass
-    else:
-        try:
-            adjoint_options['norm']
-        except (TypeError, KeyError):
-            raise ValueError("If specifying a custom `norm` for the forward pass, then must also specify a `norm` "
-                             "for the adjoint (backward) pass.")
-
     # Must come before _check_inputs as we don't want to use normalised input (in particular any changes to options)
     if adjoint_rtol is None:
         adjoint_rtol = rtol
@@ -181,12 +169,16 @@ def odeint_adjoint(func, y0, t, rtol=1e-7, atol=1e-9, method=None, options=None,
     if adjoint_method is None:
         adjoint_method = method
     if adjoint_options is None:
-        adjoint_options = options
+        adjoint_options = {k: v for k, v in options.items() if k != "norm"} if options is not None else {}
     if adjoint_params is None:
         adjoint_params = tuple(func.parameters())
 
     # Normalise to non-tupled input
     shapes, func, y0, t, rtol, atol, method, options = _check_inputs(func, y0, t, rtol, atol, method, options, SOLVERS)
+
+    if "norm" in options and "norm" not in adjoint_options:
+        adjoint_shapes = [torch.Size(()), y0.shape, y0.shape] + [torch.Size([sum(param.numel() for param in adjoint_params)])]
+        adjoint_options["norm"] = _wrap_norm([_rms_norm, options["norm"], options["norm"]], adjoint_shapes)
 
     solution = OdeintAdjointMethod.apply(shapes, func, y0, t, rtol, atol, method, options, adjoint_rtol, adjoint_atol,
                                          adjoint_method, adjoint_options, t.requires_grad, *adjoint_params)
