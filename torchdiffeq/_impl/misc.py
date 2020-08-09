@@ -24,6 +24,22 @@ def _mixed_linf_rms_norm(shapes):
     return _norm
 
 
+def _wrap_norm(norm_fns, shapes):
+    def _norm(tensor):
+        total = 0
+        out = []
+        for i, shape in enumerate(shapes):
+            next_total = total + shape.numel()
+            if i < len(norm_fns):
+                out.append(norm_fns[i](tensor[total:next_total]))
+            else:
+                out.append(_rms_norm(tensor[total:next_total]))
+            total = next_total
+        assert total == tensor.numel(), "Shapes do not total to the full size of the tensor."
+        return max(out)
+    return _norm
+
+
 def _linf_norm(tensor):
     return tensor.max()
 
