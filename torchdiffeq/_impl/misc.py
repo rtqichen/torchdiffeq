@@ -175,6 +175,11 @@ class _ReverseFunc(torch.nn.Module):
 
 
 def _check_inputs(func, y0, t, rtol, atol, method, options, event_fn, SOLVERS):
+
+    if event_fn is not None:
+        if len(t) != 2:
+            raise ValueError(f"We require len(t) == 2 when in event handling mode, but got len(t)={len(t)}.")
+
     # Normalise to tensor (non-tupled) input
     shapes = None
     if not torch.is_tensor(y0):
