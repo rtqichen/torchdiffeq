@@ -174,7 +174,7 @@ class _ReverseFunc(torch.nn.Module):
         return self.mul * self.base_func(-t, y)
 
 
-def _check_inputs(func, y0, t, rtol, atol, method, options, stopping_fn, SOLVERS):
+def _check_inputs(func, y0, t, rtol, atol, method, options, event_fn, SOLVERS):
     # Normalise to tensor (non-tupled) input
     shapes = None
     if not torch.is_tensor(y0):
@@ -184,8 +184,8 @@ def _check_inputs(func, y0, t, rtol, atol, method, options, stopping_fn, SOLVERS
         atol = _tuple_tol('atol', atol, shapes)
         y0 = torch.cat([y0_.reshape(-1) for y0_ in y0])
         func = _TupleFunc(func, shapes)
-        if stopping_fn is not None:
-            stopping_fn = _TupleScalarFunc(stopping_fn, shapes)
+        if event_fn is not None:
+            event_fn = _TupleScalarFunc(event_fn, shapes)
     _assert_floating('y0', y0)
 
     # Normalise method and options
@@ -226,8 +226,8 @@ def _check_inputs(func, y0, t, rtol, atol, method, options, stopping_fn, SOLVERS
         decreasing_time = True
         t = -t
         func = _ReverseFunc(func, mul=-1.0)
-        if stopping_fn is not None:
-            stopping_fn = _ReverseFunc(stopping_fn)
+        if event_fn is not None:
+            event_fn = _ReverseFunc(event_fn)
         try:
             grid_points = options['grid_points']
         except KeyError:
@@ -256,4 +256,4 @@ def _check_inputs(func, y0, t, rtol, atol, method, options, stopping_fn, SOLVERS
         t = t.to(y0.device)
     # ~Backward compatibility
 
-    return shapes, func, y0, t, rtol, atol, method, options, stopping_fn, decreasing_time
+    return shapes, func, y0, t, rtol, atol, method, options, event_fn, decreasing_time

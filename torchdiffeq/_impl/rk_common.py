@@ -157,19 +157,19 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeEventODESolver):
             n_steps += 1
         return _interp_evaluate(self.rk_state.interp_coeff, self.rk_state.t0, self.rk_state.t1, next_t)
 
-    def _advance_until_event(self, stopping_fn):
-        """Returns state(t) such that stopping_fn(t, state(t)) == 0."""
-        if stopping_fn(self.rk_state.t1, self.rk_state.y1) == 0:
+    def _advance_until_event(self, event_fn):
+        """Returns state(t) such that event_fn(t, state(t)) == 0."""
+        if event_fn(self.rk_state.t1, self.rk_state.y1) == 0:
             return self.rk_state.y1
 
         n_steps = 0
-        sign0 = torch.sign(stopping_fn(self.rk_state.t1, self.rk_state.y1))
-        while sign0 + torch.sign(stopping_fn(self.rk_state.t1, self.rk_state.y1)) != 0:
+        sign0 = torch.sign(event_fn(self.rk_state.t1, self.rk_state.y1))
+        while sign0 + torch.sign(event_fn(self.rk_state.t1, self.rk_state.y1)) != 0:
             assert n_steps < self.max_num_steps, 'max_num_steps exceeded ({}>={})'.format(n_steps, self.max_num_steps)
             self.rk_state = self._adaptive_step(self.rk_state)
             n_steps += 1
         interp_fn = lambda t: _interp_evaluate(self.rk_state.interp_coeff, self.rk_state.t0, self.rk_state.t1, t)
-        return find_event(interp_fn, self.rk_state.t0, self.rk_state.t1, stopping_fn, self.atol)
+        return find_event(interp_fn, self.rk_state.t0, self.rk_state.t1, event_fn, self.atol)
 
     def _adaptive_step(self, rk_state):
         """Take an adaptive Runge-Kutta step to integrate the ODE."""

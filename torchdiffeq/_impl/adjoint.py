@@ -7,7 +7,7 @@ from .misc import _check_inputs, _flat_to_shape, _rms_norm, _mixed_linf_rms_norm
 class OdeintAdjointMethod(torch.autograd.Function):
 
     @staticmethod
-    def forward(ctx, shapes, func, y0, t, rtol, atol, method, options, stopping_fn, adjoint_rtol, adjoint_atol, adjoint_method,
+    def forward(ctx, shapes, func, y0, t, rtol, atol, method, options, event_fn, adjoint_rtol, adjoint_atol, adjoint_method,
                 adjoint_options, t_requires_grad, *adjoint_params):
 
         ctx.shapes = shapes
@@ -17,12 +17,12 @@ class OdeintAdjointMethod(torch.autograd.Function):
         ctx.adjoint_method = adjoint_method
         ctx.adjoint_options = adjoint_options
         ctx.t_requires_grad = t_requires_grad
-        ctx.event_mode = stopping_fn is not None
+        ctx.event_mode = event_fn is not None
 
         with torch.no_grad():
-            ans = odeint(func, y0, t, rtol=rtol, atol=atol, method=method, options=options, stopping_fn=stopping_fn)
+            ans = odeint(func, y0, t, rtol=rtol, atol=atol, method=method, options=options, event_fn=event_fn)
 
-            if stopping_fn is None:
+            if event_fn is None:
                 y = ans
             else:
                 event_t, y = ans
@@ -174,7 +174,7 @@ class OdeintAdjointMethod(torch.autograd.Function):
         return (None, None, adj_y, time_vjps, None, None, None, None, None, None, None, None, None, None, *adj_params)
 
 
-def odeint_adjoint(func, y0, t, *, rtol=1e-7, atol=1e-9, method=None, options=None, stopping_fn=None,
+def odeint_adjoint(func, y0, t, *, rtol=1e-7, atol=1e-9, method=None, options=None, event_fn=None,
                    adjoint_rtol=None, adjoint_atol=None, adjoint_method=None, adjoint_options=None, adjoint_params=None):
 
     # We need this in order to access the variables inside this module,
@@ -197,13 +197,13 @@ def odeint_adjoint(func, y0, t, *, rtol=1e-7, atol=1e-9, method=None, options=No
         adjoint_params = tuple(func.parameters())
 
     # Normalise to non-tupled input
-    shapes, func, y0, t, rtol, atol, method, options, stopping_fn, decreasing_time = _check_inputs(func, y0, t, rtol, atol, method, options, stopping_fn, SOLVERS)
+    shapes, func, y0, t, rtol, atol, method, options, event_fn, decreasing_time = _check_inputs(func, y0, t, rtol, atol, method, options, event_fn, SOLVERS)
 
     if "norm" in options and "norm" not in adjoint_options:
         adjoint_shapes = [torch.Size(()), y0.shape, y0.shape] + [torch.Size([sum(param.numel() for param in adjoint_params)])]
         adjoint_options["norm"] = _wrap_norm([_rms_norm, options["norm"], options["norm"]], adjoint_shapes)
 
-    solution = OdeintAdjointMethod.apply(shapes, func, y0, t, rtol, atol, method, options, stopping_fn, adjoint_rtol, adjoint_atol,
+    solution = OdeintAdjointMethod.apply(shapes, func, y0, t, rtol, atol, method, options, event_fn, adjoint_rtol, adjoint_atol,
                                          adjoint_method, adjoint_options, t.requires_grad, *adjoint_params)
 
     if shapes is not None:

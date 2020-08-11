@@ -22,7 +22,7 @@ SOLVERS = {
 }
 
 
-def odeint(func, y0, t, *, rtol=1e-7, atol=1e-9, method=None, options=None, stopping_fn=None):
+def odeint(func, y0, t, *, rtol=1e-7, atol=1e-9, method=None, options=None, event_fn=None):
     """Integrate a system of ordinary differential equations.
 
     Solves the initial value problem for a non-stiff system of first order ODEs:
@@ -59,14 +59,14 @@ def odeint(func, y0, t, *, rtol=1e-7, atol=1e-9, method=None, options=None, stop
     Raises:
         ValueError: if an invalid `method` is provided.
     """
-    shapes, func, y0, t, rtol, atol, method, options, stopping_fn, decreasing_time = _check_inputs(func, y0, t, rtol, atol, method, options, stopping_fn, SOLVERS)
+    shapes, func, y0, t, rtol, atol, method, options, event_fn, decreasing_time = _check_inputs(func, y0, t, rtol, atol, method, options, event_fn, SOLVERS)
 
     solver = SOLVERS[method](func=func, y0=y0, rtol=rtol, atol=atol, **options)
 
-    if stopping_fn is None:
+    if event_fn is None:
         solution = solver.integrate(t)
     else:
-        event_t, solution = solver.integrate_until_event(t[0], stopping_fn)
+        event_t, solution = solver.integrate_until_event(t[0], event_fn)
         event_t = event_t.to(t).detach()
         if decreasing_time:
             event_t = -event_t
@@ -74,7 +74,7 @@ def odeint(func, y0, t, *, rtol=1e-7, atol=1e-9, method=None, options=None, stop
     if shapes is not None:
         solution = _flat_to_shape(solution, (len(t),), shapes)
 
-    if stopping_fn is None:
+    if event_fn is None:
         return solution
     else:
         return event_t, solution
