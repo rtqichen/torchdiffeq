@@ -60,6 +60,7 @@ def odeint(func, y0, t, *, rtol=1e-7, atol=1e-9, method=None, options=None, even
     Raises:
         ValueError: if an invalid `method` is provided.
     """
+
     shapes, func, y0, t, rtol, atol, method, options, event_fn, decreasing_time = _check_inputs(func, y0, t, rtol, atol, method, options, event_fn, SOLVERS)
 
     solver = SOLVERS[method](func=func, y0=y0, rtol=rtol, atol=atol, **options)
@@ -68,7 +69,7 @@ def odeint(func, y0, t, *, rtol=1e-7, atol=1e-9, method=None, options=None, even
         solution = solver.integrate(t)
     else:
         event_t, solution = solver.integrate_until_event(t[0], event_fn)
-        event_t = event_t.to(t).detach()
+        event_t = event_t.to(t)
         if decreasing_time:
             event_t = -event_t
 
@@ -82,7 +83,7 @@ def odeint(func, y0, t, *, rtol=1e-7, atol=1e-9, method=None, options=None, even
 
 
 def odeint_event(func, y0, t0, *, event_fn, reverse_time=False, odeint_interface=odeint, **kwargs):
-    assert isinstance(event_fn, torch.nn.Module)
+    """Automatically links up the gradient from the event_time."""
 
     if reverse_time:
         t = torch.cat([t0.reshape(-1), t0.reshape(-1).detach() - 1.0])
@@ -92,35 +93,42 @@ def odeint_event(func, y0, t0, *, event_fn, reverse_time=False, odeint_interface
     event_t, solution = odeint_interface(func, y0, t, event_fn=event_fn, **kwargs)
 
     # Dummy values for rtol, atol, method, and options.
-    shapes, func, y0, t, rtol, atol, method, options, event_fn, decreasing_time = _check_inputs(func, y0, t, 1e-7, 1e-9, None, None, event_fn, SOLVERS)
+    shapes, _func, _, t, _, _, _, _, event_fn, _ = _check_inputs(func, y0, t, 0.0, 0.0, None, None, event_fn, SOLVERS)
 
     if shapes is not None:
         state_t = torch.cat([s[-1].reshape(-1) for s in solution])
     else:
         state_t = solution[-1]
 
-    event_t = ImplicitFnGradientRerouting.apply(func, event_fn, event_t, state_t, *event_fn.parameters())
+    event_t, state_t = ImplicitFnGradientRerouting.apply(_func, event_fn, event_t, state_t)
+
+    if shapes is not None:
+        state_t = _flat_to_shape(state_t, (), shapes)
+        solution = tuple(torch.cat([s[:-1], s_t[None]], dim=0) for s, s_t in zip(solution, state_t))
+    else:
+        solution = torch.cat([solution[:-1], state_t[None]], dim=0)
+
     return event_t, solution
 
 
 class ImplicitFnGradientRerouting(torch.autograd.Function):
 
     @staticmethod
-    def forward(ctx, func, event_fn, event_t, state_t, *params):
+    def forward(ctx, func, event_fn, event_t, state_t):
         """ event_t is the solution to event_fn """
         ctx.func = func
         ctx.event_fn = event_fn
-        ctx.save_for_backward(event_t, state_t, *params)
-
-        return event_t.detach()
+        ctx.save_for_backward(event_t, state_t)
+        return event_t.detach(), state_t.detach()
 
     @staticmethod
-    def backward(ctx, grad_t):
+    def backward(ctx, grad_t, grad_state):
         func = ctx.func
         event_fn = ctx.event_fn
-        event_t, state_t, *params = ctx.saved_tensors
+        event_t, state_t = ctx.saved_tensors
 
         with torch.enable_grad():
+            f_val = func(event_t, state_t)
 
             event_t.requires_grad_(True)
             state_t.requires_grad_(True)
@@ -128,9 +136,12 @@ class ImplicitFnGradientRerouting(torch.autograd.Function):
             par_dt, dstate = torch.autograd.grad(c, (event_t, state_t), allow_unused=True, retain_graph=True)
             par_dt = torch.zeros_like(event_t) if par_dt is None else par_dt
             dstate = torch.zeros_like(dstate) if dstate is None else dstate
-            dcdt = par_dt + torch.sum(dstate * func(event_t, state_t))
 
-            params = tuple(p.requires_grad_(True) for p in params)
-            grad_state_t, *grad_params = torch.autograd.grad(c, (state_t,) + params, -1 / (dcdt + 1e-12), allow_unused=True, retain_graph=True)
+            # Total derivative of event_fn wrt t evaluated at event_t.
+            dcdt = par_dt + torch.sum(dstate * f_val)
 
-        return None, None, None, grad_state_t, *grad_params
+            # Add the gradient from final state to final time value as if a regular odeint was called.
+            grad_t = grad_t + torch.sum(grad_state * f_val)
+            grad_state = grad_state + torch.autograd.grad(c, state_t, -grad_t / (dcdt + 1e-12), allow_unused=True, retain_graph=True)[0]
+
+        return None, None, None, grad_state
