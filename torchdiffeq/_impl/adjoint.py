@@ -210,6 +210,9 @@ def odeint_adjoint(func, y0, t, *, rtol=1e-7, atol=1e-9, method=None, options=No
         solution = ans
     else:
         event_t, solution = ans
+        event_t = event_t.to(t)
+        if decreasing_time:
+            event_t = -event_t
 
     if shapes is not None:
         solution = _flat_to_shape(solution, (len(t),), shapes)
