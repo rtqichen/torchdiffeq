@@ -1,3 +1,4 @@
+import torch
 from .dopri5 import Dopri5Solver
 from .bosh3 import Bosh3Solver
 from .adaptive_heun import AdaptiveHeunSolver
@@ -78,3 +79,58 @@ def odeint(func, y0, t, *, rtol=1e-7, atol=1e-9, method=None, options=None, even
         return solution
     else:
         return event_t, solution
+
+
+def odeint_event(func, y0, t0, *, event_fn, reverse_time=False, odeint_interface=odeint, **kwargs):
+    assert isinstance(event_fn, torch.nn.Module)
+
+    if reverse_time:
+        t = torch.cat([t0.reshape(-1), t0.reshape(-1).detach() - 1.0])
+    else:
+        t = torch.cat([t0.reshape(-1), t0.reshape(-1).detach() + 1.0])
+
+    event_t, solution = odeint_interface(func, y0, t, event_fn=event_fn, **kwargs)
+
+    # Dummy values for rtol, atol, method, and options.
+    shapes, func, y0, t, rtol, atol, method, options, event_fn, decreasing_time = _check_inputs(func, y0, t, 1e-7, 1e-9, None, None, event_fn, SOLVERS)
+
+    if shapes is not None:
+        state_t = torch.cat([s[-1].reshape(-1) for s in solution])
+    else:
+        state_t = solution[-1]
+
+    event_t = ImplicitFnGradientRerouting.apply(func, event_fn, event_t, state_t, *event_fn.parameters())
+    return event_t, solution
+
+
+class ImplicitFnGradientRerouting(torch.autograd.Function):
+
+    @staticmethod
+    def forward(ctx, func, event_fn, event_t, state_t, *params):
+        """ event_t is the solution to event_fn """
+        ctx.func = func
+        ctx.event_fn = event_fn
+        ctx.save_for_backward(event_t, state_t, *params)
+
+        return event_t.detach()
+
+    @staticmethod
+    def backward(ctx, grad_t):
+        func = ctx.func
+        event_fn = ctx.event_fn
+        event_t, state_t, *params = ctx.saved_tensors
+
+        with torch.enable_grad():
+
+            event_t.requires_grad_(True)
+            state_t.requires_grad_(True)
+            c = event_fn(event_t, state_t)
+            par_dt, dstate = torch.autograd.grad(c, (event_t, state_t), allow_unused=True, retain_graph=True)
+            par_dt = torch.zeros_like(event_t) if par_dt is None else par_dt
+            dstate = torch.zeros_like(dstate) if dstate is None else dstate
+            dcdt = par_dt + torch.sum(dstate * func(event_t, state_t))
+
+            params = tuple(p.requires_grad_(True) for p in params)
+            grad_state_t, *grad_params = torch.autograd.grad(c, (state_t,) + params, -1 / (dcdt + 1e-12), allow_unused=True, retain_graph=True)
+
+        return None, None, None, grad_state_t, *grad_params

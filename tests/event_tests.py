@@ -36,7 +36,7 @@ class TestEventHandling(unittest.TestCase):
                                 else:
                                     options = {}
 
-                                t, y = torchdiffeq.odeint(f, y0, t_points, event_fn=event_fn, method=method, options=options)
+                                t, y = torchdiffeq.odeint(f, y0, t_points[0:2], event_fn=event_fn, method=method, options=options)
                                 y = y[-1]
                                 self.assertLess(rel_error(sol[2], y), tol)
                                 self.assertLess(rel_error(t_points[2], t), tol)
@@ -47,7 +47,7 @@ class TestEventHandling(unittest.TestCase):
         def event_fn(t, y):
             return torch.sum(y - sol[-1])
 
-        t, y = torchdiffeq.odeint_adjoint(f, y0, t_points, event_fn=event_fn, method="dopri5")
+        t, y = torchdiffeq.odeint_adjoint(f, y0, t_points[0:2], event_fn=event_fn, method="dopri5")
         y = y[-1]
         self.assertLess(rel_error(sol[-1], y), 1e-4)
         self.assertLess(rel_error(t_points[-1], t), 1e-4)

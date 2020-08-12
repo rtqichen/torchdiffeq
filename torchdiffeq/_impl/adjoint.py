@@ -165,7 +165,7 @@ class OdeintAdjointMethod(torch.autograd.Function):
                 time_vjps[0] = aug_state[0]
 
             # Only compute gradient wrt initial time when in event handling mode.
-            if event_mode:
+            if event_mode and t_requires_grad:
                 time_vjps = torch.cat([time_vjps[0].reshape(-1), torch.zeros_like(_t[1:])])
 
             adj_y = aug_state[2]
@@ -203,9 +203,18 @@ def odeint_adjoint(func, y0, t, *, rtol=1e-7, atol=1e-9, method=None, options=No
         adjoint_shapes = [torch.Size(()), y0.shape, y0.shape] + [torch.Size([sum(param.numel() for param in adjoint_params)])]
         adjoint_options["norm"] = _wrap_norm([_rms_norm, options["norm"], options["norm"]], adjoint_shapes)
 
-    solution = OdeintAdjointMethod.apply(shapes, func, y0, t, rtol, atol, method, options, event_fn, adjoint_rtol, adjoint_atol,
-                                         adjoint_method, adjoint_options, t.requires_grad, *adjoint_params)
+    ans = OdeintAdjointMethod.apply(shapes, func, y0, t, rtol, atol, method, options, event_fn, adjoint_rtol, adjoint_atol,
+                                    adjoint_method, adjoint_options, t.requires_grad, *adjoint_params)
+
+    if event_fn is None:
+        solution = ans
+    else:
+        event_t, solution = ans
 
     if shapes is not None:
         solution = _flat_to_shape(solution, (len(t),), shapes)
-    return solution
+
+    if event_fn is None:
+        return solution
+    else:
+        return event_t, solution
