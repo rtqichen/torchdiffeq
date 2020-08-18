@@ -142,6 +142,6 @@ class ImplicitFnGradientRerouting(torch.autograd.Function):
 
             # Add the gradient from final state to final time value as if a regular odeint was called.
             grad_t = grad_t + torch.sum(grad_state * f_val)
-            grad_state = grad_state + torch.autograd.grad(c, state_t, -grad_t / (dcdt + 1e-12), allow_unused=True, retain_graph=True)[0]
+            grad_state = grad_state + torch.autograd.grad(c, state_t, -grad_t.reshape_as(c) / (dcdt.reshape_as(c) + 1e-12), allow_unused=True, retain_graph=True)[0]
 
         return None, None, None, grad_state
