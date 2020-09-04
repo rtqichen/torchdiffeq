@@ -127,11 +127,11 @@ class ImplicitFnGradientRerouting(torch.autograd.Function):
         event_fn = ctx.event_fn
         event_t, state_t = ctx.saved_tensors
 
+        event_t = event_t.detach().clone().requires_grad_(True)
+        state_t = state_t.detach().clone().requires_grad_(True)
+
         with torch.enable_grad():
             f_val = func(event_t, state_t)
-
-            event_t.requires_grad_(True)
-            state_t.requires_grad_(True)
             c = event_fn(event_t, state_t)
             par_dt, dstate = torch.autograd.grad(c, (event_t, state_t), allow_unused=True, retain_graph=True)
             par_dt = torch.zeros_like(event_t) if par_dt is None else par_dt
