@@ -135,7 +135,7 @@ class FixedGridODESolver(metaclass=abc.ABCMeta):
 
             sign1 = torch.sign(event_fn(t1, y1))
 
-            if sign0 + sign1 == 0:
+            if sign0 != sign1:
                 if self.interp == "linear":
                     interp_fn = lambda t: self._linear_interp(t0, t1, y0, y1, t)
                 elif self.interp == "cubic":
@@ -143,7 +143,7 @@ class FixedGridODESolver(metaclass=abc.ABCMeta):
                     interp_fn = lambda t: self._cubic_hermite_interp(t0, y0, f0, t1, y1, f1, t)
                 else:
                     raise ValueError(f"Unknown interpolation method {self.interp}")
-                event_time, y1 = find_event(interp_fn, t0, t1, event_fn, float(self.atol))
+                event_time, y1 = find_event(interp_fn, sign0, t0, t1, event_fn, float(self.atol))
                 break
             else:
                 t0, y0 = t1, y1
