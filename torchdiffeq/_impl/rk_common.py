@@ -158,9 +158,9 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeEventODESolver):
         return _interp_evaluate(self.rk_state.interp_coeff, self.rk_state.t0, self.rk_state.t1, next_t)
 
     def _advance_until_event(self, event_fn):
-        """Returns state(t) such that event_fn(t, state(t)) == 0."""
+        """Returns t, state(t) such that event_fn(t, state(t)) == 0."""
         if event_fn(self.rk_state.t1, self.rk_state.y1) == 0:
-            return self.rk_state.y1
+            return (self.rk_state.t1, self.rk_state.y1)
 
         n_steps = 0
         sign0 = torch.sign(event_fn(self.rk_state.t1, self.rk_state.y1))
