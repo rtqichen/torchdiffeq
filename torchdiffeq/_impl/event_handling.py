@@ -12,9 +12,9 @@ def find_event(interp_fn, sign0, t0, t1, event_fn, tol):
             t_mid = (t1 + t0) / 2.0
             y_mid = interp_fn(t_mid)
             sign_mid = torch.sign(event_fn(t_mid, y_mid))
-            same_as_sign0 = (sign0 * sign_mid) / 2.0 + 0.5
-            t0 = t_mid * same_as_sign0 + t0 * (1.0 - same_as_sign0)
-            t1 = t_mid * (1.0 - same_as_sign0) + t1 * same_as_sign0
+            same_as_sign0 = (sign0 == sign_mid)
+            t0 = torch.where(same_as_sign0, t_mid, t0)
+            t1 = torch.where(same_as_sign0, t1, t_mid)
         event_t = (t0 + t1) / 2.0
 
     return event_t, interp_fn(event_t)
