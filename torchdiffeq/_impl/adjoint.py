@@ -175,6 +175,9 @@ def odeint_adjoint(func, y0, t, rtol=1e-7, atol=1e-9, method=None, options=None,
     else:
         adjoint_params = tuple(adjoint_params)  # in case adjoint_params is a generator.
 
+    # Filter params that don't require gradients.
+    adjoint_params = tuple(p for p in adjoint_params if p.requires_grad)
+
     # Normalise to non-tupled input
     shapes, func, y0, t, rtol, atol, method, options = _check_inputs(func, y0, t, rtol, atol, method, options, SOLVERS)
 
