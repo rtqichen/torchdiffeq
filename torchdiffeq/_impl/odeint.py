@@ -1,4 +1,5 @@
 import torch
+from torch.autograd.functional import vjp
 from .dopri5 import Dopri5Solver
 from .bosh3 import Bosh3Solver
 from .adaptive_heun import AdaptiveHeunSolver
@@ -133,11 +134,7 @@ class ImplicitFnGradientRerouting(torch.autograd.Function):
         f_val = func(event_t, state_t)
 
         with torch.enable_grad():
-            c = event_fn(event_t, state_t)
-
-        par_dt, dstate = torch.autograd.grad(c, (event_t, state_t), allow_unused=True, retain_graph=True)
-        par_dt = torch.zeros_like(event_t) if par_dt is None else par_dt
-        dstate = torch.zeros_like(state_t) if dstate is None else dstate
+            c, (par_dt, dstate) = vjp(event_fn, (event_t, state_t))
 
         # Total derivative of event_fn wrt t evaluated at event_t.
         dcdt = par_dt + torch.sum(dstate * f_val)
@@ -145,8 +142,8 @@ class ImplicitFnGradientRerouting(torch.autograd.Function):
         # Add the gradient from final state to final time value as if a regular odeint was called.
         grad_t = grad_t + torch.sum(grad_state * f_val)
 
-        dstate = torch.autograd.grad(c, state_t, -grad_t.reshape_as(c) / (dcdt.reshape_as(c) + 1e-12), allow_unused=True, retain_graph=False)[0]
-        dstate = torch.zeros_like(state_t) if dstate is None else dstate
-        grad_state = grad_state + dstate.detach()
+        dstate = dstate * (-grad_t / (dcdt + 1e-12)).reshape_as(c)
+
+        grad_state = grad_state + dstate
 
         return None, None, None, grad_state
