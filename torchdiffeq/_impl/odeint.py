@@ -2,6 +2,7 @@ from .dopri5 import Dopri5Solver
 from .bosh3 import Bosh3Solver
 from .adaptive_heun import AdaptiveHeunSolver
 from .fixed_grid import Euler, Midpoint, RK4
+from .fixed_grid_symplectic import Yoshida4th
 from .fixed_adams import AdamsBashforth, AdamsBashforthMoulton
 from .dopri8 import Dopri8Solver
 from .misc import _check_inputs, _flat_to_shape
@@ -14,6 +15,7 @@ SOLVERS = {
     'euler': Euler,
     'midpoint': Midpoint,
     'rk4': RK4,
+    'yoshida4th':Yoshida4th,
     'explicit_adams': AdamsBashforth,
     'implicit_adams': AdamsBashforthMoulton,
     # Backward compatibility: use the same name as before

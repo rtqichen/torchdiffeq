@@ -154,9 +154,10 @@ class _TupleFunc(torch.nn.Module):
 
 
 class _ReverseFunc(torch.nn.Module):
-    def __init__(self, base_func):
+    def __init__(self, base_func,shapes):
         super(_ReverseFunc, self).__init__()
         self.base_func = base_func
+        self.shapes = shapes
 
     def forward(self, t, y):
         return -self.base_func(-t, y)
@@ -209,7 +210,7 @@ def _check_inputs(func, y0, t, rtol, atol, method, options, SOLVERS):
     _assert_floating('t', t)
     if _decreasing(t):
         t = -t
-        func = _ReverseFunc(func)
+        func = _ReverseFunc(func,shapes)
         try:
             grid_points = options['grid_points']
         except KeyError:
