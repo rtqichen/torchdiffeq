@@ -1,47 +1,48 @@
 import torch
 import warnings
 
+SYMPLECTIC = ['yoshida4th']
 
 def _handle_unused_kwargs(solver, unused_kwargs):
     if len(unused_kwargs) > 0:
         warnings.warn('{}: Unexpected arguments {}'.format(solver.__class__.__name__, unused_kwargs))
 
 
-def _rms_norm(tensor):
-    return tensor.pow(2).mean().sqrt()
+def _rms_norm(inputs):
+    return inputs.pow(2).mean().sqrt()
 
 
 def _mixed_linf_rms_norm(shapes):
-    def _norm(tensor):
+    def _norm(inputs):
         total = 0
         out = []
         for shape in shapes:
             next_total = total + shape.numel()
-            out.append(_rms_norm(tensor[total:next_total]))
+            out.append(_rms_norm(inputs[total:next_total]))
             total = next_total
-        assert total == tensor.numel(), "Shapes do not total to the full size of the tensor."
+        assert total == inputs.numel(), "Shapes do not total to the full size of the tensor."
         return max(out)
     return _norm
 
 
 def _wrap_norm(norm_fns, shapes):
-    def _norm(tensor):
+    def _norm(inputs):
         total = 0
         out = []
         for i, shape in enumerate(shapes):
             next_total = total + shape.numel()
             if i < len(norm_fns):
-                out.append(norm_fns[i](tensor[total:next_total]))
+                out.append(norm_fns[i](inputs[total:next_total]))
             else:
-                out.append(_rms_norm(tensor[total:next_total]))
+                out.append(_rms_norm(inputs[total:next_total]))
             total = next_total
-        assert total == tensor.numel(), "Shapes do not total to the full size of the tensor."
+        assert total == inputs.numel(), "Shapes do not total to the full size of the tensor."
         return max(out)
     return _norm
 
 
-def _linf_norm(tensor):
-    return tensor.max()
+def _linf_norm(inputs):
+    return inputs.max()
 
 
 def _select_initial_step(func, t0, y0, order, rtol, atol, norm, f0=None):
@@ -131,13 +132,28 @@ def _tuple_tol(name, tol, shapes):
     return torch.cat(tol)
 
 
-def _flat_to_shape(tensor, length, shapes):
+def _flat_to_shape(inputs, length, shapes):
     tensor_list = []
     total = 0
     for shape in shapes:
         next_total = total + shape.numel()
         # It's important that this be view((...)), not view(...). Else when length=(), shape=() it fails.
-        tensor_list.append(tensor[..., total:next_total].view((*length, *shape)))
+        tensor_list.append(inputs[..., total:next_total].view((*length, *shape)))
+        total = next_total
+    return tuple(tensor_list)
+
+
+def _flat_to_shape_symplectic(inputs, length, shapes):
+    tensor_list = []
+    total = 0
+    tensor_l, tensor_r = torch.chunk(inputs,2,dim=-1)
+    for shape in shapes:
+        next_total = total + shape.numel()
+        # It's important that this be view((...)), not view(...). Else when length=(), shape=() it fails.
+        tensor_l_ = tensor_l[..., total:next_total].view((*length, *shape))
+        tensor_r_ = tensor_r[..., total:next_total].view((*length, *shape))
+        tensor_ = torch.cat([tensor_l_,tensor_r_],dim=-1)
+        tensor_list.append(tensor_)
         total = next_total
     return tuple(tensor_list)
 
@@ -153,26 +169,54 @@ class _TupleFunc(torch.nn.Module):
         return torch.cat([f_.reshape(-1) for f_ in f])
 
 
-class _ReverseFunc(torch.nn.Module):
-    def __init__(self, base_func,shapes):
-        super(_ReverseFunc, self).__init__()
+class _TupleFuncSymplectic(torch.nn.Module):
+    def __init__(self, base_func, shapes):
+        super(_TupleFuncSymplectic, self).__init__()
         self.base_func = base_func
         self.shapes = shapes
+
+    def forward(self, t, y):
+        f = self.base_func(t, _flat_to_shape_symplectic(y, (), self.shapes))
+        return _reform_inputs_for_symplectic(f)[1]
+
+
+class _ReverseFunc(torch.nn.Module):
+    def __init__(self, base_func):
+        super(_ReverseFunc, self).__init__()
+        self.base_func = base_func
 
     def forward(self, t, y):
         return -self.base_func(-t, y)
 
 
+def _reform_inputs_for_symplectic(inputs):
+    tensor_l = torch.tensor([])
+    tensor_r = torch.tensor([])
+    shapes = []
+    for tensor_ in inputs:
+        assert tensor_.shape[-1] % 2 == 0, 'using symplectic, input dimension must be dividable by two'
+        tensor_l_, tensor_r_ = torch.chunk(tensor_,2,dim=-1)
+        tensor_l = torch.cat([tensor_l, tensor_l_.reshape(-1)])
+        tensor_r = torch.cat([tensor_r, tensor_r_.reshape(-1)])
+        shapes.append(tensor_l_.shape)
+    return shapes, torch.cat([tensor_l, tensor_r])
+
+
 def _check_inputs(func, y0, t, rtol, atol, method, options, SOLVERS):
-    # Normalise to tensor (non-tupled) input
+    # Normalise to inputs (non-tupled) input
     shapes = None
     if not torch.is_tensor(y0):
         assert isinstance(y0, tuple), 'y0 must be either a torch.Tensor or a tuple'
-        shapes = [y0_.shape for y0_ in y0]
+        if method in SYMPLECTIC:
+            shapes, y0 = _reform_inputs_for_symplectic(y0)
+            func = _TupleFuncSymplectic(func, shapes)
+        else:
+            shapes = [y0_.shape for y0_ in y0]
+            y0 = torch.cat([y0_.reshape(-1) for y0_ in y0])
+            func = _TupleFunc(func, shapes)
         rtol = _tuple_tol('rtol', rtol, shapes)
         atol = _tuple_tol('atol', atol, shapes)
-        y0 = torch.cat([y0_.reshape(-1) for y0_ in y0])
-        func = _TupleFunc(func, shapes)
+
     _assert_floating('y0', y0)
 
     # Normalise method and options
@@ -210,7 +254,7 @@ def _check_inputs(func, y0, t, rtol, atol, method, options, SOLVERS):
     _assert_floating('t', t)
     if _decreasing(t):
         t = -t
-        func = _ReverseFunc(func,shapes)
+        func = _ReverseFunc(func)
         try:
             grid_points = options['grid_points']
         except KeyError:
@@ -240,3 +284,5 @@ def _check_inputs(func, y0, t, rtol, atol, method, options, SOLVERS):
     # ~Backward compatibility
 
     return shapes, func, y0, t, rtol, atol, method, options
+
+
