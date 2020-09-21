@@ -5,7 +5,7 @@ from .fixed_grid import Euler, Midpoint, RK4
 from .fixed_grid_symplectic import Yoshida4th
 from .fixed_adams import AdamsBashforth, AdamsBashforthMoulton
 from .dopri8 import Dopri8Solver
-from .misc import _check_inputs, _flat_to_shape
+from .misc import _check_inputs, _flat_to_shape, _flat_to_shape_symplectic, SYMPLECTIC
 
 SOLVERS = {
     'dopri8': Dopri8Solver,
@@ -61,11 +61,15 @@ def odeint(func, y0, t, rtol=1e-7, atol=1e-9, method=None, options=None):
     Raises:
         ValueError: if an invalid `method` is provided.
     """
+
     shapes, func, y0, t, rtol, atol, method, options = _check_inputs(func, y0, t, rtol, atol, method, options, SOLVERS)
 
     solver = SOLVERS[method](func=func, y0=y0, rtol=rtol, atol=atol, **options)
     solution = solver.integrate(t)
 
     if shapes is not None:
-        solution = _flat_to_shape(solution, (len(t),), shapes)
+        if method in SYMPLECTIC:
+            solution = _flat_to_shape_symplectic(solution, (len(t),), shapes)
+        else:
+            solution = _flat_to_shape(solution, (len(t),), shapes)
     return solution
