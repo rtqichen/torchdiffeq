@@ -190,8 +190,10 @@ class _ReverseFunc(torch.nn.Module):
 
 
 def _reform_inputs_for_symplectic(inputs):
-    tensor_l = torch.tensor([])
-    tensor_r = torch.tensor([])
+    device = inputs[0].device
+    dtype = inputs[0].dtype
+    tensor_l = torch.tensor([],device=device,dtype=dtype)
+    tensor_r = torch.tensor([],device=device,dtype=dtype)
     shapes = []
     for tensor_ in inputs:
         assert tensor_.shape[-1] % 2 == 0, 'using symplectic, input dimension must be dividable by two'
