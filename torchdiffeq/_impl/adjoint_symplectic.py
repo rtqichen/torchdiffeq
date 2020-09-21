@@ -74,7 +74,8 @@ class OdeintAdjointMethodSymplectic(torch.autograd.Function):
             # [-1] because y and grad_y are both of shape (len(t), *y0.shape)
             # Symplectic integarator considers the input as (q, p)
             aug_state = [torch.zeros(2, dtype=y.dtype, device=y.device), y[-1], grad_y[-1]]  # vjp_t, y, vjp_y
-            aug_state.extend([torch.zeros(2*len(param)) for param in adjoint_params])  # vjp_params
+            aug_state.extend([torch.zeros(2*len(param), dtype=y.dtype, device=y.device) \
+                              for param in adjoint_params])  # vjp_params
 
             ##################################
             #    Set up backward ODE func    #
@@ -109,13 +110,15 @@ class OdeintAdjointMethodSymplectic(torch.autograd.Function):
                     )
 
                 # autograd.grad returns None if no gradient, set to zero.
-                vjp_t = torch.zeros(2*len(t.reshape(-1))) if vjp_t is None else \
-                            torch.cat([vjp_t, torch.zeros(len(t))])
+                vjp_t = torch.zeros(2*len(t.reshape(-1)), dtype=y.dtype, device=y.device) \
+                                    if vjp_t is None else \
+                                        torch.cat([vjp_t, torch.zeros(len(t))])
 
                 vjp_y = torch.zeros_like(y) if vjp_y is None else vjp_y
 
-                vjp_params = [torch.zeros(2*len(param)) if vjp_param is None 
-                              else torch.cat([vjp_param,torch.zeros(len(vjp_param))])
+                vjp_params = [torch.zeros(2*len(param), dtype=y.dtype, device=y.device) 
+                              if vjp_param is None \
+                              else torch.cat([vjp_param,torch.zeros(len(vjp_param))]) \
                               for param, vjp_param in zip(adjoint_params, vjp_params)]
 
                 return (vjp_t, func_eval, vjp_y, *vjp_params)
