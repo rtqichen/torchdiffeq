@@ -189,6 +189,15 @@ class _ReverseFunc(torch.nn.Module):
         return -self.base_func(-t, y)
 
 
+class _ReverseFuncSymplectic(torch.nn.Module):
+    def __init__(self, base_func):
+        super(_ReverseFuncSymplectic, self).__init__()
+        self.base_func = base_func
+
+    def forward(self, t, y):
+        return self.base_func(-t, y)
+
+
 def _reform_inputs_for_symplectic(inputs):
     device = inputs[0].device
     dtype = inputs[0].dtype
@@ -256,7 +265,10 @@ def _check_inputs(func, y0, t, rtol, atol, method, options, SOLVERS):
     _assert_floating('t', t)
     if _decreasing(t):
         t = -t
-        func = _ReverseFunc(func)
+        if method in SYMPLECTIC:
+            func = _ReverseFuncSymplectic(func)
+        else:
+            func = _ReverseFunc(func)
         try:
             grid_points = options['grid_points']
         except KeyError:
