@@ -40,6 +40,7 @@ class OdeintAdjointMethod(torch.autograd.Function):
             t, y, *adjoint_params = ctx.saved_tensors
             adjoint_params = tuple(adjoint_params)
 
+
             ##################################
             #     Set up adjoint_options     #
             ##################################
@@ -174,7 +175,7 @@ def odeint_adjoint(func, y0, t, rtol=1e-7, atol=1e-9, method=None, options=None,
     if adjoint_options is None:
         adjoint_options = {k: v for k, v in options.items() if k != "norm"} if options is not None else {}
     if adjoint_params is None:
-        adjoint_params = tuple([param.reshape(-1) for param in func.parameters()])
+        adjoint_params = tuple(func.parameters())
     else:
         adjoint_params = tuple(adjoint_params)  # in case adjoint_params is a generator.
 
