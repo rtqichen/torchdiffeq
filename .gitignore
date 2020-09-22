@@ -3,3 +3,4 @@
 *.egg
 *__pycache__*
 .vscode
+*.swp
