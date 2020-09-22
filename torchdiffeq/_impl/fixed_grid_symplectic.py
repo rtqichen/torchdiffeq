@@ -14,6 +14,8 @@ _c2 = 1.0 / (1.0 - pow(2.0,2.0/3.0))
 
 
 class Yoshida4th(FixedGridODESolver):
+    "support only H = p^2/2 + V(q) form"
+
     def __init__(self, eps=0., **kwargs):
         super(Yoshida4th, self).__init__(**kwargs)
         self.eps = torch.as_tensor(eps, dtype=self.dtype, device=self.device)
@@ -21,6 +23,7 @@ class Yoshida4th(FixedGridODESolver):
     def _step_symplectic(self, func, y, t, h, h2):
         dy = torch.zeros(y.size(),dtype=self.dtype,device=self.device)
         n = len(y) // 2
+
         k_ = func(t + self.eps, y)
         dy[:n] = h*_c1*k_[:n] + h2*_c1*_b1*k_[n:]
         dy[n:] = h*_b1*k_[n:]
@@ -46,3 +49,20 @@ class Yoshida4th(FixedGridODESolver):
 
         return self._step_symplectic(func, y, t, h, h2)
 
+    def integrate(self, t):
+        n = len(self.y0) // 2
+        reverse = False
+        if abs(t[0]) > abs(t[-1]):
+            reverse = True
+
+        if reverse:
+            self.y0[n:] = -self.y0[n:]
+
+        solution = super().integrate(t)
+
+        if reverse:
+            self.y0[n:] = -self.y0[n:]
+            solution[:,n:] = -solution[:,n:]
+
+        return solution
+ 
