@@ -13,7 +13,8 @@ _c2 = 1.0 / (1.0 - pow(2.0,2.0/3.0))
 
 
 class Yoshida4th(FixedGridODESolver):
-    "support only H = p^2/2 + V(q) form"
+    "support only H = p^2/2 + V(q,theta) form"
+    order = 4
 
     def __init__(self, eps=0., **kwargs):
         super(Yoshida4th, self).__init__(**kwargs)
