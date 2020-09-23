@@ -37,11 +37,11 @@ class OdeintAdjointMethodSymplectic(torch.autograd.Function):
             t_requires_grad = ctx.t_requires_grad
 
             t, y, *adjoint_params = ctx.saved_tensors
+            num_particles = len(y[-1]) // 2
 
             param_shapes = [param_.shape for param_ in adjoint_params]
             adj_params_len = sum(shape.numel() for shape in param_shapes)
             adjoint_params = tuple(adjoint_params)
-
 
             ##################################
             #     Set up adjoint_options     #
@@ -74,10 +74,9 @@ class OdeintAdjointMethodSymplectic(torch.autograd.Function):
                     shapes = [y[-1].shape]  
                 # adj_t, y, adj_y, adj_params, 
                 # corresponding to the order in aug_state below
-                adjoint_shapes = [torch.Size(())]  \
+                adjoint_shapes = [torch.Size(2)]  \
                                     + shapes + shapes \
-                                    + [torch.Size([sum(param.numel() \
-                                            for param in adjoint_params)])]
+                                    + [torch.Size(adj_params_len)] \
 
                 adjoint_options['norm'] = _mixed_linf_rms_norm(adjoint_shapes)
             # ~Backward compatibility
@@ -106,9 +105,11 @@ class OdeintAdjointMethodSymplectic(torch.autograd.Function):
             # Thus, augmented state should be 
             # ([q_t,p_t],[q,p],[p_grad, q_grad],[q_theta,p_theta])
 
+            adj_y_init = torch.flip(grad_y[-1],dims=[0])
+            adj_y_init[num_particles:] = - adj_y_init[num_particles:]
+
             aug_state = \
-                [torch.zeros(2, dtype=y.dtype, device=y.device), 
-                 y[-1], torch.flip(grad_y[-1],dims=[0])]  
+                [torch.zeros(2, dtype=y.dtype, device=y.device), y[-1], adj_y_init]  
             # [-1] because y and grad_y are both of shape (len(t), *y0.shape)
             #  for the correspondence, grad_y should be flip.
 
@@ -126,6 +127,7 @@ class OdeintAdjointMethodSymplectic(torch.autograd.Function):
                 # the adjoint wrt y, and an integrator wrt t and args.
                 y = y_aug[1]
                 adj_y = torch.flip(y_aug[2],dims=[0])
+                adj_y[:num_particles] = - adj_y[:num_particles]
 
                 with torch.enable_grad():
                     t_ = t.detach()
@@ -152,18 +154,20 @@ class OdeintAdjointMethodSymplectic(torch.autograd.Function):
                     )
 
                 # autograd.grad returns None if no gradient, set to zero.
-                p_t = y_aug[0][1:]
-                p_theta = y_aug[3][adj_params_len:]
-
                 vjp_t = torch.zeros_like(t).reshape(-1) if vjp_t is None else vjp_t
-                vjp_t = torch.cat([p_t,vjp_t])
                 vjp_y = torch.zeros_like(y) if vjp_y is None else vjp_y
                 vjp_params = tuple([torch.zeros_like(param) if vjp_param is None else vjp_param
                               for param, vjp_param in zip(adjoint_params, vjp_params)])
-                vjp_params = torch.cat([vjp_para_.reshape(-1) for vjp_para_ in vjp_params])
-                vjp_params = torch.cat([p_theta, vjp_params])
+
+                p_t = y_aug[0][1:]
+                vjp_t = torch.cat([p_t,vjp_t])
 
                 vjp_y = torch.flip(vjp_y, dims=[0])
+                vjp_y[num_particles:] = - vjp_y[num_particles:]
+
+                p_theta = y_aug[3][adj_params_len:]
+                vjp_params = torch.cat([vjp_para_.reshape(-1) for vjp_para_ in vjp_params])
+                vjp_params = torch.cat([p_theta, vjp_params])
 
                 return (vjp_t, func_eval, vjp_y, vjp_params)
             ##################################
@@ -191,7 +195,9 @@ class OdeintAdjointMethodSymplectic(torch.autograd.Function):
                 )
                 aug_state = [a[1] for a in aug_state]  # extract just the t[i - 1] value
                 aug_state[1] = y[i - 1]  # update to use our forward-pass estimate of the state
-                aug_state[2] += torch.flip(grad_y[i - 1],dims=[0]) 
+                adj_y_t = torch.flip(grad_y[i - 1],dims=[0])
+                adj_y_t[num_particles:] = - adj_y_t[num_particles:]
+                aug_state[2] += adj_y_t 
                 # update any gradients wrt state at this time point
 
             if t_requires_grad:
@@ -199,6 +205,8 @@ class OdeintAdjointMethodSymplectic(torch.autograd.Function):
 
             adj_y = aug_state[2]
             adj_y = torch.flip(adj_y,dims=[0])
+            adj_y[:num_particles] = - adj_y[:num_particles]
+
             adj_params = aug_state[3][adj_params_len:]
             adj_params = _flat_to_shape(adj_params,(),param_shapes)
 
