@@ -4,7 +4,6 @@
 
 import torch
 from .solvers import FixedGridODESolver
-from .rk_common import rk4_alt_step_func
 
 # symplectic integrators constatn 
 _b1 = 1.0/(4.0 - 2.0*pow(2.0,1.0/3.0))
