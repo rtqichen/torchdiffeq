@@ -169,6 +169,15 @@ class _TupleFunc(torch.nn.Module):
         return torch.cat([f_.reshape(-1) for f_ in f])
 
 
+class _ReverseFunc(torch.nn.Module):
+    def __init__(self, base_func):
+        super(_ReverseFunc, self).__init__()
+        self.base_func = base_func
+
+    def forward(self, t, y):
+        return -self.base_func(-t, y)
+
+
 class _TupleFuncSymplectic(torch.nn.Module):
     def __init__(self, base_func, shapes):
         super(_TupleFuncSymplectic, self).__init__()
@@ -177,16 +186,8 @@ class _TupleFuncSymplectic(torch.nn.Module):
 
     def forward(self, t, y):
         f = self.base_func(t, _flat_to_shape_symplectic(y, (), self.shapes))
-        return _reform_inputs_for_symplectic(f)[1]
-
-
-class _ReverseFunc(torch.nn.Module):
-    def __init__(self, base_func):
-        super(_ReverseFunc, self).__init__()
-        self.base_func = base_func
-
-    def forward(self, t, y):
-        return -self.base_func(-t, y)
+        shapes, f = _reform_inputs_for_symplectic(f)
+        return f
 
 
 class _ReverseFuncSymplectic(torch.nn.Module):
@@ -199,16 +200,16 @@ class _ReverseFuncSymplectic(torch.nn.Module):
 
 
 def _reform_inputs_for_symplectic(inputs):
-    device = inputs[0].device
-    dtype = inputs[0].dtype
-    tensor_l = torch.tensor([],device=device,dtype=dtype)
-    tensor_r = torch.tensor([],device=device,dtype=dtype)
     shapes = []
-    for tensor_ in inputs:
-        assert tensor_.shape[-1] % 2 == 0, 'using symplectic, input dimension must be dividable by two'
+    counter = 0
+    for counter, tensor_ in enumerate(inputs):
         tensor_l_, tensor_r_ = torch.chunk(tensor_,2,dim=-1)
-        tensor_l = torch.cat([tensor_l, tensor_l_.reshape(-1)])
-        tensor_r = torch.cat([tensor_r, tensor_r_.reshape(-1)])
+        if counter == 0:
+            tensor_l = tensor_l_.reshape(-1)
+            tensor_r = tensor_r_.reshape(-1)
+        else:
+            tensor_l = torch.cat([tensor_l, tensor_l_.reshape(-1)])
+            tensor_r = torch.cat([tensor_r, tensor_r_.reshape(-1)])
         shapes.append(tensor_l_.shape)
     return shapes, torch.cat([tensor_l, tensor_r])
 
