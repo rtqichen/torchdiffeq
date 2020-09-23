@@ -23,22 +23,23 @@ class ConstantODEforSymplectic(torch.nn.Module):
     def __init__(self):
         super(ConstantODEforSymplectic, self).__init__()
         self.a = torch.nn.Parameter(torch.tensor(0.2))
-        self.b = torch.nn.Parameter(torch.tensor(0.5))
-        self.c = torch.nn.Parameter(torch.tensor(1.0))
+        self.q_0 = torch.tensor(0.5)        
+        self.p_0 = torch.tensor(1.0)
 
     def forward(self, t, y):
-        auxiliy_fp = self.a * torch.ones(len(y)//2).to(y) 
-        auxiliy_fq = y[len(y)//2:]
+        auxiliy_fp = self.a * torch.ones(1).to(y) 
+        auxiliy_fq = y[1:]
         return torch.cat([auxiliy_fq,auxiliy_fp])
 
     def y_exact(self, t):
         t_numpy = t.detach().cpu().numpy()
         ans = []
         for t_i in t_numpy:
-            auxiliy_q = 0.5 * self. a * t_i ** 2 + self.b * t_i + self.c
-            auxiliy_p = self. a * t_i + self.b 
+            auxiliy_q = 0.5 * self. a * t_i ** 2 + self.p_0 * t_i + self.q_0
+            auxiliy_p = self. a * t_i + self.p_0 
             ans.append([auxiliy_q, auxiliy_p])
-        return torch.stack([torch.tensor(ans_) for ans_ in ans]).reshape(len(t_numpy), 2).to(t)
+        return torch.stack([torch.tensor(ans_) for ans_ in ans])\
+                                                .reshape(len(t_numpy), 2).to(t)
 
 
 class SineODE(torch.nn.Module):
@@ -75,19 +76,22 @@ class LinearODE(torch.nn.Module):
 
 class HarmonicOscillator(torch.nn.Module):
 
-    def __init__(self, dim=4):
+    def __init__(self, dim=6):
         super(HarmonicOscillator, self).__init__()
-        self.dim = dim
         n = dim//2
         kappa = 0.1 * torch.abs(torch.randn(n))
         D_H_upper = torch.cat((torch.zeros(n,n) , torch.diag(-kappa)), 1)
         D_H_lower = torch.cat((torch.eye(n), torch.zeros(n,n)), 1)
-        D_H = torch.cat((D_H_upper, D_H_lower),0)
-        self.D_H = torch.nn.Parameter(D_H)
-        self.initial_val = np.ones((1, dim))
+        self.D_H = torch.cat((D_H_upper, D_H_lower),0)
+
+        self.dim = dim
+        self.n = n
+        self.kappa = torch.nn.Parameter(kappa)
+        self.initial_val = 0.5* np.ones((1, dim))
 
     def forward(self, t, y):
-        return torch.matmul(y.reshape(1,self.dim),self.D_H).reshape(-1)
+        n = self.n
+        return torch.cat([y[n:], -self.kappa*y[:n]]) 
 
     def y_exact(self, t):
         t_numpy = t.detach().cpu().numpy()
@@ -108,8 +112,7 @@ if torch.cuda.is_available():
 FIXED_METHODS = ('euler', 'midpoint', 'rk4', 'explicit_adams', 'implicit_adams')
 FIXED_SYMPLECTIC_METHODS = ('yoshida4th',)
 ADAPTIVE_METHODS = ('dopri5', 'bosh3', 'adaptive_heun', 'dopri8')  # TODO: add in adaptive adams and tsit5 if/when they're fixed
-METHODS = FIXED_SYMPLECTIC_METHODS
-#METHODS = FIXED_METHODS + ADAPTIVE_METHODS + FIXED_SYMPLECTIC_METHODS
+METHODS = FIXED_METHODS + ADAPTIVE_METHODS + FIXED_SYMPLECTIC_METHODS
 
 
 def construct_problem(device, npts=10, ode='constant', reverse=False, dtype=torch.float64):
