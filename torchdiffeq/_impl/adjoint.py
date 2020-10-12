@@ -207,10 +207,13 @@ def odeint_adjoint(func, y0, t, rtol=1e-7, atol=1e-9, method=None,
         adjoint_options = {k: v for k, v in options.items() if k != "norm"} \
                                                 if options is not None else {}
     if adjoint_params is None:
-        adjoint_params = tuple(func.parameters())
+        adjoint_params = tuple(find_parameters(func))
     else:
         adjoint_params = tuple(adjoint_params) 
         # in case adjoint_params is a generator.
+
+    # Filter params that don't require gradients.
+    adjoint_params = tuple(p for p in adjoint_params if p.requires_grad)
 
     # Normalise to non-tupled input
     shapes, func, y0, t, rtol, atol, method, options = \
@@ -258,3 +261,19 @@ def odeint_adjoint(func, y0, t, rtol=1e-7, atol=1e-9, method=None,
             solution = _flat_to_shape(solution, (len(t),), shapes)
 
     return solution
+
+
+def find_parameters(module):
+
+    assert isinstance(module, nn.Module)
+
+    if getattr(module, '_is_replica', False):
+
+        def find_tensor_attributes(module):
+            tuples = [(k, v) for k, v in module.__dict__.items() if torch.is_tensor(v) and v.requires_grad]
+            return tuples
+
+        gen = module._named_members(get_members_fn=find_tensor_attributes)
+        return [param for _, param in gen]
+    else:
+        return list(module.parameters())

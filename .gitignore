@@ -3,4 +3,5 @@
 *.egg
 *__pycache__*
 .vscode
-*.swp
+build
+dist
