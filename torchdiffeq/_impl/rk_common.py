@@ -4,7 +4,8 @@ import torch
 from .interp import _interp_evaluate, _interp_fit
 from .misc import (_compute_error_ratio,
                    _select_initial_step,
-                   _optimal_step_size)
+                   _optimal_step_size,
+                   _nextafter)
 from .solvers import AdaptiveStepsizeODESolver
 
 
@@ -182,12 +183,11 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
         _func = self.func
         if on_grid:
             t_grid = self.grid_points[self.next_grid_index].type_as(y0)
-            print("on grid")
             dt = self.grid_points[self.next_grid_index] - t0
             if self.eps is None:
-                dt = torch.nextafter(dt.type_as(y0), dt.type_as(y0) - 1.0).type_as(dt)
+                dt = _nextafter(dt.type_as(y0), dt.type_as(y0) - 1.0).type_as(dt)
                 # Ensure the time value never exceeds or equals the grid time.
-                _func = lambda t, y: self.func(min(t, torch.nextafter(t_grid, t_grid - 1.0)), y)
+                _func = lambda t, y: self.func(min(t, _nextafter(t_grid, t_grid - 1.0)), y)
             else:
                 eps = min(0.5 * dt, self.eps)
                 dt = dt - eps
@@ -216,8 +216,7 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
             # We've just passed a discontinuity in f; we should update f to match the side of the discontinuity we're
             # now on.
             if self.eps is None:
-                print("eps is None")
-                t_next = torch.nextafter(t_grid, t_grid + 1.0)
+                t_next = _nextafter(t_grid, t_grid + 1.0)
             if self.eps != 0:
                 f1 = self.func(t_next, y_next)
             if self.next_grid_index != len(self.grid_points) - 1:
