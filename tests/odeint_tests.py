@@ -50,6 +50,24 @@ class TestSolverError(unittest.TestCase):
                             self.assertLess(rel_error(sol, y), eps)
 
 
+class TestScipySolvers(unittest.TestCase):
+
+    def test_odeint(self):
+        for reverse in (False, True):
+            for dtype in DTYPES:
+                for device in DEVICES:
+                    for solver in ['RK45', 'RK23', 'DOP853', 'Radau', 'BDF', 'LSODA']:
+                        for ode in PROBLEMS:
+                            eps = 1e-3
+
+                            with self.subTest(reverse=reverse, dtype=dtype, device=device, ode=ode, solver=solver):
+                                f, y0, t_points, sol = construct_problem(dtype=dtype, device=device, ode=ode,
+                                                                         reverse=reverse)
+                                y = torchdiffeq.odeint(f, y0, t_points, method='scipy_solver', options={"solver": solver})
+                                self.assertTrue(sol.shape == y.shape)
+                                self.assertLess(rel_error(sol, y), eps)
+
+
 class TestNoIntegration(unittest.TestCase):
     def test_odeint(self):
         for reverse in (False, True):
@@ -72,6 +90,8 @@ class TestGridPoints(unittest.TestCase):
             for device in DEVICES:
                 for method in ADAPTIVE_METHODS:
                     if dtype == torch.float32 and method == 'dopri8':
+                        continue
+                    if method == 'scipy_solver':
                         continue
                     with self.subTest(dtype=dtype, device=device, method=method):
 
