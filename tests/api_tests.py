@@ -30,6 +30,8 @@ class TestCollectionState(unittest.TestCase):
             f, y0, t_points, sol = construct_problem(device=device)
             tuple_f = lambda t, y: (f(t, y[0]), f(t, y[1]))
             for method in ADAPTIVE_METHODS:
+                if method == "scipy_solver":
+                    continue
 
                 with self.subTest(device=device, method=method):
                     for i in range(2):

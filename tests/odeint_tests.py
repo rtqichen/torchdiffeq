@@ -93,6 +93,8 @@ class TestGridPoints(unittest.TestCase):
                 for method in ADAPTIVE_METHODS:
                     if dtype == torch.float32 and method == 'dopri8':
                         continue
+                    if method == 'scipy_solver':
+                        continue
                     with self.subTest(dtype=dtype, device=device, method=method):
 
                         nfe = [0]

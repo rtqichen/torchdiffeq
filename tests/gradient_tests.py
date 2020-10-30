@@ -14,12 +14,24 @@ class TestGradient(unittest.TestCase):
         for device in DEVICES:
             for method in METHODS:
 
+                if method == 'scipy_solver':
+                    continue
+
                 with self.subTest(device=device, method=method):
                     f, y0, t_points, _ = construct_problem(device=device)
                     func = lambda y0, t_points: torchdiffeq.odeint(f, y0, t_points, method=method)
                     self.assertTrue(torch.autograd.gradcheck(func, (y0, t_points)))
 
     def test_adjoint(self):
+        for device in DEVICES:
+            for method in METHODS:
+
+                with self.subTest(device=device, method=method):
+                    f, y0, t_points, _ = construct_problem(device=device)
+                    func = lambda y0, t_points: torchdiffeq.odeint_adjoint(f, y0, t_points, method=method)
+                    self.assertTrue(torch.autograd.gradcheck(func, (y0, t_points)))
+
+    def test_adjoint_against_odeint(self):
         """
         Test against dopri5
         """
@@ -90,7 +102,11 @@ class TestCompareAdjointGradient(unittest.TestCase):
         return func, y0, t_points
 
     def test_against_dopri5(self):
-        method_eps = {'dopri5': (3e-4, 1e-4, 2e-3)}  # TODO: add in adaptive adams if/when it's fixed.
+        # TODO: add in adaptive adams if/when it's fixed.
+        method_eps = {
+            'dopri5': (3e-4, 1e-4, 2e-3),
+            'scipy_solver': (3e-4, 1e-4, 2e-3),
+        }
         for device in DEVICES:
             for method, eps in method_eps.items():
                 for t_grad in (True, False):
