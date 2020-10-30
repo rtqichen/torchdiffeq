@@ -38,9 +38,9 @@ from torchdiffeq import odeint
 
 odeint(func, y0, t)
 ```
-where `func` is any callable implementing the ordinary differential equation `f(t, x)`, `y0` is an _any_-D Tensor or a tuple of _any_-D Tensors representing the initial values, and `t` is a 1-D Tensor containing the evaluation points. The initial time is taken to be `t[0]`.
+where `func` is any callable implementing the ordinary differential equation `f(t, x)`, `y0` is an _any_-D Tensor representing the initial values, and `t` is a 1-D Tensor containing the evaluation points. The initial time is taken to be `t[0]`.
 
-Backpropagation through `odeint` goes through the internals of the solver, but this is not supported for all solvers. Instead, we encourage the use of the adjoint method explained in [1], which will allow solving with as many steps as necessary due to O(1) memory usage.
+Backpropagation through `odeint` goes through the internals of the solver. Note that this is not numerically stable for all solvers (but should probably be fine with the default `dopri5` method). Instead, we encourage the use of the adjoint method explained in [1], which will allow solving with as many steps as necessary due to O(1) memory usage.
 
 To use the adjoint method:
 ```
@@ -56,22 +56,30 @@ The biggest **gotcha** is that `func` must be a `nn.Module` when using the adjoi
  - `rtol` Relative tolerance.
  - `atol` Absolute tolerance.
  - `method` One of the solvers listed below.
+ - `options` A dictionary of solver-specific options, see the [further documentation](FURTHER_DOCUMENTATION.md).
 
 #### List of ODE Solvers:
 
 Adaptive-step:
- - `dopri5` Runge-Kutta 4(5) [default].
- - `adams` Adaptive-order implicit Adams.
+ - `dopri8` Runge-Kutta 7(8) of Dormand-Prince-Shampine
+ - `dopri5` Runge-Kutta 4(5) of Dormand-Prince **[default]**.
+ - `bosh3` Runge-Kutta 2(3) of Bogacki-Shampine
+ - `adaptive_heun` Runge-Kutta 1(2)
 
 Fixed-step:
  - `euler` Euler method.
  - `midpoint` Midpoint method.
  - `rk4` Fourth-order Runge-Kutta with 3/8 rule.
- - `explicit_adams` Explicit Adams.
- - `fixed_adams` Implicit Adams.
+ - `explicit_adams` Explicit Adams-Bashforth.
+ - `implicit_adams` Implicit Adams-Bashforth-Moulton.
+ 
+For most problems, good choices are the default `dopri5`, or to use `rk4` with `options=dict(step_size=...)` set appropriately small. Adjusting the tolerances (adaptive solvers) or step size (fixed solvers), will allow for trade-offs between speed and accuracy.
 
 #### Frequently Asked Questions
 Take a look at our [FAQ](FAQ.md) for frequently asked questions.
+
+#### Further documentation
+For details of the adjoint-specific and solver-specific options, check out the [further documentation](FURTHER_DOCUMENTATION.md).
 
 ### References
 [1] Ricky T. Q. Chen, Yulia Rubanova, Jesse Bettencourt, David Duvenaud. "Neural Ordinary Differential Equations." *Advances in Neural Information Processing Systems.* 2018. [[arxiv]](https://arxiv.org/abs/1806.07366)
