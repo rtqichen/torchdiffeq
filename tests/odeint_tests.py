@@ -65,5 +65,52 @@ class TestNoIntegration(unittest.TestCase):
                                 self.assertLess((sol[0] - y).abs().max(), 1e-12)
 
 
+class TestGridPoints(unittest.TestCase):
+    def test_odeint_grid_points(self):
+
+        for dtype in DTYPES:
+            for device in DEVICES:
+                for method in ADAPTIVE_METHODS:
+                    if dtype == torch.float32 and method == 'dopri8':
+                        continue
+                    with self.subTest(dtype=dtype, device=device, method=method):
+
+                        nfe = [0]
+
+                        def f(t, x):
+                            nfe[0] += 1
+                            if t < 0.5:
+                                return -0.5 * x
+                            else:
+                                return 1.0 * x**2
+
+                        x0 = torch.tensor([1.0, 2.0]).to(device, dtype)
+                        kwargs = dict(rtol=1e-12, atol=1e-14) if method == 'dopri8' else dict()
+
+                        torchdiffeq.odeint(
+                            f, x0, torch.tensor([0., 1.0]).to(device), method=method,
+                            options={"grid_points": torch.tensor([0.5]).to(device), "eps": 1e-6},
+                            **kwargs)
+                        fixed_eps_nfe = nfe[0]
+                        nfe[0] = 0
+
+                        torchdiffeq.odeint(
+                            f, x0, torch.tensor([0., 1.0]).to(device), method=method,
+                            options={"grid_points": torch.tensor([0.5]).to(device), "eps": None},
+                            **kwargs)
+                        nextafter_eps_nfe = nfe[0]
+                        nfe[0] = 0
+
+                        torchdiffeq.odeint(
+                            f, x0, torch.tensor([0., 1.0]).to(device), method=method,
+                            options={"grid_points": torch.tensor([0.5]).to(device), "eps": 0.0},
+                            **kwargs)
+                        zero_eps_nfe = nfe[0]
+                        nfe[0] = 0
+
+                        self.assertLessEqual(nextafter_eps_nfe, fixed_eps_nfe)
+                        self.assertLess(nextafter_eps_nfe, zero_eps_nfe)
+
+
 if __name__ == '__main__':
     unittest.main()
