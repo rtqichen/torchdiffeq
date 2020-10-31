@@ -16,6 +16,11 @@ class TestEventHandling(unittest.TestCase):
             for dtype in DTYPES:
                 for device in DEVICES:
                     for method in METHODS:
+
+                        # TODO: remove after event handling gets enabled.
+                        if method == 'scipy_solver':
+                            continue
+
                         for ode in ("constant", "sine"):
                             with self.subTest(reverse=reverse, dtype=dtype, device=device, ode=ode, method=method):
                                 if method == "explicit_adams":
