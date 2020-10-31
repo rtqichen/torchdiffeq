@@ -111,7 +111,7 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeEventODESolver):
     mid: torch.Tensor
 
     def __init__(self, func, y0, rtol, atol, first_step=None, safety=0.9, ifactor=10.0, dfactor=0.2,
-                 max_num_steps=2 ** 31 - 1, grid_points=None, eps=None, dtype=torch.float64, **kwargs):
+                 max_num_steps=2 ** 31 - 1, grid_points=None, eps=0.0, dtype=torch.float64, **kwargs):
         super(RKAdaptiveStepsizeODESolver, self).__init__(dtype=dtype, y0=y0, **kwargs)
 
         # We use mixed precision. y has its original dtype (probably float32), whilst all 'time'-like objects use
