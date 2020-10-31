@@ -18,3 +18,18 @@ def find_event(interp_fn, sign0, t0, t1, event_fn, tol):
         event_t = (t0 + t1) / 2.0
 
     return event_t, interp_fn(event_t)
+
+
+def combine_event_functions(event_fn, t0, y0):
+    """
+    We ensure all event functions are initially positive,
+    so then we can combine them by taking a min.
+    """
+    with torch.no_grad():
+        initial_signs = torch.sign(event_fn(t0, y0))
+
+    def combined_event_fn(t, y):
+        c = event_fn(t, y)
+        return torch.min(c * initial_signs)
+
+    return combined_event_fn

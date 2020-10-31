@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 import warnings
+from .event_handling import combine_event_functions
 
 
 def _handle_unused_kwargs(solver, unused_kwargs):
@@ -155,9 +156,9 @@ class _TupleFunc(torch.nn.Module):
         return torch.cat([f_.reshape(-1) for f_ in f])
 
 
-class _TupleScalarFunc(torch.nn.Module):
+class _TupleInputOnlyFunc(torch.nn.Module):
     def __init__(self, base_func, shapes):
-        super(_TupleScalarFunc, self).__init__()
+        super(_TupleInputOnlyFunc, self).__init__()
         self.base_func = base_func
         self.shapes = shapes
 
@@ -181,6 +182,9 @@ def _check_inputs(func, y0, t, rtol, atol, method, options, event_fn, SOLVERS):
         if len(t) != 2:
             raise ValueError(f"We require len(t) == 2 when in event handling mode, but got len(t)={len(t)}.")
 
+        # Combine event functions if the output is multivariate.
+        event_fn = combine_event_functions(event_fn, t[0], y0)
+
     # Normalise to tensor (non-tupled) input
     shapes = None
     if not torch.is_tensor(y0):
@@ -191,7 +195,7 @@ def _check_inputs(func, y0, t, rtol, atol, method, options, event_fn, SOLVERS):
         y0 = torch.cat([y0_.reshape(-1) for y0_ in y0])
         func = _TupleFunc(func, shapes)
         if event_fn is not None:
-            event_fn = _TupleScalarFunc(event_fn, shapes)
+            event_fn = _TupleInputOnlyFunc(event_fn, shapes)
     _assert_floating('y0', y0)
 
     # Normalise method and options
