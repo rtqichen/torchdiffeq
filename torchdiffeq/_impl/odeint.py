@@ -4,6 +4,7 @@ from .adaptive_heun import AdaptiveHeunSolver
 from .fixed_grid import Euler, Midpoint, RK4
 from .fixed_adams import AdamsBashforth, AdamsBashforthMoulton
 from .dopri8 import Dopri8Solver
+from .scipy_wrapper import ScipyWrapperODESolver
 from .misc import _check_inputs, _flat_to_shape
 
 SOLVERS = {
@@ -19,6 +20,7 @@ SOLVERS = {
     # Backward compatibility: use the same name as before
     'fixed_adams': AdamsBashforthMoulton,
     # ~Backwards compatibility
+    'scipy_solver': ScipyWrapperODESolver,
 }
 
 
@@ -41,7 +43,7 @@ def odeint(func, y0, t, rtol=1e-7, atol=1e-9, method=None, options=None):
             can also be a tuple of Tensors.
         t: 1-D Tensor holding a sequence of time points for which to solve for
             `y`. The initial time point should be the first element of this sequence,
-            and each time must be larger than the previous time. 
+            and each time must be larger than the previous time.
         rtol: optional float64 Tensor specifying an upper bound on relative error,
             per element of `y`.
         atol: optional float64 Tensor specifying an upper bound on absolute error,

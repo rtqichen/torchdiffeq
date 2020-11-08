@@ -4,7 +4,8 @@ import torch
 from .interp import _interp_evaluate, _interp_fit
 from .misc import (_compute_error_ratio,
                    _select_initial_step,
-                   _optimal_step_size)
+                   _optimal_step_size,
+                   _nextafter)
 from .solvers import AdaptiveStepsizeODESolver
 
 
@@ -109,7 +110,7 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
     mid: torch.Tensor
 
     def __init__(self, func, y0, rtol, atol, first_step=None, safety=0.9, ifactor=10.0, dfactor=0.2,
-                 max_num_steps=2 ** 31 - 1, grid_points=None, eps=0., dtype=torch.float64, **kwargs):
+                 max_num_steps=2 ** 31 - 1, grid_points=None, eps=0.0, dtype=torch.float64, **kwargs):
         super(RKAdaptiveStepsizeODESolver, self).__init__(dtype=dtype, y0=y0, **kwargs)
 
         # We use mixed precision. y has its original dtype (probably float32), whilst all 'time'-like objects use
@@ -127,7 +128,7 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
         self.max_num_steps = torch.as_tensor(max_num_steps, dtype=torch.int32, device=device)
         grid_points = torch.tensor([], dtype=dtype, device=device) if grid_points is None else grid_points.to(dtype)
         self.grid_points = grid_points
-        self.eps = torch.as_tensor(eps, dtype=dtype, device=device)
+        self.eps = eps if eps is None else torch.as_tensor(eps, dtype=dtype, device=device)
         self.dtype = dtype
 
         # Copy from class to instance to set device
@@ -168,7 +169,6 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
         # dt.dtype == self.dtype
         # for coeff in interp_coeff: coeff.dtype == self.y0.dtype
 
-
         ########################################################
         #                      Assertions                      #
         ########################################################
@@ -179,14 +179,20 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
         #     Make step, respecting prescribed grid points     #
         ########################################################
         on_grid = len(self.grid_points) and t0 < self.grid_points[self.next_grid_index] < t0 + dt
+        eps = 0
+        _func = self.func
         if on_grid:
+            t_grid = self.grid_points[self.next_grid_index].type_as(y0)
             dt = self.grid_points[self.next_grid_index] - t0
-            eps = min(0.5 * dt, self.eps)
-            dt = dt - eps
-        else:
-            eps = 0
+            if self.eps is None:
+                dt = _nextafter(dt.type_as(y0), dt.type_as(y0) - 1.0).type_as(dt)
+                # Ensure the time value never exceeds or equals the grid time.
+                _func = lambda t, y: self.func(min(t, _nextafter(t_grid, t_grid - 1.0)), y)
+            else:
+                eps = min(0.5 * dt, self.eps)
+                dt = dt - eps
 
-        y1, f1, y1_error, k = _runge_kutta_step(self.func, y0, f0, t0, dt, tableau=self.tableau)
+        y1, f1, y1_error, k = _runge_kutta_step(_func, y0, f0, t0, dt, tableau=self.tableau)
         # dtypes:
         # y1.dtype == self.y0.dtype
         # f1.dtype == self.y0.dtype
@@ -209,7 +215,9 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
         if on_grid and accept_step:
             # We've just passed a discontinuity in f; we should update f to match the side of the discontinuity we're
             # now on.
-            if eps != 0:
+            if self.eps is None:
+                t_next = _nextafter(t_grid, t_grid + 1.0)
+            if self.eps != 0:
                 f1 = self.func(t_next, y_next)
             if self.next_grid_index != len(self.grid_points) - 1:
                 self.next_grid_index += 1

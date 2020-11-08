@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 import warnings
 
@@ -239,3 +240,18 @@ def _check_inputs(func, y0, t, rtol, atol, method, options, SOLVERS):
     # ~Backward compatibility
 
     return shapes, func, y0, t, rtol, atol, method, options
+
+
+def _nextafter(x1, x2):
+    if hasattr(torch, "nextafter"):
+        return torch.nextafter(x1, x2)
+    else:
+        return np_nextafter(x1, x2)
+
+
+def np_nextafter(x1, x2):
+    warnings.warn("torch.nextafter is only available in PyTorch 1.7 or newer. Falling back to numpy.nextafter.")
+    x1_np = x1.detach().cpu().numpy()
+    x2_np = x2.detach().cpu().numpy()
+    out = torch.tensor(np.nextafter(x1_np, x2_np)).to(x1)
+    return out.detach() + (x1 - x1.detach())  # stitch gradients.

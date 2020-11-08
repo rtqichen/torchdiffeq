@@ -32,6 +32,7 @@ class LinearODE(torch.nn.Module):
 
     def __init__(self, dim=10):
         super(LinearODE, self).__init__()
+        torch.manual_seed(0)
         self.dim = dim
         U = torch.randn(dim, dim) * 0.1
         A = 2 * U - (U + U.transpose(0, 1))
@@ -56,7 +57,7 @@ DEVICES = ['cpu']
 if torch.cuda.is_available():
     DEVICES.append('cuda:0')
 FIXED_METHODS = ('euler', 'midpoint', 'rk4', 'explicit_adams', 'implicit_adams')
-ADAPTIVE_METHODS = ('dopri5', 'bosh3', 'adaptive_heun', 'dopri8')  # TODO: add in adaptive adams and tsit5 if/when they're fixed
+ADAPTIVE_METHODS = ('dopri5', 'bosh3', 'adaptive_heun', 'dopri8', 'scipy_solver')  # TODO: add in adaptive adams and tsit5 if/when they're fixed
 METHODS = FIXED_METHODS + ADAPTIVE_METHODS
 
 
