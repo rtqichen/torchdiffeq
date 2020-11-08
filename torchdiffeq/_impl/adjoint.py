@@ -1,16 +1,67 @@
 import torch
 import torch.nn as nn
 from .odeint import SOLVERS, odeint
-from .misc import _check_inputs, _flat_to_shape
+from .misc import _check_inputs, _flat_to_shape, _all_event_names
+
+
+class AdjointFunc(torch.nn.Module):
+    def __init__(self, base_func, t_requires_grad, adjoint_params):
+        super(AdjointFunc, self).__init__()
+
+        self.base_func = base_func
+        self.t_requires_grad = t_requires_grad
+        self.adjoint_params = adjoint_params
+
+        for event_name in _all_event_names:
+            try:
+                event_func = getattr(base_func, event_name + '_adjoint')
+            except AttributeError:
+                pass
+            else:
+                setattr(self, event_name, event_func)
+
+    def forward(self, t, y_aug):
+        # Dynamics of the original system augmented with
+        # the adjoint wrt y, and an integrator wrt t and args.
+        y = y_aug[1]
+        adj_y = y_aug[2]
+        # ignore gradients wrt time and parameters
+
+        with torch.enable_grad():
+            t_ = t.detach()
+            t = t_.requires_grad_(True)
+            y = y.detach().requires_grad_(True)
+
+            # If using an adaptive solver we don't want to waste time resolving dL/dt unless we need it (which
+            # doesn't necessarily even exist if there is piecewise structure in time), so turning off gradients
+            # wrt t here means we won't compute that if we don't need it.
+            func_eval = self.base_func(t if self.t_requires_grad else t_, y)
+
+            # Workaround for PyTorch bug #39784
+            _t = torch.as_strided(t, (), ())
+            _y = torch.as_strided(y, (), ())
+            _params = tuple(torch.as_strided(param, (), ()) for param in self.adjoint_params)
+
+            vjp_t, vjp_y, *vjp_params = torch.autograd.grad(
+                func_eval, (t, y) + self.adjoint_params, -adj_y,
+                allow_unused=True, retain_graph=True
+            )
+
+        # autograd.grad returns None if no gradient, set to zero.
+        vjp_t = torch.zeros_like(t) if vjp_t is None else vjp_t
+        vjp_y = torch.zeros_like(y) if vjp_y is None else vjp_y
+        vjp_params = [torch.zeros_like(param) if vjp_param is None else vjp_param
+                      for param, vjp_param in zip(self.adjoint_params, vjp_params)]
+
+        return (vjp_t, func_eval, vjp_y, *vjp_params)
 
 
 class OdeintAdjointMethod(torch.autograd.Function):
 
     @staticmethod
-    def forward(ctx, shapes, func, y0, t, rtol, atol, method, options, adjoint_rtol, adjoint_atol, adjoint_method,
+    def forward(ctx, func, y0, t, rtol, atol, solver, adjoint_rtol, adjoint_atol, adjoint_method,
                 adjoint_options, t_requires_grad, *adjoint_params):
 
-        ctx.shapes = shapes
         ctx.func = func
         ctx.adjoint_rtol = adjoint_rtol
         ctx.adjoint_atol = adjoint_atol
@@ -21,14 +72,13 @@ class OdeintAdjointMethod(torch.autograd.Function):
         with torch.no_grad():
             # .detach() so that the tensors y0 and t don't register as requiring gradients when that's checked, e.g.
             # in the SciPy solvers.
-            y = odeint(func, y0.detach(), t.detach(), rtol=rtol, atol=atol, method=method, options=options)
+            y = odeint(func, y0.detach(), t.detach(), rtol=rtol, atol=atol, method=solver)
         ctx.save_for_backward(t, y, *adjoint_params)
         return y
 
     @staticmethod
     def backward(ctx, grad_y):
         with torch.no_grad():
-            shapes = ctx.shapes
             func = ctx.func
             adjoint_rtol = ctx.adjoint_rtol
             adjoint_atol = ctx.adjoint_atol
@@ -51,41 +101,8 @@ class OdeintAdjointMethod(torch.autograd.Function):
             #    Set up backward ODE func    #
             ##################################
 
-            # TODO: use a nn.Module and call odeint_adjoint to implement higher order derivatives.
-            def augmented_dynamics(t, y_aug):
-                # Dynamics of the original system augmented with
-                # the adjoint wrt y, and an integrator wrt t and args.
-                y = y_aug[1]
-                adj_y = y_aug[2]
-                # ignore gradients wrt time and parameters
-
-                with torch.enable_grad():
-                    t_ = t.detach()
-                    t = t_.requires_grad_(True)
-                    y = y.detach().requires_grad_(True)
-
-                    # If using an adaptive solver we don't want to waste time resolving dL/dt unless we need it (which
-                    # doesn't necessarily even exist if there is piecewise structure in time), so turning off gradients
-                    # wrt t here means we won't compute that if we don't need it.
-                    func_eval = func(t if t_requires_grad else t_, y)
-
-                    # Workaround for PyTorch bug #39784
-                    _t = torch.as_strided(t, (), ())
-                    _y = torch.as_strided(y, (), ())
-                    _params = tuple(torch.as_strided(param, (), ()) for param in adjoint_params)
-
-                    vjp_t, vjp_y, *vjp_params = torch.autograd.grad(
-                        func_eval, (t, y) + adjoint_params, -adj_y,
-                        allow_unused=True, retain_graph=True
-                    )
-
-                # autograd.grad returns None if no gradient, set to zero.
-                vjp_t = torch.zeros_like(t) if vjp_t is None else vjp_t
-                vjp_y = torch.zeros_like(y) if vjp_y is None else vjp_y
-                vjp_params = [torch.zeros_like(param) if vjp_param is None else vjp_param
-                              for param, vjp_param in zip(adjoint_params, vjp_params)]
-
-                return (vjp_t, func_eval, vjp_y, *vjp_params)
+            # TODO: Call odeint_adjoint to implement higher order derivatives.
+            augmented_dynamics = AdjointFunc(func, t_requires_grad, adjoint_params)
 
             ##################################
             #       Solve adjoint ODE        #
@@ -120,11 +137,13 @@ class OdeintAdjointMethod(torch.autograd.Function):
             adj_y = aug_state[2]
             adj_params = aug_state[3:]
 
-        return (None, None, adj_y, time_vjps, None, None, None, None, None, None, None, None, None, *adj_params)
+        return (None, adj_y, time_vjps, None, None, None, None, None, None, None, None, *adj_params)
 
 
 def odeint_adjoint(func, y0, t, rtol=1e-7, atol=1e-9, method=None, options=None, adjoint_rtol=None, adjoint_atol=None,
                    adjoint_method=None, adjoint_options=None, adjoint_params=None):
+
+    shapes, func, y0, t, rtol, atol, solver = _check_inputs(func, y0, t, rtol, atol, method, options, SOLVERS)
 
     # We need this in order to access the variables inside this module,
     # since we have no other way of getting variables along the execution path.
@@ -132,8 +151,6 @@ def odeint_adjoint(func, y0, t, rtol=1e-7, atol=1e-9, method=None, options=None,
         raise ValueError('func must be an instance of `nn.Module` to specify the adjoint parameters; alternatively '
                          'they can be specified explicitly via the `adjoint_params` argument. If there are no '
                          'parameters then it is allowable to set `adjoint_params=()`.')
-
-    shapes, func, y0, t, rtol, atol, method, options = _check_inputs(func, y0, t, rtol, atol, method, options, SOLVERS)
 
     # Set up adjoint defaults based on forward settings.
     if adjoint_rtol is None:
@@ -164,7 +181,7 @@ def odeint_adjoint(func, y0, t, rtol=1e-7, atol=1e-9, method=None, options=None,
                                                                                        adjoint_options=adjoint_options,
                                                                                        adjoint_params=adjoint_params)
 
-    solution = OdeintAdjointMethod.apply(shapes, func, y0, t, rtol, atol, method, options, adjoint_rtol, adjoint_atol,
+    solution = OdeintAdjointMethod.apply(func, y0, t, rtol, atol, solver, adjoint_rtol, adjoint_atol,
                                          adjoint_method, adjoint_options, t.requires_grad, *adjoint_params)
 
     if shapes is not None:

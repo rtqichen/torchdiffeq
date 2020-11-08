@@ -2,11 +2,7 @@ import math
 import numpy as np
 import torch
 import warnings
-
-
-def _handle_unused_kwargs(solver, unused_kwargs):
-    if len(unused_kwargs) > 0:
-        warnings.warn('{}: Unexpected arguments {}'.format(solver.__class__.__name__, unused_kwargs))
+from . import solvers
 
 
 def _handle_deprecated_kwargs(solver, kwargs, kwarg, message):
@@ -185,8 +181,9 @@ _inf = torch.tensor(math.inf)
 _neginf = torch.tensor(-math.inf)
 
 
-class _WrapFunc:
+class _WrapFunc(torch.nn.Module):
     def __init__(self, base_func):
+        super(_WrapFunc, self).__init__()
         self.base_func = base_func
         self.events = set()
         for event_name in _all_event_names:
@@ -232,17 +229,6 @@ def _check_inputs(func, y0, t, rtol, atol, method, options, SOLVERS):
         func = _TupleFunc(func, shapes)
     _assert_floating('y0', y0)
 
-    # Normalise method and options
-    if options is None:
-        options = {}
-    else:
-        options = options.copy()
-    if method is None:
-        method = 'dopri5'
-    if method not in SOLVERS:
-        raise ValueError('Invalid method "{}". Must be one of {}'.format(method,
-                                                                         '{"' + '", "'.join(SOLVERS.keys()) + '"}.'))
-
     # Normalise time
     t, is_reversed = _check_timelike('t', t, True, _decreasing)
     if is_reversed:
@@ -261,8 +247,25 @@ def _check_inputs(func, y0, t, rtol, atol, method, options, SOLVERS):
     # ~Backward compatibility
 
     func = _WrapFunc(func)
-    invalid_events = func.events - SOLVERS[method].valid_events()
+
+    # Normalise method and options
+    if options is None:
+        options = {}
+    else:
+        options = options.copy()
+    if method is None:
+        method = 'dopri5'
+    if isinstance(method, solvers.Solver):
+        solver = method
+    else:
+        if method not in SOLVERS:
+            raise ValueError('Invalid method "{}". Must be one of {}'
+                             .format(method, '{"' + '", "'.join(SOLVERS.keys()) + '"}.'))
+        solver = SOLVERS[method](func=func, y0=y0, rtol=rtol, atol=atol, shapes=shapes, is_reversed=is_reversed,
+                                 **options)
+
+    invalid_events = func.events - solver.valid_events()
     if len(invalid_events) > 0:
         raise ValueError("Solver '{}' does not support events {}.".format(method, invalid_events))
 
-    return shapes, func, y0, t, rtol, atol, method, options, is_reversed
+    return shapes, func, y0, t, rtol, atol, solver

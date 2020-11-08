@@ -1,6 +1,6 @@
 import abc
 import torch
-from .misc import _handle_unused_kwargs
+import warnings
 
 
 class Solver(metaclass=abc.ABCMeta):
@@ -13,7 +13,8 @@ class Solver(metaclass=abc.ABCMeta):
         unused_kwargs.pop('atol')
         unused_kwargs.pop('shapes')
         unused_kwargs.pop('is_reversed')
-        _handle_unused_kwargs(self, unused_kwargs)
+        if len(unused_kwargs) > 0:
+            warnings.warn('{}: Unexpected arguments {}'.format(self.__class__.__name__, unused_kwargs))
 
     @classmethod
     def valid_events(cls):
