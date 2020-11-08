@@ -15,9 +15,9 @@ For these solvers, `rtol` and `atol` correspond to the tolerances for accepting/
 
 - `dtype=torch.float64`: what dtype to use for timelike quantities. Setting this to `torch.float32` will improve speed but may produce underflow errors more easily.
 
-- `grid_points=None`: The locations of any discontinuities or derivative discontinuities in the vector field. Crossing these will make the solver suddenly take a larger error, so it will reject the step and slow down to resolve the discontinuity. Once it has done that, then it must speed back up again. If the locations of these discontinuities is known in advance, then the solver can be told about their locations and make a step exactly to them. If passed this should be an ordered one dimensional `torch.Tensor`.
+- `step_locations=None`: Times that a step must me made to. In particular this is useful when `func` has kinks (derivative discontinuities) at these times, as the solver then does not need to (slowly) discover these for itself. If passed this should be an ordered one dimensional `torch.Tensor`.
 
-- `eps=0.`: A small perturbation either side of each value in `grid_points` to evaluate at. If the vector field is discontinuous then this ensures that evaluations are performed the correct size of the discontinuity. If used it usually best to just set this to a small number like `1e-5`.
+- `jump_locations=None`: Times that a step must be made to, and `func` re-evaluated at. In particular this is useful when `func` has discontinuites at these times, as then the solver knows that the final function evaluation of the previous step is not equal to the first function evaluation of this step. (i.e. the FSAL property does not hold at this point.) If passed this should be an ordered one dimensional `torch.Tensor`.
 
 - `norm`: What norm to compute the accept/reject criterion with respect to. Given tensor input, this defaults to an RMS norm. Given tupled input, it computes an RMS norm over each tensor, and then takes a max over the tuple, producing a mixed L-infinity/RMS norm. If passed this should be a function consuming a single tensor of shape the same as `y0` (given tensor input) or a single tensor of shape `(sum(y.numel() for y in y0),)` (given tupled input), and return a scalar tensor corresponding to its norm.
 
@@ -30,9 +30,7 @@ For these solvers, `rtol` and `atol` correspond to the tolerances for accepting/
 Individual solvers also offer certain options.
 
 **euler, midpoint, rk4:**<br>
-For these solvers, `rtol` and `atol` are ignored. These solvers also support:
-
-- `eps=0.`: Analogous to the `eps` argument of the adaptive solvers, this adds a small perturbation to each end of the every step (not just the grid points), to help stay the right side of discontinuities.
+For these solvers, `rtol` and `atol` are ignored. Note that these solvers automatically add small perturbations to their evaluation points, so stepping to discontinuities is supported.
 
 **explicit_adams:**<br>
 For this solver, `rtol` and `atol` are ignored. This solver also supports:
@@ -46,6 +44,11 @@ For this solver, `rtol` and `atol` correspond to the tolerance for convergence o
 
 - `max_iters`: The maximum number of iterations to run the Adams-Moulton corrector for.
 
+**scipy_solver:**<br>
+- `solver`: which SciPy solver to use; corresponds to the `'method'` argument of `scipy.integrate.solve_ivp`.
+
+- `**kwargs`: all additional kwargs are forwarded to `scipy.integrate.solve_ivp`.
+
  ## Adjoint options
  
  The function `odeint_adjoint` offers some adjoint-specific options.
@@ -53,3 +56,18 @@ For this solver, `rtol` and `atol` correspond to the tolerance for convergence o
  - `adjoint_rtol`,<br>`adjoint_atol`,<br>`adjoint_method`,<br>`adjoint_options`:<br>The `rtol, atol, method, options` to use for the backward pass. Defaults to the values used for the forward pass.
  
  - `adjoint_params`: The parameters to compute gradients with respect to in the backward pass. Should be a tuple of tensors. Defaults to `tuple(func.parameters())`. If passed then `func` does not have to be a `torch.nn.Module`.
+ 
+ ## Events
+ 
+ Events can be triggered during the solve. Events should be specified as methods of the `func` argument to `odeint` and `odeint_adjoint`.
+ 
+ At the moment support for this is minimal.
+ 
+ **event_step(self, t0, y0, dt):**<br>
+ This is called immediately before taking a step of size `dt`, at time `t0`, with current solution value `y0`. This is supported by every solver except `scipy_solver`.
+ 
+ **event_accept_step(self, t0, y0, dt):**<br>
+ This is called when accepting a step of size `dt` at time `t0`, with current solution value `y0`. This is supported by the adaptive solvers (dopri8, dopri5, bosh3, adaptive_heun).
+ 
+ **event_reject_step(self, t0, y0, dt):**<br>
+ As `event_accept_step`, except called when rejecting steps.

@@ -165,7 +165,7 @@ class AdamsBashforthMoulton(FixedGridODESolver):
 
     def __init__(self, func, y0, rtol=1e-3, atol=1e-4, implicit=True, max_iters=_MAX_ITERS, max_order=_MAX_ORDER,
                  **kwargs):
-        super(AdamsBashforthMoulton, self).__init__(func, y0, **kwargs)
+        super(AdamsBashforthMoulton, self).__init__(func=func, y0=y0, rtol=rtol, atol=atol, **kwargs)
         assert max_order <= _MAX_ORDER, "max_order must be at most {}".format(_MAX_ORDER)
         if max_order < _MIN_ORDER:
             warnings.warn("max_order is below {}, so the solver reduces to `rk4`.".format(_MIN_ORDER))
@@ -191,34 +191,34 @@ class AdamsBashforthMoulton(FixedGridODESolver):
         error_ratio = _compute_error_ratio(torch.abs(y0 - y1), self.rtol, self.atol, y0, y1, _linf_norm)
         return error_ratio < 1
 
-    def _step_func(self, func, t, dt, y):
-        self._update_history(t, func(t, y))
+    def _step_func(self, func, t0, dt, t1, y0):
+        self._update_history(t0, func(t0, y0))
         order = min(len(self.prev_f), self.max_order - 1)
         if order < _MIN_ORDER - 1:
             # Compute using RK4.
-            dy = rk4_alt_step_func(func, t, dt, y, k1=self.prev_f[0])
+            dy = rk4_alt_step_func(func, t0, dt, t1, y0, k1=self.prev_f[0])
             return dy
         else:
             # Adams-Bashforth predictor.
             bashforth_coeffs = self.bashforth[order]
-            dy = _dot_product(dt * bashforth_coeffs, self.prev_f).type_as(y)  # bashforth is float64 so cast back
+            dy = _dot_product(dt * bashforth_coeffs, self.prev_f).type_as(y0)  # bashforth is float64 so cast back
 
             # Adams-Moulton corrector.
             if self.implicit:
                 moulton_coeffs = self.moulton[order + 1]
-                delta = dt * _dot_product(moulton_coeffs[1:], self.prev_f).type_as(y)  # moulton is float64 so cast back
+                delta = dt * _dot_product(moulton_coeffs[1:], self.prev_f).type_as(y0)  # moulton is float64 so cast back
                 converged = False
                 for _ in range(self.max_iters):
                     dy_old = dy
-                    f = func(t + dt, y + dy)
-                    dy = (dt * (moulton_coeffs[0]) * f).type_as(y) + delta  # moulton is float64 so cast back
+                    f = func(t1, y0 + dy)
+                    dy = (dt * (moulton_coeffs[0]) * f).type_as(y0) + delta  # moulton is float64 so cast back
                     converged = self._has_converged(dy_old, dy)
                     if converged:
                         break
                 if not converged:
                     warnings.warn('Functional iteration did not converge. Solution may be incorrect.', file=sys.stderr)
                     self.prev_f.pop()
-                self._update_history(t, f)
+                self._update_history(t0, f)
             return dy
 
 

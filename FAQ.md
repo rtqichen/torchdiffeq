@@ -18,6 +18,8 @@
   - `rk4` Fourth-order Runge-Kutta with 3/8 rule.
   - `explicit_adams` Explicit Adams.
   - `implicit_adams` Implicit Adams.
+  
+- `scipy_solver`: Wraps a SciPy solver.
 
 
 **What are `NFE-F` and `NFE-B`?**<br>

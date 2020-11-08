@@ -3,15 +3,40 @@ import torch
 from .misc import _handle_unused_kwargs
 
 
-class AdaptiveStepsizeODESolver(metaclass=abc.ABCMeta):
-    def __init__(self, dtype, y0, norm, **unused_kwargs):
-        _handle_unused_kwargs(self, unused_kwargs)
-        del unused_kwargs
-
+class Solver(metaclass=abc.ABCMeta):
+    def __init__(self, func, y0, **unused_kwargs):
+        super(Solver, self).__init__()
+        self.func = func
         self.y0 = y0
-        self.dtype = dtype
 
-        self.norm = norm
+        unused_kwargs.pop('rtol')
+        unused_kwargs.pop('atol')
+        unused_kwargs.pop('shapes')
+        unused_kwargs.pop('is_reversed')
+        _handle_unused_kwargs(self, unused_kwargs)
+
+    @classmethod
+    def valid_events(cls):
+        return set()
+
+    @classmethod
+    def adjoint_options_from_options(cls, shapes, y0, options, adjoint_params):
+        if options is None:
+            return {}
+        return options.copy()
+
+    @classmethod
+    def adjoint_options_from_adjoint_options(cls, shapes, y0, options, adjoint_options, adjoint_params):
+        if adjoint_options is None:
+            return {}
+        return adjoint_options.copy()
+
+
+class AdaptiveStepsizeODESolver(Solver):
+    def __init__(self, dtype, **kwargs):
+        super(AdaptiveStepsizeODESolver, self).__init__(**kwargs)
+
+        self.dtype = dtype
 
     def _before_integrate(self, t):
         pass
@@ -30,18 +55,12 @@ class AdaptiveStepsizeODESolver(metaclass=abc.ABCMeta):
         return solution
 
 
-class FixedGridODESolver(metaclass=abc.ABCMeta):
+class FixedGridODESolver(Solver):
     order: int
 
-    def __init__(self, func, y0, step_size=None, grid_constructor=None, **unused_kwargs):
-        unused_kwargs.pop('rtol', None)
-        unused_kwargs.pop('atol', None)
-        unused_kwargs.pop('norm', None)
-        _handle_unused_kwargs(self, unused_kwargs)
-        del unused_kwargs
+    def __init__(self, y0, is_reversed, step_size=None, grid_constructor=None, **kwargs):
+        super(FixedGridODESolver, self).__init__(y0=y0, is_reversed=is_reversed, **kwargs)
 
-        self.func = func
-        self.y0 = y0
         self.dtype = y0.dtype
         self.device = y0.device
 
@@ -49,12 +68,29 @@ class FixedGridODESolver(metaclass=abc.ABCMeta):
             if grid_constructor is None:
                 self.grid_constructor = lambda f, y0, t: t
             else:
-                self.grid_constructor = grid_constructor
+                if is_reversed:
+                    self.grid_constructor = lambda f, y0, t: -grid_constructor(f, y0, t)
+                else:
+                    self.grid_constructor = grid_constructor
         else:
             if grid_constructor is None:
                 self.grid_constructor = self._grid_constructor_from_step_size(step_size)
             else:
                 raise ValueError("step_size and grid_constructor are mutually exclusive arguments.")
+
+    @classmethod
+    def valid_events(cls):
+        return super(FixedGridODESolver, cls).valid_events() | {'event_step'}
+
+    @classmethod
+    def adjoint_options_from_options(cls, shapes, y0, options, adjoint_params):
+        adjoint_options = super(FixedGridODESolver, cls).adjoint_options_from_options(shapes=shapes,
+                                                                                      y0=y0,
+                                                                                      options=options,
+                                                                                      adjoint_params=adjoint_params)
+        if 'grid_constructor' in options:
+            adjoint_options['grid_constructor'] = lambda f, y0, t: options['grid_constructor'](f, y0, t).flip(0)
+        return adjoint_options
 
     @staticmethod
     def _grid_constructor_from_step_size(step_size):
@@ -71,7 +107,7 @@ class FixedGridODESolver(metaclass=abc.ABCMeta):
         return _grid_constructor
 
     @abc.abstractmethod
-    def _step_func(self, func, t, dt, y):
+    def _step_func(self, func, t0, dt, t1, y):
         pass
 
     def integrate(self, t):
@@ -84,7 +120,9 @@ class FixedGridODESolver(metaclass=abc.ABCMeta):
         j = 1
         y0 = self.y0
         for t0, t1 in zip(time_grid[:-1], time_grid[1:]):
-            dy = self._step_func(self.func, t0, t1 - t0, y0)
+            dt = t1 - t0
+            self.func.event_step(t0, y0, dt)
+            dy = self._step_func(self.func, t0, dt, t1, y0)
             y1 = y0 + dy
 
             while j < len(t) and t1 >= t[j]:

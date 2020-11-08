@@ -1,3 +1,4 @@
+import math
 import numpy as np
 import torch
 import warnings
@@ -8,41 +9,41 @@ def _handle_unused_kwargs(solver, unused_kwargs):
         warnings.warn('{}: Unexpected arguments {}'.format(solver.__class__.__name__, unused_kwargs))
 
 
-def _rms_norm(tensor):
-    return tensor.pow(2).mean().sqrt()
-
-
-def _mixed_linf_rms_norm(shapes):
-    def _norm(tensor):
-        total = 0
-        out = []
-        for shape in shapes:
-            next_total = total + shape.numel()
-            out.append(_rms_norm(tensor[total:next_total]))
-            total = next_total
-        assert total == tensor.numel(), "Shapes do not total to the full size of the tensor."
-        return max(out)
-    return _norm
-
-
-def _wrap_norm(norm_fns, shapes):
-    def _norm(tensor):
-        total = 0
-        out = []
-        for i, shape in enumerate(shapes):
-            next_total = total + shape.numel()
-            if i < len(norm_fns):
-                out.append(norm_fns[i](tensor[total:next_total]))
-            else:
-                out.append(_rms_norm(tensor[total:next_total]))
-            total = next_total
-        assert total == tensor.numel(), "Shapes do not total to the full size of the tensor."
-        return max(out)
-    return _norm
+def _handle_deprecated_kwargs(solver, kwargs, kwarg, message):
+    try:
+        kwargs.pop(kwarg)
+    except KeyError:
+        pass
+    else:
+        warnings.warn('{}: {}'.format(solver.__class__.__name__, message))
 
 
 def _linf_norm(tensor):
     return tensor.max()
+
+
+def _rms_norm(tensor):
+    return tensor.pow(2).mean().sqrt()
+
+
+def _zero_norm(tensor):
+    return 0.
+
+
+def _mixed_norm(norm_fns, shapes):
+    assert len(norm_fns) == len(shapes)
+
+    def _norm(tensor):
+        total = 0
+        out = []
+        for norm_fn, shape in zip(norm_fns, shapes):
+            next_total = total + shape.numel()
+            out.append(norm_fn(tensor[total:next_total]))
+            total = next_total
+        assert total == tensor.numel(), "Shapes do not total to the full size of the tensor."
+        return max(out)
+
+    return _norm
 
 
 def _select_initial_step(func, t0, y0, order, rtol, atol, norm, f0=None):
@@ -108,17 +109,32 @@ def _decreasing(t):
     return (t[1:] < t[:-1]).all()
 
 
-def _assert_one_dimensional(name, t):
-    assert t.ndimension() == 1, "{} must be one dimensional".format(name)
-
-
-def _assert_increasing(name, t):
-    assert (t[1:] > t[:-1]).all(), '{} must be strictly increasing or decreasing'.format(name)
-
-
 def _assert_floating(name, t):
     if not torch.is_floating_point(t):
         raise TypeError('`{}` must be a floating point Tensor but is a {}'.format(name, t.type()))
+
+
+class _StitchGradient(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x1, out):
+        return out
+
+    @staticmethod
+    def backward(ctx, grad_out):
+        return grad_out, None
+
+
+if hasattr(torch, "nextafter"):
+    def _nextafter(x1, x2):
+        out = torch.nextafter(x1, x2).detach()
+        return _StitchGradient.apply(x1, out)
+else:
+    def _nextafter(x1, x2):
+        warnings.warn("torch.nextafter is only available in PyTorch 1.7 or newer. Falling back to numpy.nextafter.")
+        x1_np = x1.detach().cpu().numpy()
+        x2_np = x2.detach().cpu().numpy()
+        out = torch.as_tensor(np.nextafter(x1_np, x2_np), device=x1.device)
+        return _StitchGradient.apply(x1, out)
 
 
 def _tuple_tol(name, tol, shapes):
@@ -163,6 +179,47 @@ class _ReverseFunc(torch.nn.Module):
         return -self.base_func(-t, y)
 
 
+_all_event_names = ['event_step', 'event_accept_step', 'event_reject_step']
+_null_event = lambda *args, **kwargs: None
+_inf = torch.tensor(math.inf)
+_neginf = torch.tensor(-math.inf)
+
+
+class _WrapFunc:
+    def __init__(self, base_func):
+        self.base_func = base_func
+        self.events = set()
+        for event_name in _all_event_names:
+            try:
+                event_func = getattr(base_func, event_name)
+            except AttributeError:
+                setattr(self, event_name, _null_event)
+            else:
+                setattr(self, event_name, event_func)
+                self.events.add(event_name)
+
+    def __call__(self, t, y, perturb=None):
+        t = t.type_as(y)
+        if perturb is True:
+            t = _nextafter(t, _inf)
+        elif perturb is False:
+            t = _nextafter(t, _neginf)
+        return self.base_func(t, y)
+
+
+def _check_timelike(name, timelike, can_grad, reverse_check):
+    assert torch.is_tensor(timelike), '{} must be a torch.Tensor'.format(name)
+    _assert_floating(name, timelike)
+    assert timelike.ndimension() == 1, "{} must be one dimensional".format(name)
+    if not can_grad:
+        assert not timelike.requires_grad, "{} cannot require gradient".format(name)
+    is_reversed = reverse_check(timelike)
+    if is_reversed:
+        timelike = -timelike
+    assert (timelike[1:] > timelike[:-1]).all(), '{} must be strictly increasing or decreasing'.format(name)
+    return timelike, is_reversed
+
+
 def _check_inputs(func, y0, t, rtol, atol, method, options, SOLVERS):
     # Normalise to tensor (non-tupled) input
     shapes = None
@@ -186,46 +243,10 @@ def _check_inputs(func, y0, t, rtol, atol, method, options, SOLVERS):
         raise ValueError('Invalid method "{}". Must be one of {}'.format(method,
                                                                          '{"' + '", "'.join(SOLVERS.keys()) + '"}.'))
 
-    try:
-        grid_points = options['grid_points']
-    except KeyError:
-        pass
-    else:
-        assert torch.is_tensor(grid_points), 'grid_points must be a torch.Tensor'
-        _assert_one_dimensional('grid_points', grid_points)
-        assert not grid_points.requires_grad, "grid_points cannot require gradient"
-        _assert_floating('grid_points', grid_points)
-
-    if 'norm' not in options:
-        if shapes is None:
-            # L2 norm over a single input
-            options['norm'] = _rms_norm
-        else:
-            # Mixed Linf/L2 norm over tupled input (chosen mostly just for backward compatibility reasons)
-            options['norm'] = _mixed_linf_rms_norm(shapes)
-
     # Normalise time
-    assert torch.is_tensor(t), 't must be a torch.Tensor'
-    _assert_one_dimensional('t', t)
-    _assert_floating('t', t)
-    if _decreasing(t):
-        t = -t
+    t, is_reversed = _check_timelike('t', t, True, _decreasing)
+    if is_reversed:
         func = _ReverseFunc(func)
-        try:
-            grid_points = options['grid_points']
-        except KeyError:
-            pass
-        else:
-            options['grid_points'] = -grid_points
-
-    # Can only do after having normalised time
-    _assert_increasing('t', t)
-    try:
-        grid_points = options['grid_points']
-    except KeyError:
-        pass
-    else:
-        _assert_increasing('grid_points', grid_points)
 
     # Tol checking
     if torch.is_tensor(rtol):
@@ -239,19 +260,9 @@ def _check_inputs(func, y0, t, rtol, atol, method, options, SOLVERS):
         t = t.to(y0.device)
     # ~Backward compatibility
 
-    return shapes, func, y0, t, rtol, atol, method, options
+    func = _WrapFunc(func)
+    invalid_events = func.events - SOLVERS[method].valid_events()
+    if len(invalid_events) > 0:
+        raise ValueError("Solver '{}' does not support events {}.".format(method, invalid_events))
 
-
-def _nextafter(x1, x2):
-    if hasattr(torch, "nextafter"):
-        return torch.nextafter(x1, x2)
-    else:
-        return np_nextafter(x1, x2)
-
-
-def np_nextafter(x1, x2):
-    warnings.warn("torch.nextafter is only available in PyTorch 1.7 or newer. Falling back to numpy.nextafter.")
-    x1_np = x1.detach().cpu().numpy()
-    x2_np = x2.detach().cpu().numpy()
-    out = torch.tensor(np.nextafter(x1_np, x2_np)).to(x1)
-    return out.detach() + (x1 - x1.detach())  # stitch gradients.
+    return shapes, func, y0, t, rtol, atol, method, options, is_reversed

@@ -73,6 +73,8 @@ Fixed-step:
  - `explicit_adams` Explicit Adams-Bashforth.
  - `implicit_adams` Implicit Adams-Bashforth-Moulton.
  
+ Additionally SciPy solvers can be called with `scipy_solver`.
+ 
 For most problems, good choices are the default `dopri5`, or to use `rk4` with `options=dict(step_size=...)` set appropriately small. Adjusting the tolerances (adaptive solvers) or step size (fixed solvers), will allow for trade-offs between speed and accuracy.
 
 #### Frequently Asked Questions

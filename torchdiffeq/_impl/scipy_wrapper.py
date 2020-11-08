@@ -1,31 +1,35 @@
-import abc
 import torch
 from scipy.integrate import solve_ivp
-from .misc import _handle_unused_kwargs
+from .solvers import Solver
 
 
-class ScipyWrapperODESolver(metaclass=abc.ABCMeta):
+_backprop_error = "'{}' required gradient but SciPy solvers do not support backpropagation. " \
+                  "Try `odeint_adjoint` instead."
 
-    def __init__(self, func, y0, rtol, atol, solver="LSODA", **unused_kwargs):
-        unused_kwargs.pop('norm', None)
-        unused_kwargs.pop('grid_points', None)
-        unused_kwargs.pop('eps', None)
-        _handle_unused_kwargs(self, unused_kwargs)
-        del unused_kwargs
 
-        self.dtype = y0.dtype
-        self.device = y0.device
-        self.shape = y0.shape
-        self.y0 = y0.detach().cpu().numpy().reshape(-1)
+class ScipyWrapperODESolver(Solver):
+
+    def __init__(self, rtol, atol, solver="LSODA", **kwargs):
+        super(ScipyWrapperODESolver, self).__init__(rtol=rtol, atol=atol, **kwargs)
+
+        if self.y0.requires_grad:
+            raise ValueError(_backprop_error.format('y0'))
+
+        self.dtype = self.y0.dtype
+        self.device = self.y0.device
+        self.shape = self.y0.shape
+        self.y0 = self.y0.cpu().numpy().reshape(-1)
         self.rtol = rtol
         self.atol = atol
         self.solver = solver
-        self.func = convert_func_to_numpy(func, self.shape, self.device, self.dtype)
+        self.func = convert_func_to_numpy(self.func, self.shape, self.device, self.dtype)
 
     def integrate(self, t):
+        if t.requires_grad:
+            raise ValueError(_backprop_error.format('t'))
         if t.numel() == 1:
-            return torch.tensor(self.y0)[None].to(self.device, self.dtype)
-        t = t.detach().cpu().numpy()
+            return torch.as_tensor(self.y0, device=self.device, dtype=self.dtype)[None]
+        t = t.cpu().numpy()
         sol = solve_ivp(
             self.func,
             t_span=[t.min(), t.max()],
@@ -35,7 +39,7 @@ class ScipyWrapperODESolver(metaclass=abc.ABCMeta):
             rtol=self.rtol,
             atol=self.atol,
         )
-        sol = torch.tensor(sol.y).T.to(self.device, self.dtype)
+        sol = torch.as_tensor(sol.y, dtype=self.dtype, device=self.device).T
         sol = sol.reshape(-1, *self.shape)
         return sol
 
@@ -43,10 +47,11 @@ class ScipyWrapperODESolver(metaclass=abc.ABCMeta):
 def convert_func_to_numpy(func, shape, device, dtype):
 
     def np_func(t, y):
-        t = torch.tensor(t).to(device, dtype)
-        y = torch.reshape(torch.tensor(y).to(device, dtype), shape)
-        with torch.no_grad():
-            f = func(t, y)
+        t = torch.as_tensor(t, dtype=dtype, device=device)
+        y = torch.as_tensor(y, dtype=dtype, device=device).reshape(shape)
+        f = func(t, y)
+        if f.requires_grad:
+            raise ValueError(_backprop_error.format('func(t, y)'))
         return f.detach().cpu().numpy().reshape(-1)
 
     return np_func
