@@ -186,18 +186,26 @@ _neginf = torch.tensor(-math.inf)
 
 
 class _WrapFunc(torch.nn.Module):
-    def __init__(self, base_func):
+    def __init__(self, base_func, original_func):
         super(_WrapFunc, self).__init__()
         self.base_func = base_func
         self.events = set()
         for event_name in _all_event_names:
             try:
-                event_func = getattr(base_func, event_name)
+                event_func = getattr(original_func, event_name)
             except AttributeError:
                 setattr(self, event_name, _null_event)
             else:
                 setattr(self, event_name, event_func)
                 self.events.add(event_name)
+        # Preserve adjoint events so that the adjoint can pick up on them later.
+        for event_name in _all_event_names:
+            try:
+                event_func = getattr(original_func, event_name + '_adjoint')
+            except AttributeError:
+                pass
+            else:
+                setattr(self, event_name, event_func)
 
     def __call__(self, t, y, perturb=None):
         t = t.to(y.dtype)
@@ -222,6 +230,8 @@ def _check_timelike(name, timelike, can_grad, reverse_check):
 
 
 def _check_inputs(func, y0, t, rtol, atol, method, options, SOLVERS):
+    original_func = func
+
     # Normalise to tensor (non-tupled) input
     shapes = None
     if not torch.is_tensor(y0):
@@ -250,7 +260,7 @@ def _check_inputs(func, y0, t, rtol, atol, method, options, SOLVERS):
         t = t.to(y0.device)
     # ~Backward compatibility
 
-    func = _WrapFunc(func)
+    func = _WrapFunc(func, original_func)
 
     # Normalise method and options
     if options is None:

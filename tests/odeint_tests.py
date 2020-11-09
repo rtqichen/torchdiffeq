@@ -146,15 +146,12 @@ class TestStepLocations(unittest.TestCase):
 
 
 class _NeuralF(torch.nn.Module):
-    def __init__(self, width, depth, oscillate):
+    def __init__(self, width, oscillate):
         super(_NeuralF, self).__init__()
-        linears = [torch.nn.Linear(2, width), torch.nn.Tanh()]
-        for _ in range(depth - 2):
-            linears.append(torch.nn.Linear(width, width))
-            linears.append(torch.nn.Tanh())
-        linears.append(torch.nn.Linear(width, 2))
-        linears.append(torch.nn.Tanh())
-        self.linears = torch.nn.Sequential(*linears)
+        self.linears = torch.nn.Sequential(torch.nn.Linear(2, width),
+                                           torch.nn.Tanh(),
+                                           torch.nn.Linear(width, 2),
+                                           torch.nn.Tanh())
         self.nfe = 0
         self.oscillate = oscillate
 
@@ -185,9 +182,9 @@ class TestNorms(unittest.TestCase):
                         x0 = torch.tensor([1.0, 2.0], device=device, dtype=dtype)
                         t = torch.tensor([0., 1.0], device=device, dtype=dtype)
 
-                        norm_f = _NeuralF(width=10, depth=2, oscillate=True).to(device, dtype)
+                        norm_f = _NeuralF(width=10, oscillate=True).to(device, dtype)
                         torchdiffeq.odeint(norm_f, x0, t, method=method, options=dict(norm=norm))
-                        large_norm_f = _NeuralF(width=10, depth=2, oscillate=True).to(device, dtype)
+                        large_norm_f = _NeuralF(width=10, oscillate=True).to(device, dtype)
                         with torch.no_grad():
                             for norm_param, large_norm_param in zip(norm_f.parameters(), large_norm_f.parameters()):
                                 large_norm_param.copy_(norm_param)
@@ -213,16 +210,16 @@ class TestNorms(unittest.TestCase):
                         x0 = torch.tensor([1.0, 2.0], device=device, dtype=dtype)
                         t = torch.tensor([0., 1.0], device=device, dtype=dtype)
 
-                        norm_f = _NeuralF(width=100, depth=5, oscillate=True).to(device, dtype)
+                        norm_f = _NeuralF(width=256, oscillate=True).to(device, dtype)
                         out = torchdiffeq.odeint_adjoint(norm_f, x0, t, atol=3e-7, method=method)
                         norm_f.nfe = 0
                         out.sum().backward()
 
-                        seminorm_f = _NeuralF(width=100, depth=5, oscillate=True).to(device, dtype)
+                        seminorm_f = _NeuralF(width=256, oscillate=True).to(device, dtype)
                         with torch.no_grad():
                             for norm_param, seminorm_param in zip(norm_f.parameters(), seminorm_f.parameters()):
                                 seminorm_param.copy_(norm_param)
-                        out = torchdiffeq.odeint_adjoint(seminorm_f, x0, t, atol=3e-7, method=method,
+                        out = torchdiffeq.odeint_adjoint(seminorm_f, x0, t, atol=1e-6, method=method,
                                                          adjoint_options=dict(norm='seminorm'))
                         seminorm_f.nfe = 0
                         out.sum().backward()
@@ -238,7 +235,7 @@ class TestEvents(unittest.TestCase):
         for method in FIXED_METHODS:
             for event_name in ('event_accept_step', 'event_reject_step'):
                 with self.subTest(method=method):
-                    f = _NeuralF(width=10, depth=2, oscillate=False)
+                    f = _NeuralF(width=10, oscillate=False)
                     setattr(f, event_name, lambda t0, y0, dt: None)
                     with self.assertRaises(ValueError):
                         torchdiffeq.odeint(f, x0, t, method=method)
@@ -246,7 +243,7 @@ class TestEvents(unittest.TestCase):
         for method in SCIPY_METHODS:
             for event_name in ('event_step', 'event_accept_step', 'event_reject_step'):
                 with self.subTest(method=method):
-                    f = _NeuralF(width=10, depth=2, oscillate=False)
+                    f = _NeuralF(width=10, oscillate=False)
                     setattr(f, event_name, lambda t0, y0, dt: None)
                     with self.assertRaises(ValueError):
                         torchdiffeq.odeint(f, x0, t, method=method)
@@ -254,9 +251,9 @@ class TestEvents(unittest.TestCase):
     def test_steps(self):
         for adjoint in (False, True):
             for method in FIXED_METHODS + ADAPTIVE_METHODS:
-                if method == 'dopri8':
+                if method == 'dopri8':  # using torch.float32
                     continue
-                with self.subTest(method=method):
+                with self.subTest(adjoint=adjoint, method=method):
 
                     counter = 0
                     accept_counter = 0
@@ -274,7 +271,7 @@ class TestEvents(unittest.TestCase):
                         nonlocal reject_counter
                         reject_counter += 1
 
-                    f = _NeuralF(width=10, depth=2, oscillate=False).to()
+                    f = _NeuralF(width=10, oscillate=False).to()
                     if adjoint:
                         f.event_step_adjoint = event_step
                         if method in ADAPTIVE_METHODS:
@@ -299,6 +296,7 @@ class TestEvents(unittest.TestCase):
                     if method in FIXED_METHODS:
                         self.assertEqual(counter, 10)
                     if method in ADAPTIVE_METHODS:
+                        self.assertGreater(counter, 0)
                         self.assertEqual(accept_counter + reject_counter, counter)
 
 
