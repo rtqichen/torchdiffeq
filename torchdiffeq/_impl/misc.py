@@ -130,11 +130,9 @@ if hasattr(torch, "nextafter"):
         return _StitchGradient.apply(x1, out)
 else:
     def _nextafter(x1, x2):
-        warnings.warn("torch.nextafter is only available in PyTorch 1.7 or newer. Falling back to numpy.nextafter.")
-        x1_np = x1.detach().cpu().numpy()
-        x2_np = x2.detach().cpu().numpy()
-        out = torch.as_tensor(np.nextafter(x1_np, x2_np), device=x1.device)
-        return _StitchGradient.apply(x1, out)
+        warnings.warn("torch.nextafter is only available in PyTorch 1.7 or newer. Falling back to adding a small "
+                      "epsilon.")
+        return torch.where(x1 < x2, x1 + 1e-5, x1 - 1e-5)
 
 
 def _tuple_tol(name, tol, shapes):
@@ -179,8 +177,8 @@ class _ReverseFunc(torch.nn.Module):
         return -self.base_func(-t, y)
 
 
-_all_event_names = ['event_step', 'event_accept_step', 'event_reject_step']
-_null_event = lambda *args, **kwargs: None
+_all_callback_names = ['callback_step', 'callback_accept_step', 'callback_reject_step']
+_null_callback = lambda *args, **kwargs: None
 _inf = torch.tensor(math.inf)
 _neginf = torch.tensor(-math.inf)
 
@@ -189,23 +187,23 @@ class _WrapFunc(torch.nn.Module):
     def __init__(self, base_func, original_func):
         super(_WrapFunc, self).__init__()
         self.base_func = base_func
-        self.events = set()
-        for event_name in _all_event_names:
+        self.callbacks = set()
+        for callback_name in _all_callback_names:
             try:
-                event_func = getattr(original_func, event_name)
+                callback_func = getattr(original_func, callback_name)
             except AttributeError:
-                setattr(self, event_name, _null_event)
+                setattr(self, callback_name, _null_callback)
             else:
-                setattr(self, event_name, event_func)
-                self.events.add(event_name)
-        # Preserve adjoint events so that the adjoint can pick up on them later.
-        for event_name in _all_event_names:
+                setattr(self, callback_name, callback_func)
+                self.callbacks.add(callback_name)
+        # Preserve adjoint callbacks so that the adjoint can pick up on them later.
+        for callback_name in _all_callback_names:
             try:
-                event_func = getattr(original_func, event_name + '_adjoint')
+                callback_func = getattr(original_func, callback_name + '_adjoint')
             except AttributeError:
                 pass
             else:
-                setattr(self, event_name, event_func)
+                setattr(self, callback_name, callback_func)
 
     def __call__(self, t, y, perturb=None):
         t = t.to(y.dtype)
@@ -273,8 +271,8 @@ def _check_inputs(func, y0, t, rtol, atol, method, options, SOLVERS):
         raise ValueError('Invalid method "{}". Must be one of {}'
                          .format(method, '{"' + '", "'.join(SOLVERS.keys()) + '"}.'))
 
-    invalid_events = func.events - SOLVERS[method].valid_events()
-    if len(invalid_events) > 0:
-        raise ValueError("Solver '{}' does not support events {}.".format(method, invalid_events))
+    invalid_callbacks = func.callbacks - SOLVERS[method].valid_callbacks()
+    if len(invalid_callbacks) > 0:
+        raise ValueError("Solver '{}' does not support callbacks {}.".format(method, invalid_callbacks))
 
     return shapes, func, y0, t, rtol, atol, method, options, is_reversed

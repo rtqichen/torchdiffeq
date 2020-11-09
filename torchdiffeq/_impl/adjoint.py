@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from .odeint import SOLVERS, odeint
-from .misc import _check_inputs, _flat_to_shape, _all_event_names
+from .misc import _check_inputs, _flat_to_shape, _all_callback_names
 
 
 class _AdjointFunc(torch.nn.Module):
@@ -12,13 +12,13 @@ class _AdjointFunc(torch.nn.Module):
         self.t_requires_grad = t_requires_grad
         self.adjoint_params = adjoint_params
 
-        for event_name in _all_event_names:
+        for callback_name in _all_callback_names:
             try:
-                event_func = getattr(base_func, event_name + '_adjoint')
+                callback_func = getattr(base_func, callback_name + '_adjoint')
             except AttributeError:
                 pass
             else:
-                setattr(self, event_name, event_func)
+                setattr(self, callback_name, callback_func)
 
     def forward(self, t, y_aug):
         # Dynamics of the original system augmented with

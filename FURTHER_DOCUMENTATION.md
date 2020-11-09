@@ -15,9 +15,9 @@ For these solvers, `rtol` and `atol` correspond to the tolerances for accepting/
 
 - `dtype=torch.float64`: what dtype to use for timelike quantities. Setting this to `torch.float32` will improve speed but may produce underflow errors more easily.
 
-- `step_locations=None`: Times that a step must me made to. In particular this is useful when `func` has kinks (derivative discontinuities) at these times, as the solver then does not need to (slowly) discover these for itself. If passed this should be an ordered one dimensional `torch.Tensor`.
+- `step_t=None`: Times that a step must me made to. In particular this is useful when `func` has kinks (derivative discontinuities) at these times, as the solver then does not need to (slowly) discover these for itself. If passed this should be an ordered one dimensional `torch.Tensor`.
 
-- `jump_locations=None`: Times that a step must be made to, and `func` re-evaluated at. In particular this is useful when `func` has discontinuites at these times, as then the solver knows that the final function evaluation of the previous step is not equal to the first function evaluation of this step. (i.e. the FSAL property does not hold at this point.) If passed this should be an ordered one dimensional `torch.Tensor`.
+- `jump_t=None`: Times that a step must be made to, and `func` re-evaluated at. In particular this is useful when `func` has discontinuites at these times, as then the solver knows that the final function evaluation of the previous step is not equal to the first function evaluation of this step. (i.e. the FSAL property does not hold at this point.) If passed this should be an ordered one dimensional `torch.Tensor`.
 
 - `norm`: What norm to compute the accept/reject criterion with respect to. Given tensor input, this defaults to an RMS norm. Given tupled input, this defaults to computing an RMS norm over each tensor, and then taking a max over the tuple, producing a mixed L-infinity/RMS norm. If passed this should be a function consuming a single tensor of shape the same as `y0` (given tensor input) or a single tensor of shape `(sum(y.numel() for y in y0),)` (given tupled input), and return a scalar tensor corresponding to its norm. When passed as part of `adjoint_options`, then the special value `"seminorm"` may be used to zero out the contribution from the parameters, as per the ["Hey, that's not an ODE"](https://arxiv.org/abs/2009.09457) paper.
 
@@ -55,19 +55,19 @@ For this solver, `rtol` and `atol` correspond to the tolerance for convergence o
  
  - `adjoint_params`: The parameters to compute gradients with respect to in the backward pass. Should be a tuple of tensors. Defaults to `tuple(func.parameters())`. If passed then `func` does not have to be a `torch.nn.Module`.
  
- ## Events
+ ## Callbacks
  
- Events can be triggered during the solve. Events should be specified as methods of the `func` argument to `odeint` and `odeint_adjoint`.
+ Callbacks can be triggered during the solve. Callbacks should be specified as methods of the `func` argument to `odeint` and `odeint_adjoint`.
  
- At the moment support for this is minimal: let us know if you'd find additional events useful.
+ At the moment support for this is minimal: let us know if you'd find additional callbacks useful.
  
- **event_step(self, t0, y0, dt):**<br>
+ **callback_step(self, t0, y0, dt):**<br>
  This is called immediately before taking a step of size `dt`, at time `t0`, with current solution value `y0`. This is supported by every solver except `scipy_solver`.
  
- **event_accept_step(self, t0, y0, dt):**<br>
+ **callback_accept_step(self, t0, y0, dt):**<br>
  This is called when accepting a step of size `dt` at time `t0`, with current solution value `y0`. This is supported by the adaptive solvers (dopri8, dopri5, bosh3, adaptive_heun).
  
- **event_reject_step(self, t0, y0, dt):**<br>
- As `event_accept_step`, except called when rejecting steps.
+ **callback_reject_step(self, t0, y0, dt):**<br>
+ As `callback_accept_step`, except called when rejecting steps.
  
- In addition events can be trigged during the adjoint pass by adding `_adjoint` to the name of any one of the supported events, e.g. `event_step_adjoint`.
+ In addition callbacks can be trigged during the adjoint pass by adding `_adjoint` to the name of any one of the supported callbacks, e.g. `callback_step_adjoint`.

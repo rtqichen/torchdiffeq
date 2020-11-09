@@ -124,40 +124,40 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
 
     def __init__(self, rtol, atol, state_dtype, device, shapes, is_reversed,
                  norm=None, first_step=None, safety=0.9, ifactor=10.0, dfactor=0.2, max_num_steps=2 ** 31 - 1,
-                 step_locations=None, jump_locations=None, dtype=torch.float64, **kwargs):
+                 step_t=None, jump_t=None, dtype=torch.float64, **kwargs):
 
         if 'grid_points' in kwargs:
-            if jump_locations is not None:
-                raise ValueError("'grid_points' has been deprecated and is mutually exclusive with 'step_locations'.")
-            if jump_locations is not None:
-                raise ValueError("'grid_points' has been deprecated and is mutually exclusive with 'jump_locations'.")
+            if jump_t is not None:
+                raise ValueError("'grid_points' has been deprecated and is mutually exclusive with 'step_t'.")
+            if jump_t is not None:
+                raise ValueError("'grid_points' has been deprecated and is mutually exclusive with 'jump_t'.")
             eps = kwargs.get('eps', 0.)
             if eps > 0:
-                jump_locations = kwargs['grid_points']
+                jump_t = kwargs['grid_points']
             else:
-                step_locations = kwargs['grid_points']
+                step_t = kwargs['grid_points']
         _handle_deprecated_kwargs(self, kwargs, 'grid_points', "'grid_points' has been deprecated and renamed "
-                                                               "'step_locations'.")
-        _handle_deprecated_kwargs(self, kwargs, 'eps', "'eps' has been deprecated; use 'jump_locations' instead.")
+                                                               "'step_t'.")
+        _handle_deprecated_kwargs(self, kwargs, 'eps', "'eps' has been deprecated; use 'jump_t' instead.")
 
         dtype = torch.promote_types(dtype, state_dtype)
 
         super(RKAdaptiveStepsizeODESolver, self).__init__(rtol=rtol, atol=atol, state_dtype=state_dtype, device=device,
                                                           shapes=shapes, is_reversed=is_reversed, dtype=dtype, **kwargs)
 
-        if step_locations is None:
-            step_locations = torch.tensor([], dtype=dtype, device=device)
+        if step_t is None:
+            step_t = torch.tensor([], dtype=dtype, device=device)
         else:
-            step_locations, _ = _check_timelike('step_locations', step_locations, False, lambda x: is_reversed)
-            step_locations = step_locations.to(dtype)
-        if jump_locations is None:
-            jump_locations = torch.tensor([], dtype=dtype, device=device)
+            step_t, _ = _check_timelike('step_t', step_t, False, lambda x: is_reversed)
+            step_t = step_t.to(dtype)
+        if jump_t is None:
+            jump_t = torch.tensor([], dtype=dtype, device=device)
         else:
-            jump_locations, _ = _check_timelike('jump_locations', jump_locations, False, lambda x: is_reversed)
-            jump_locations = jump_locations.to(dtype)
-        counts = torch.cat([step_locations, jump_locations]).unique(return_counts=True)[1]
+            jump_t, _ = _check_timelike('jump_t', jump_t, False, lambda x: is_reversed)
+            jump_t = jump_t.to(dtype)
+        counts = torch.cat([step_t, jump_t]).unique(return_counts=True)[1]
         if (counts > 1).any():
-            raise ValueError("`step_locations` and `jump_locations` must not have any repeated elements between them.")
+            raise ValueError("`step_t` and `jump_t` must not have any repeated elements between them.")
 
         if norm is None:
             if shapes is None:
@@ -182,8 +182,8 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
         assert not self.ifactor.requires_grad, "ifactor cannot require gradient."
         assert not self.dfactor.requires_grad, "dfactor cannot require gradient."
         self.max_num_steps = torch.as_tensor(max_num_steps, dtype=torch.int32, device=device)
-        self.step_locations = step_locations
-        self.jump_locations = jump_locations
+        self.step_t = step_t
+        self.jump_t = jump_t
         # We use mixed precision. y has its original dtype (probably float32), whilst all 'time'-like objects use
         # `dtype` (defaulting to float64).
         self.dtype = dtype
@@ -196,14 +196,14 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
         self.mid = self.mid.to(device=device, dtype=state_dtype)
 
     @classmethod
-    def valid_events(cls):
-        return super(RKAdaptiveStepsizeODESolver, cls).valid_events() | {'event_step',
-                                                                         'event_accept_step',
-                                                                         'event_reject_step'}
+    def valid_callbacks(cls):
+        return super(RKAdaptiveStepsizeODESolver, cls).valid_callbacks() | {'callback_step',
+                                                                            'callback_accept_step',
+                                                                            'callback_reject_step'}
 
     @staticmethod
     def _flip_option(adjoint_options, option_name):
-        # We assume that step_locations etc. are given to us ordered in the same direction as for the forward pass (for
+        # We assume that step_t etc. are given to us ordered in the same direction as for the forward pass (for
         # compatibility with the default adjoint_options=options), so we need to flip them around here.
         try:
             option_value = adjoint_options[option_name]
@@ -237,8 +237,8 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
                                                                                              adjoint_params=adjoint_params)
 
         cls._flip_option(adjoint_options, 'grid_points')
-        cls._flip_option(adjoint_options, 'step_locations')
-        cls._flip_option(adjoint_options, 'jump_locations')
+        cls._flip_option(adjoint_options, 'step_t')
+        cls._flip_option(adjoint_options, 'jump_t')
 
         if 'norm' in adjoint_options:
             adjoint_options["norm"] = cls._adjoint_norm(y0, shapes, adjoint_params, adjoint_options['norm'], _rms_norm)
@@ -253,8 +253,8 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
                                                                                                      adjoint_params=adjoint_params)
 
         cls._flip_option(adjoint_options, 'grid_points')
-        cls._flip_option(adjoint_options, 'step_locations')
-        cls._flip_option(adjoint_options, 'jump_locations')
+        cls._flip_option(adjoint_options, 'step_t')
+        cls._flip_option(adjoint_options, 'jump_t')
 
         if 'norm' in options:
             state_norm = options['norm']
@@ -276,8 +276,8 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
         else:
             first_step = self.first_step
         self.rk_state = _RungeKuttaState(y0, f0, t[0], t[0], first_step, [y0] * 5)
-        self.next_step_index = min(bisect.bisect(self.step_locations.tolist(), t[0]), len(self.step_locations) - 1)
-        self.next_jump_index = min(bisect.bisect(self.jump_locations.tolist(), t[0]), len(self.jump_locations) - 1)
+        self.next_step_index = min(bisect.bisect(self.step_t.tolist(), t[0]), len(self.step_t) - 1)
+        self.next_jump_index = min(bisect.bisect(self.jump_t.tolist(), t[0]), len(self.jump_t) - 1)
 
     def _advance(self, func, next_t):
         """Interpolate through the next time point, integrating as necessary."""
@@ -291,7 +291,7 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
     def _adaptive_step(self, func, rk_state):
         """Take an adaptive Runge-Kutta step to integrate the ODE."""
         y0, f0, _, t0, dt, interp_coeff = rk_state
-        func.event_step(t0, y0, dt)
+        func.callback_step(t0, y0, dt)
         t1 = t0 + dt
 
         # dtypes: y0.dtype (probably float32); self.dtype (probably float64)
@@ -313,24 +313,24 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
         #     Make step, respecting prescribed grid points     #
         ########################################################
 
-        on_step_loc = False
-        if len(self.step_locations):
-            next_step_location = self.step_locations[self.next_step_index]
-            on_step_loc = t0 < next_step_location < t0 + dt
-            if on_step_loc:
-                t1 = next_step_location
+        on_step_t = False
+        if len(self.step_t):
+            next_step_t = self.step_t[self.next_step_index]
+            on_step_t = t0 < next_step_t < t0 + dt
+            if on_step_t:
+                t1 = next_step_t
                 dt = t1 - t0
 
-        on_jump_loc = False
-        if len(self.jump_locations):
-            next_jump_location = self.jump_locations[self.next_jump_index]
-            on_jump_loc = t0 < next_jump_location < t0 + dt
-            if on_jump_loc:
-                on_step_loc = False
-                t1 = next_jump_location
+        on_jump_t = False
+        if len(self.jump_t):
+            next_jump_t = self.jump_t[self.next_jump_index]
+            on_jump_t = t0 < next_jump_t < t0 + dt
+            if on_jump_t:
+                on_step_t = False
+                t1 = next_jump_t
                 dt = t1 - t0
 
-        # Must be arranged as doing all the step_locations handling, then all the jump_locations handling, in case we
+        # Must be arranged as doing all the step_t handling, then all the jump_t handling, in case we
         # trigger both. (i.e. interleaving them would be wrong.)
 
         y1, f1, y1_error, k = _runge_kutta_step(func, y0, f0, t0, dt, t1, tableau=self.tableau)
@@ -353,22 +353,22 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
         #                   Update RK State                    #
         ########################################################
         if accept_step:
-            func.event_accept_step(t0, y0, dt)
+            func.callback_accept_step(t0, y0, dt)
             t_next = t1
             y_next = y1
             interp_coeff = self._interp_fit(y0, y_next, k, dt)
-            if on_step_loc:
-                if self.next_step_index != len(self.step_locations) - 1:
+            if on_step_t:
+                if self.next_step_index != len(self.step_t) - 1:
                     self.next_step_index += 1
-            if on_jump_loc:
-                if self.next_jump_index != len(self.jump_locations) - 1:
+            if on_jump_t:
+                if self.next_jump_index != len(self.jump_t) - 1:
                     self.next_jump_index += 1
                 # We've just passed a discontinuity in f; we should update f to match the side of the discontinuity
                 # we're now on.
                 f1 = func(t_next, y_next, True)
             f_next = f1
         else:
-            func.event_reject_step(t0, y0, dt)
+            func.callback_reject_step(t0, y0, dt)
             t_next = t0
             y_next = y0
             f_next = f0

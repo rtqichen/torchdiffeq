@@ -15,7 +15,7 @@ class Solver(metaclass=abc.ABCMeta):
         _handle_unused_kwargs(self, unused_kwargs)
 
     @classmethod
-    def valid_events(cls):
+    def valid_callbacks(cls):
         return set()
 
     @classmethod
@@ -78,8 +78,8 @@ class FixedGridODESolver(Solver):
                 raise ValueError("step_size and grid_constructor are mutually exclusive arguments.")
 
     @classmethod
-    def valid_events(cls):
-        return super(FixedGridODESolver, cls).valid_events() | {'event_step'}
+    def valid_callbacks(cls):
+        return super(FixedGridODESolver, cls).valid_callbacks() | {'callback_step'}
 
     @classmethod
     def adjoint_options_from_options(cls, shapes, y0, options, adjoint_params):
@@ -132,7 +132,7 @@ class FixedGridODESolver(Solver):
         j = 1
         for t0, t1 in zip(time_grid[:-1], time_grid[1:]):
             dt = t1 - t0
-            func.event_step(t0, y0, dt)
+            func.callback_step(t0, y0, dt)
             dy = self._step_func(func, t0, dt, t1, y0)
             y1 = y0 + dy
 

@@ -115,8 +115,8 @@ class _JumpF:
             return x ** 2
 
 
-class TestStepLocations(unittest.TestCase):
-    def test_odeint_step_locations(self):
+class TestJump(unittest.TestCase):
+    def test_odeint_step_t(self):
         for dtype in DTYPES:
             for device in DEVICES:
                 for method in ADAPTIVE_METHODS:
@@ -134,7 +134,7 @@ class TestStepLocations(unittest.TestCase):
 
                             better_f = _JumpF()
                             if new_options:
-                                options = dict(jump_locations=torch.tensor([0.5], device=device))
+                                options = dict(jump_t=torch.tensor([0.5], device=device))
                             else:
                                 options = dict(grid_points=torch.tensor([0.5], device=device), eps=1e-6)
                             with warnings.catch_warnings():
@@ -227,24 +227,24 @@ class TestNorms(unittest.TestCase):
                         self.assertLessEqual(seminorm_f.nfe, norm_f.nfe)
 
 
-class TestEvents(unittest.TestCase):
-    def test_wrong_event(self):
+class TestCallbacks(unittest.TestCase):
+    def test_wrong_callback(self):
         x0 = torch.tensor([1.0, 2.0])
         t = torch.tensor([0., 1.0])
 
         for method in FIXED_METHODS:
-            for event_name in ('event_accept_step', 'event_reject_step'):
+            for callback_name in ('callback_accept_step', 'callback_reject_step'):
                 with self.subTest(method=method):
                     f = _NeuralF(width=10, oscillate=False)
-                    setattr(f, event_name, lambda t0, y0, dt: None)
+                    setattr(f, callback_name, lambda t0, y0, dt: None)
                     with self.assertRaises(ValueError):
                         torchdiffeq.odeint(f, x0, t, method=method)
 
         for method in SCIPY_METHODS:
-            for event_name in ('event_step', 'event_accept_step', 'event_reject_step'):
+            for callback_name in ('callback_step', 'callback_accept_step', 'callback_reject_step'):
                 with self.subTest(method=method):
                     f = _NeuralF(width=10, oscillate=False)
-                    setattr(f, event_name, lambda t0, y0, dt: None)
+                    setattr(f, callback_name, lambda t0, y0, dt: None)
                     with self.assertRaises(ValueError):
                         torchdiffeq.odeint(f, x0, t, method=method)
 
@@ -259,29 +259,29 @@ class TestEvents(unittest.TestCase):
                     accept_counter = 0
                     reject_counter = 0
 
-                    def event_step(t0, y0, dt):
+                    def callback_step(t0, y0, dt):
                         nonlocal counter
                         counter += 1
 
-                    def event_accept_step(t0, y0, dt):
+                    def callback_accept_step(t0, y0, dt):
                         nonlocal accept_counter
                         accept_counter += 1
 
-                    def event_reject_step(t0, y0, dt):
+                    def callback_reject_step(t0, y0, dt):
                         nonlocal reject_counter
                         reject_counter += 1
 
                     f = _NeuralF(width=10, oscillate=False).to()
                     if adjoint:
-                        f.event_step_adjoint = event_step
+                        f.callback_step_adjoint = callback_step
                         if method in ADAPTIVE_METHODS:
-                            f.event_accept_step_adjoint = event_accept_step
-                            f.event_reject_step_adjoint = event_reject_step
+                            f.callback_accept_step_adjoint = callback_accept_step
+                            f.callback_reject_step_adjoint = callback_reject_step
                     else:
-                        f.event_step = event_step
+                        f.callback_step = callback_step
                         if method in ADAPTIVE_METHODS:
-                            f.event_accept_step = event_accept_step
-                            f.event_reject_step = event_reject_step
+                            f.callback_accept_step = callback_accept_step
+                            f.callback_reject_step = callback_reject_step
                     x0 = torch.tensor([1.0, 2.0])
                     t = torch.tensor([0., 1.0])
 
