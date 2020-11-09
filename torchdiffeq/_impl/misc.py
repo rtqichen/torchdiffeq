@@ -2,7 +2,11 @@ import math
 import numpy as np
 import torch
 import warnings
-from . import solvers
+
+
+def _handle_unused_kwargs(solver, unused_kwargs):
+    if len(unused_kwargs) > 0:
+        warnings.warn('{}: Unexpected arguments {}'.format(solver.__class__.__name__, unused_kwargs))
 
 
 def _handle_deprecated_kwargs(solver, kwargs, kwarg, message):
@@ -95,7 +99,7 @@ def _optimal_step_size(last_step, error_ratio, safety, ifactor, dfactor, order):
         return last_step * ifactor
     if error_ratio < 1:
         dfactor = torch.ones((), dtype=last_step.dtype, device=last_step.device)
-    error_ratio = error_ratio.type_as(last_step)
+    error_ratio = error_ratio.to(last_step.dtype)
     exponent = torch.tensor(order, dtype=last_step.dtype, device=last_step.device).reciprocal()
     factor = torch.min(ifactor, torch.max(safety / error_ratio ** exponent, dfactor))
     return last_step * factor
@@ -196,7 +200,7 @@ class _WrapFunc(torch.nn.Module):
                 self.events.add(event_name)
 
     def __call__(self, t, y, perturb=None):
-        t = t.type_as(y)
+        t = t.to(y.dtype)
         if perturb is True:
             t = _nextafter(t, _inf)
         elif perturb is False:

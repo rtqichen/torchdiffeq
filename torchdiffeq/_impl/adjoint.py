@@ -71,7 +71,7 @@ class _AdjointIntegrate(torch.autograd.Function):
 
         # .detach() so that the tensors y0 and t don't register as requiring gradients when that's checked, e.g. in the
         # SciPy solvers.
-        y = solver.integrate(t.detach())
+        y = solver.integrate(func, y0.detach(), t.detach())
         ctx.save_for_backward(t, y, *adjoint_params)
         return y
 
@@ -100,7 +100,6 @@ class _AdjointIntegrate(torch.autograd.Function):
             #    Set up backward ODE func    #
             ##################################
 
-            # TODO: Call odeint_adjoint to implement higher order derivatives.
             augmented_dynamics = _AdjointFunc(func, t_requires_grad, adjoint_params)
 
             ##################################
@@ -121,6 +120,7 @@ class _AdjointIntegrate(torch.autograd.Function):
                     time_vjps[i] = dLd_cur_t
 
                 # Run the augmented system backwards in time.
+                # TODO: Call odeint_adjoint to implement higher order derivatives. (Or better still, this Function.)
                 aug_state = odeint(
                     augmented_dynamics, tuple(aug_state),
                     t[i - 1:i + 1].flip(0),
@@ -144,8 +144,8 @@ def odeint_adjoint(func, y0, t, rtol=1e-7, atol=1e-9, method=None, options=None,
 
     shapes, func, y0, t, rtol, atol, method, options, is_reversed = _check_inputs(func, y0, t, rtol, atol, method,
                                                                                   options, SOLVERS)
-    solver = SOLVERS[method](func=func, y0=y0, rtol=rtol, atol=atol, shapes=shapes, is_reversed=is_reversed,
-                             **options)
+    solver = SOLVERS[method](rtol=rtol, atol=atol, state_dtype=y0.dtype, device=y0.device, shapes=shapes,
+                             is_reversed=is_reversed, **options)
 
     # We need this in order to access the variables inside this module,
     # since we have no other way of getting variables along the execution path.
@@ -156,9 +156,19 @@ def odeint_adjoint(func, y0, t, rtol=1e-7, atol=1e-9, method=None, options=None,
 
     # Set up adjoint defaults based on forward settings.
     if adjoint_rtol is None:
-        adjoint_rtol = rtol
+        try:
+            iter(rtol)
+        except TypeError:
+            adjoint_rtol = rtol
+        else:
+            raise ValueError("`adjoint_rtol` cannot be inferred from `rtol` when `rtol` is an iterable.")
     if adjoint_atol is None:
-        adjoint_atol = atol
+        try:
+            iter(atol)
+        except TypeError:
+            adjoint_atol = atol
+        else:
+            raise ValueError("`adjoint_atol` cannot be inferred from `atol` when `atol` is an iterable.")
     if adjoint_method is None:
         adjoint_method = method
     if adjoint_method != method and options is not None and adjoint_options is None:

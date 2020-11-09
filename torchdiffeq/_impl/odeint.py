@@ -63,10 +63,10 @@ def odeint(func, y0, t, rtol=1e-7, atol=1e-9, method=None, options=None):
     """
     shapes, func, y0, t, rtol, atol, method, options, is_reversed = _check_inputs(func, y0, t, rtol, atol, method,
                                                                                   options, SOLVERS)
-    solver = SOLVERS[method](func=func, y0=y0, rtol=rtol, atol=atol, shapes=shapes, is_reversed=is_reversed,
-                             **options)
+    solver = SOLVERS[method](rtol=rtol, atol=atol, state_dtype=y0.dtype, device=y0.device, shapes=shapes,
+                             is_reversed=is_reversed, **options)
 
-    solution = solver.integrate(t)
+    solution = solver.integrate(func, y0, t)
 
     if shapes is not None:
         solution = _flat_to_shape(solution, (len(t),), shapes)

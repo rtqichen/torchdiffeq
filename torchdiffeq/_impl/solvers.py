@@ -1,20 +1,18 @@
 import abc
 import torch
-import warnings
+from .misc import _handle_unused_kwargs
 
 
 class Solver(metaclass=abc.ABCMeta):
-    def __init__(self, func, y0, **unused_kwargs):
+    def __init__(self, **unused_kwargs):
         super(Solver, self).__init__()
-        self.func = func
-        self.y0 = y0
-
         unused_kwargs.pop('rtol')
         unused_kwargs.pop('atol')
+        unused_kwargs.pop('state_dtype')
+        unused_kwargs.pop('device')
         unused_kwargs.pop('shapes')
         unused_kwargs.pop('is_reversed')
-        if len(unused_kwargs) > 0:
-            warnings.warn('{}: Unexpected arguments {}'.format(self.__class__.__name__, unused_kwargs))
+        _handle_unused_kwargs(self, unused_kwargs)
 
     @classmethod
     def valid_events(cls):
@@ -32,38 +30,38 @@ class Solver(metaclass=abc.ABCMeta):
             return {}
         return adjoint_options.copy()
 
+    @abc.abstractmethod
+    def integrate(self, func, y0, t):
+        raise NotImplementedError
+
 
 class AdaptiveStepsizeODESolver(Solver):
     def __init__(self, dtype, **kwargs):
         super(AdaptiveStepsizeODESolver, self).__init__(**kwargs)
-
         self.dtype = dtype
 
-    def _before_integrate(self, t):
+    def _before_integrate(self, func, y0, t):
         pass
 
     @abc.abstractmethod
-    def _advance(self, next_t):
+    def _advance(self, func, next_t):
         raise NotImplementedError
 
-    def integrate(self, t):
-        solution = torch.empty(len(t), *self.y0.shape, dtype=self.y0.dtype, device=self.y0.device)
-        solution[0] = self.y0
+    def integrate(self, func, y0, t):
+        solution = torch.empty(len(t), *y0.shape, dtype=y0.dtype, device=y0.device)
+        solution[0] = y0
         t = t.to(self.dtype)
-        self._before_integrate(t)
+        self._before_integrate(func, y0, t)
         for i in range(1, len(t)):
-            solution[i] = self._advance(t[i])
+            solution[i] = self._advance(func, t[i])
         return solution
 
 
 class FixedGridODESolver(Solver):
     order: int
 
-    def __init__(self, y0, is_reversed, step_size=None, grid_constructor=None, **kwargs):
-        super(FixedGridODESolver, self).__init__(y0=y0, is_reversed=is_reversed, **kwargs)
-
-        self.dtype = y0.dtype
-        self.device = y0.device
+    def __init__(self, is_reversed, step_size=None, grid_constructor=None, **kwargs):
+        super(FixedGridODESolver, self).__init__(is_reversed=is_reversed, **kwargs)
 
         if step_size is None:
             if grid_constructor is None:
@@ -89,8 +87,21 @@ class FixedGridODESolver(Solver):
                                                                                       y0=y0,
                                                                                       options=options,
                                                                                       adjoint_params=adjoint_params)
-        if 'grid_constructor' in options:
-            adjoint_options['grid_constructor'] = lambda f, y0, t: options['grid_constructor'](f, y0, t).flip(0)
+        if 'grid_constructor' in adjoint_options:
+            _grid_constructor = adjoint_options['grid_constructor']
+            adjoint_options['grid_constructor'] = lambda func, y0, t: _grid_constructor(func, y0, t).flip(0)
+        return adjoint_options
+
+    @classmethod
+    def adjoint_options_from_adjoint_options(cls, shapes, y0, options, adjoint_options, adjoint_params):
+        adjoint_options = super(FixedGridODESolver, cls).adjoint_options_from_adjoint_options(shapes=shapes,
+                                                                                              y0=y0,
+                                                                                              options=options,
+                                                                                              adjoint_options=adjoint_options,
+                                                                                              adjoint_params=adjoint_params)
+        if 'grid_constructor' in adjoint_options:
+            _grid_constructor = adjoint_options['grid_constructor']
+            adjoint_options['grid_constructor'] = lambda func, y0, t: _grid_constructor(func, y0, t).flip(0)
         return adjoint_options
 
     @staticmethod
@@ -111,19 +122,18 @@ class FixedGridODESolver(Solver):
     def _step_func(self, func, t0, dt, t1, y):
         pass
 
-    def integrate(self, t):
-        time_grid = self.grid_constructor(self.func, self.y0, t)
+    def integrate(self, func, y0, t):
+        time_grid = self.grid_constructor(func, y0, t)
         assert time_grid[0] == t[0] and time_grid[-1] == t[-1]
 
-        solution = torch.empty(len(t), *self.y0.shape, dtype=self.y0.dtype, device=self.y0.device)
-        solution[0] = self.y0
+        solution = torch.empty(len(t), *y0.shape, dtype=y0.dtype, device=y0.device)
+        solution[0] = y0
 
         j = 1
-        y0 = self.y0
         for t0, t1 in zip(time_grid[:-1], time_grid[1:]):
             dt = t1 - t0
-            self.func.event_step(t0, y0, dt)
-            dy = self._step_func(self.func, t0, dt, t1, y0)
+            func.event_step(t0, y0, dt)
+            dy = self._step_func(func, t0, dt, t1, y0)
             y1 = y0 + dy
 
             while j < len(t) and t1 >= t[j]:

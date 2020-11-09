@@ -163,23 +163,24 @@ def _dot_product(x, y):
 class AdamsBashforthMoulton(FixedGridODESolver):
     order = 4
 
-    def __init__(self, func, y0, rtol=1e-3, atol=1e-4, implicit=True, max_iters=_MAX_ITERS, max_order=_MAX_ORDER,
+    def __init__(self, rtol, atol, state_dtype, device, implicit=True, max_iters=_MAX_ITERS, max_order=_MAX_ORDER,
                  **kwargs):
-        super(AdamsBashforthMoulton, self).__init__(func=func, y0=y0, rtol=rtol, atol=atol, **kwargs)
+        super(AdamsBashforthMoulton, self).__init__(rtol=rtol, atol=atol, state_dtype=state_dtype, device=device,
+                                                    **kwargs)
         assert max_order <= _MAX_ORDER, "max_order must be at most {}".format(_MAX_ORDER)
         if max_order < _MIN_ORDER:
             warnings.warn("max_order is below {}, so the solver reduces to `rk4`.".format(_MIN_ORDER))
 
-        self.rtol = torch.as_tensor(rtol, dtype=y0.dtype, device=y0.device)
-        self.atol = torch.as_tensor(atol, dtype=y0.dtype, device=y0.device)
+        self.rtol = torch.as_tensor(rtol, dtype=state_dtype, device=device)
+        self.atol = torch.as_tensor(atol, dtype=state_dtype, device=device)
         self.implicit = implicit
         self.max_iters = max_iters
         self.max_order = int(max_order)
         self.prev_f = collections.deque(maxlen=self.max_order - 1)
         self.prev_t = None
 
-        self.bashforth = [x.to(y0.device) for x in _BASHFORTH_DIVISOR]
-        self.moulton = [x.to(y0.device) for x in _MOULTON_DIVISOR]
+        self.bashforth = [x.to(device) for x in _BASHFORTH_DIVISOR]
+        self.moulton = [x.to(device) for x in _MOULTON_DIVISOR]
 
     def _update_history(self, t, f):
         if self.prev_t is None or self.prev_t != t:
@@ -201,27 +202,27 @@ class AdamsBashforthMoulton(FixedGridODESolver):
         else:
             # Adams-Bashforth predictor.
             bashforth_coeffs = self.bashforth[order]
-            dy = _dot_product(dt * bashforth_coeffs, self.prev_f).type_as(y0)  # bashforth is float64 so cast back
+            dy = _dot_product(dt * bashforth_coeffs, self.prev_f).to(y0.dtype)  # bashforth is float64 so cast back
 
             # Adams-Moulton corrector.
             if self.implicit:
                 moulton_coeffs = self.moulton[order + 1]
-                delta = dt * _dot_product(moulton_coeffs[1:], self.prev_f).type_as(y0)  # moulton is float64 so cast back
+                delta = dt * _dot_product(moulton_coeffs[1:], self.prev_f).to(y0.dtype)  # moulton is float64 so cast back
                 converged = False
                 for _ in range(self.max_iters):
                     dy_old = dy
                     f = func(t1, y0 + dy)
-                    dy = (dt * (moulton_coeffs[0]) * f).type_as(y0) + delta  # moulton is float64 so cast back
+                    dy = (dt * (moulton_coeffs[0]) * f).to(y0.dtype) + delta  # moulton is float64 so cast back
                     converged = self._has_converged(dy_old, dy)
                     if converged:
                         break
                 if not converged:
-                    warnings.warn('Functional iteration did not converge. Solution may be incorrect.', file=sys.stderr)
+                    warnings.warn('Functional iteration did not converge. Solution may be incorrect.')
                     self.prev_f.pop()
                 self._update_history(t0, f)
             return dy
 
 
 class AdamsBashforth(AdamsBashforthMoulton):
-    def __init__(self, func, y0, **kwargs):
-        super(AdamsBashforth, self).__init__(func, y0, implicit=False, **kwargs)
+    def __init__(self, **kwargs):
+        super(AdamsBashforth, self).__init__(implicit=False, **kwargs)

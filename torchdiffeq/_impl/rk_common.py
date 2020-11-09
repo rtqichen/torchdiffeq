@@ -61,9 +61,9 @@ def _runge_kutta_step(func, y0, f0, t0, dt, t1, tableau):
         calculating these terms.
     """
 
-    t0 = t0.type_as(y0)
-    dt = dt.type_as(y0)
-    t1 = t1.type_as(y0)
+    t0 = t0.to(y0.dtype)
+    dt = dt.to(y0.dtype)
+    t1 = t1.to(y0.dtype)
 
     # We use an unchecked assign to put data into k without incrementing its _version counter, so that the backward
     # doesn't throw an (overzealous) error about in-place correctness. We know that it's actually correct.
@@ -122,9 +122,9 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
     tableau: _ButcherTableau
     mid: torch.Tensor
 
-    def __init__(self, y0, rtol, atol, shapes, is_reversed, norm=None, first_step=None, safety=0.9, ifactor=10.0,
-                 dfactor=0.2, max_num_steps=2 ** 31 - 1, step_locations=None, jump_locations=None, dtype=torch.float64,
-                 **kwargs):
+    def __init__(self, rtol, atol, state_dtype, device, shapes, is_reversed,
+                 norm=None, first_step=None, safety=0.9, ifactor=10.0, dfactor=0.2, max_num_steps=2 ** 31 - 1,
+                 step_locations=None, jump_locations=None, dtype=torch.float64, **kwargs):
 
         if 'grid_points' in kwargs:
             if jump_locations is not None:
@@ -140,13 +140,10 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
                                                                "'step_locations'.")
         _handle_deprecated_kwargs(self, kwargs, 'eps', "'eps' has been deprecated; use 'jump_locations' instead.")
 
-        super(RKAdaptiveStepsizeODESolver, self).__init__(y0=y0, rtol=rtol, atol=atol, shapes=shapes,
-                                                          is_reversed=is_reversed, dtype=dtype, **kwargs)
+        dtype = torch.promote_types(dtype, state_dtype)
 
-        # We use mixed precision. y has its original dtype (probably float32), whilst all 'time'-like objects use
-        # `dtype` (defaulting to float64).
-        dtype = torch.promote_types(dtype, y0.dtype)
-        device = y0.device
+        super(RKAdaptiveStepsizeODESolver, self).__init__(rtol=rtol, atol=atol, state_dtype=state_dtype, device=device,
+                                                          shapes=shapes, is_reversed=is_reversed, dtype=dtype, **kwargs)
 
         if step_locations is None:
             step_locations = torch.tensor([], dtype=dtype, device=device)
@@ -187,14 +184,16 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
         self.max_num_steps = torch.as_tensor(max_num_steps, dtype=torch.int32, device=device)
         self.step_locations = step_locations
         self.jump_locations = jump_locations
+        # We use mixed precision. y has its original dtype (probably float32), whilst all 'time'-like objects use
+        # `dtype` (defaulting to float64).
         self.dtype = dtype
 
         # Copy from class to instance to set device
-        self.tableau = _ButcherTableau(alpha=self.tableau.alpha.to(device=device, dtype=y0.dtype),
-                                       beta=[b.to(device=device, dtype=y0.dtype) for b in self.tableau.beta],
-                                       c_sol=self.tableau.c_sol.to(device=device, dtype=y0.dtype),
-                                       c_error=self.tableau.c_error.to(device=device, dtype=y0.dtype))
-        self.mid = self.mid.to(device=device, dtype=y0.dtype)
+        self.tableau = _ButcherTableau(alpha=self.tableau.alpha.to(device=device, dtype=state_dtype),
+                                       beta=[b.to(device=device, dtype=state_dtype) for b in self.tableau.beta],
+                                       c_sol=self.tableau.c_sol.to(device=device, dtype=state_dtype),
+                                       c_error=self.tableau.c_error.to(device=device, dtype=state_dtype))
+        self.mid = self.mid.to(device=device, dtype=state_dtype)
 
     @classmethod
     def valid_events(cls):
@@ -258,9 +257,9 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
         cls._flip_option(adjoint_options, 'jump_locations')
 
         if 'norm' in options:
-            state_norm = _rms_norm
-        else:
             state_norm = options['norm']
+        else:
+            state_norm = _rms_norm
         if 'norm' not in adjoint_options:
             adjoint_options['norm'] = cls._adjoint_norm(y0, shapes, adjoint_params, state_norm, _rms_norm)
         elif adjoint_options['norm'] == 'seminorm':
@@ -268,41 +267,41 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
 
         return adjoint_options
 
-    def _before_integrate(self, t):
-        f0 = self.func(t[0], self.y0)
+    def _before_integrate(self, func, y0, t):
+        f0 = func(t[0], y0)
         if self.first_step is None:
             with torch.no_grad():
-                first_step = _select_initial_step(self.func, t[0], self.y0, self.order - 1, self.rtol, self.atol,
+                first_step = _select_initial_step(func, t[0], y0, self.order - 1, self.rtol, self.atol,
                                                   self.norm, f0=f0)
         else:
             first_step = self.first_step
-        self.rk_state = _RungeKuttaState(self.y0, f0, t[0], t[0], first_step, [self.y0] * 5)
+        self.rk_state = _RungeKuttaState(y0, f0, t[0], t[0], first_step, [y0] * 5)
         self.next_step_index = min(bisect.bisect(self.step_locations.tolist(), t[0]), len(self.step_locations) - 1)
         self.next_jump_index = min(bisect.bisect(self.jump_locations.tolist(), t[0]), len(self.jump_locations) - 1)
 
-    def _advance(self, next_t):
+    def _advance(self, func, next_t):
         """Interpolate through the next time point, integrating as necessary."""
         n_steps = 0
         while next_t > self.rk_state.t1:
             assert n_steps < self.max_num_steps, 'max_num_steps exceeded ({}>={})'.format(n_steps, self.max_num_steps)
-            self.rk_state = self._adaptive_step(self.rk_state)
+            self.rk_state = self._adaptive_step(func, self.rk_state)
             n_steps += 1
         return _interp_evaluate(self.rk_state.interp_coeff, self.rk_state.t0, self.rk_state.t1, next_t)
 
-    def _adaptive_step(self, rk_state):
+    def _adaptive_step(self, func, rk_state):
         """Take an adaptive Runge-Kutta step to integrate the ODE."""
         y0, f0, _, t0, dt, interp_coeff = rk_state
-        self.func.event_step(t0, y0, dt)
+        func.event_step(t0, y0, dt)
         t1 = t0 + dt
 
-        # dtypes: self.y0.dtype (probably float32); self.dtype (probably float64)
+        # dtypes: y0.dtype (probably float32); self.dtype (probably float64)
         # used for state and timelike objects respectively.
         # Then:
-        # y0.dtype == self.y0.dtype
-        # f0.dtype == self.y0.dtype
+        # y0.dtype == y0.dtype
+        # f0.dtype == y0.dtype
         # t0.dtype == self.dtype
         # dt.dtype == self.dtype
-        # for coeff in interp_coeff: coeff.dtype == self.y0.dtype
+        # for coeff in interp_coeff: coeff.dtype == y0.dtype
 
         ########################################################
         #                      Assertions                      #
@@ -334,12 +333,12 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
         # Must be arranged as doing all the step_locations handling, then all the jump_locations handling, in case we
         # trigger both. (i.e. interleaving them would be wrong.)
 
-        y1, f1, y1_error, k = _runge_kutta_step(self.func, y0, f0, t0, dt, t1, tableau=self.tableau)
+        y1, f1, y1_error, k = _runge_kutta_step(func, y0, f0, t0, dt, t1, tableau=self.tableau)
         # dtypes:
-        # y1.dtype == self.y0.dtype
-        # f1.dtype == self.y0.dtype
+        # y1.dtype == y0.dtype
+        # f1.dtype == y0.dtype
         # y1_error.dtype == self.dtype
-        # k.dtype == self.y0.dtype
+        # k.dtype == y0.dtype
 
         ########################################################
         #                     Error Ratio                      #
@@ -354,7 +353,7 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
         #                   Update RK State                    #
         ########################################################
         if accept_step:
-            self.func.event_accept_step(t0, y0, dt)
+            func.event_accept_step(t0, y0, dt)
             t_next = t1
             y_next = y1
             interp_coeff = self._interp_fit(y0, y_next, k, dt)
@@ -366,10 +365,10 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
                     self.next_jump_index += 1
                 # We've just passed a discontinuity in f; we should update f to match the side of the discontinuity
                 # we're now on.
-                f1 = self.func(t_next, y_next, True)
+                f1 = func(t_next, y_next, True)
             f_next = f1
         else:
-            self.func.event_reject_step(t0, y0, dt)
+            func.event_reject_step(t0, y0, dt)
             t_next = t0
             y_next = y0
             f_next = f0
@@ -379,7 +378,7 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
 
     def _interp_fit(self, y0, y1, k, dt):
         """Fit an interpolating polynomial to the results of a Runge-Kutta step."""
-        dt = dt.type_as(y0)
+        dt = dt.to(y0.dtype)
         y_mid = y0 + k.matmul(dt * self.mid).view_as(y0)
         f0 = k[..., 0]
         f1 = k[..., -1]
