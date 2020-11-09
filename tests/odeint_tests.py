@@ -193,12 +193,12 @@ class TestNorms(unittest.TestCase):
                         x0 = torch.tensor([1.0, 2.0], device=device, dtype=dtype)
                         t = torch.tensor([0., 1.0], device=device, dtype=dtype)
 
-                        norm_f = _NeuralF().to(dtype, device)
+                        norm_f = _NeuralF().to(device, dtype)
                         out = torchdiffeq.odeint_adjoint(norm_f, x0, t, method=method)
                         norm_f.nfe = 0
                         out.sum().backward()
 
-                        seminorm_f = _NeuralF().to(dtype, device)
+                        seminorm_f = _NeuralF().to(device, dtype)
                         out = torchdiffeq.odeint_adjoint(seminorm_f, x0, t, method=method,
                                                          adjoint_options=dict(norm='seminorm'))
                         seminorm_f.nfe = 0

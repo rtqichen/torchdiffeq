@@ -255,17 +255,12 @@ def _check_inputs(func, y0, t, rtol, atol, method, options, SOLVERS):
         options = options.copy()
     if method is None:
         method = 'dopri5'
-    if isinstance(method, solvers.Solver):
-        solver = method
-    else:
-        if method not in SOLVERS:
-            raise ValueError('Invalid method "{}". Must be one of {}'
-                             .format(method, '{"' + '", "'.join(SOLVERS.keys()) + '"}.'))
-        solver = SOLVERS[method](func=func, y0=y0, rtol=rtol, atol=atol, shapes=shapes, is_reversed=is_reversed,
-                                 **options)
+    if method not in SOLVERS:
+        raise ValueError('Invalid method "{}". Must be one of {}'
+                         .format(method, '{"' + '", "'.join(SOLVERS.keys()) + '"}.'))
 
-    invalid_events = func.events - solver.valid_events()
+    invalid_events = func.events - SOLVERS[method].valid_events()
     if len(invalid_events) > 0:
         raise ValueError("Solver '{}' does not support events {}.".format(method, invalid_events))
 
-    return shapes, func, y0, t, rtol, atol, solver
+    return shapes, func, y0, t, rtol, atol, method, options, is_reversed

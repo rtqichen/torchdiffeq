@@ -4,9 +4,9 @@ from .odeint import SOLVERS, odeint
 from .misc import _check_inputs, _flat_to_shape, _all_event_names
 
 
-class AdjointFunc(torch.nn.Module):
+class _AdjointFunc(torch.nn.Module):
     def __init__(self, base_func, t_requires_grad, adjoint_params):
-        super(AdjointFunc, self).__init__()
+        super(_AdjointFunc, self).__init__()
 
         self.base_func = base_func
         self.t_requires_grad = t_requires_grad
@@ -56,11 +56,11 @@ class AdjointFunc(torch.nn.Module):
         return (vjp_t, func_eval, vjp_y, *vjp_params)
 
 
-class OdeintAdjointMethod(torch.autograd.Function):
+class _AdjointIntegrate(torch.autograd.Function):
 
     @staticmethod
-    def forward(ctx, func, y0, t, rtol, atol, solver, adjoint_rtol, adjoint_atol, adjoint_method,
-                adjoint_options, t_requires_grad, *adjoint_params):
+    def forward(ctx, func, y0, t, solver, adjoint_rtol, adjoint_atol, adjoint_method, adjoint_options, t_requires_grad,
+                *adjoint_params):
 
         ctx.func = func
         ctx.adjoint_rtol = adjoint_rtol
@@ -69,10 +69,9 @@ class OdeintAdjointMethod(torch.autograd.Function):
         ctx.adjoint_options = adjoint_options
         ctx.t_requires_grad = t_requires_grad
 
-        with torch.no_grad():
-            # .detach() so that the tensors y0 and t don't register as requiring gradients when that's checked, e.g.
-            # in the SciPy solvers.
-            y = odeint(func, y0.detach(), t.detach(), rtol=rtol, atol=atol, method=solver)
+        # .detach() so that the tensors y0 and t don't register as requiring gradients when that's checked, e.g. in the
+        # SciPy solvers.
+        y = solver.integrate(t.detach())
         ctx.save_for_backward(t, y, *adjoint_params)
         return y
 
@@ -102,7 +101,7 @@ class OdeintAdjointMethod(torch.autograd.Function):
             ##################################
 
             # TODO: Call odeint_adjoint to implement higher order derivatives.
-            augmented_dynamics = AdjointFunc(func, t_requires_grad, adjoint_params)
+            augmented_dynamics = _AdjointFunc(func, t_requires_grad, adjoint_params)
 
             ##################################
             #       Solve adjoint ODE        #
@@ -137,13 +136,16 @@ class OdeintAdjointMethod(torch.autograd.Function):
             adj_y = aug_state[2]
             adj_params = aug_state[3:]
 
-        return (None, adj_y, time_vjps, None, None, None, None, None, None, None, None, *adj_params)
+        return (None, adj_y, time_vjps, None, None, None, None, None, None, *adj_params)
 
 
 def odeint_adjoint(func, y0, t, rtol=1e-7, atol=1e-9, method=None, options=None, adjoint_rtol=None, adjoint_atol=None,
                    adjoint_method=None, adjoint_options=None, adjoint_params=None):
 
-    shapes, func, y0, t, rtol, atol, solver = _check_inputs(func, y0, t, rtol, atol, method, options, SOLVERS)
+    shapes, func, y0, t, rtol, atol, method, options, is_reversed = _check_inputs(func, y0, t, rtol, atol, method,
+                                                                                  options, SOLVERS)
+    solver = SOLVERS[method](func=func, y0=y0, rtol=rtol, atol=atol, shapes=shapes, is_reversed=is_reversed,
+                             **options)
 
     # We need this in order to access the variables inside this module,
     # since we have no other way of getting variables along the execution path.
@@ -160,7 +162,7 @@ def odeint_adjoint(func, y0, t, rtol=1e-7, atol=1e-9, method=None, options=None,
     if adjoint_method is None:
         adjoint_method = method
     if adjoint_method != method and options is not None and adjoint_options is None:
-        raise ValueError("If `adjoint_method != method` then we cannot infer `adjoint_options` from `options`. As "
+        raise ValueError("If `adjoint_method != method` then we cannot infer `adjoint_options` from `options`. So as "
                          "`options` has been passed then `adjoint_options` must be passed as well.")
 
     if adjoint_params is None:
@@ -181,12 +183,12 @@ def odeint_adjoint(func, y0, t, rtol=1e-7, atol=1e-9, method=None, options=None,
                                                                                        adjoint_options=adjoint_options,
                                                                                        adjoint_params=adjoint_params)
 
-    solution = OdeintAdjointMethod.apply(func, y0, t, rtol, atol, solver, adjoint_rtol, adjoint_atol,
-                                         adjoint_method, adjoint_options, t.requires_grad, *adjoint_params)
+    y = _AdjointIntegrate.apply(func, y0, t, solver, adjoint_rtol, adjoint_atol, adjoint_method, adjoint_options,
+                                t.requires_grad, *adjoint_params)
 
     if shapes is not None:
-        solution = _flat_to_shape(solution, (len(t),), shapes)
-    return solution
+        y = _flat_to_shape(y, (len(t),), shapes)
+    return y
 
 
 def find_parameters(module):
