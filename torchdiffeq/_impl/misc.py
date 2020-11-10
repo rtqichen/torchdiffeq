@@ -129,10 +129,13 @@ if hasattr(torch, "nextafter"):
         out = torch.nextafter(x1, x2).detach()
         return _StitchGradient.apply(x1, out)
 else:
+    # TODO: remove once PyTorch 1.7.0 becomes obligatory + remove comment to that effect in FURTHER_DOCUMENTATION.md
     def _nextafter(x1, x2):
-        warnings.warn("torch.nextafter is only available in PyTorch 1.7 or newer. Falling back to adding a small "
-                      "epsilon.")
-        return torch.where(x1 < x2, x1 + 1e-5, x1 - 1e-5)
+        warnings.warn("torch.nextafter is only available in PyTorch 1.7 or newer. Falling back to numpy.nextafter.")
+        x1_np = x1.detach().cpu().numpy()
+        x2_np = x2.detach().cpu().numpy()
+        out = torch.as_tensor(np.nextafter(x1_np, x2_np), device=x1.device)
+        return _StitchGradient.apply(x1, out)
 
 
 def _tuple_tol(name, tol, shapes):

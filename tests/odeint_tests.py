@@ -4,7 +4,7 @@ import unittest
 import warnings
 
 from problems import (construct_problem, PROBLEMS, DTYPES, DEVICES, METHODS, ADAPTIVE_METHODS, FIXED_METHODS,
-                      SCIPY_METHODS)
+                      SCIPY_METHODS, ADAMS_METHODS)
 
 
 def rel_error(true, estimate):
@@ -115,8 +115,8 @@ class _JumpF:
             return x ** 2
 
 
-class TestJump(unittest.TestCase):
-    def test_odeint_step_t(self):
+class TestDiscontinuities(unittest.TestCase):
+    def test_odeint_jump_t(self):
         for dtype in DTYPES:
             for device in DEVICES:
                 for method in ADAPTIVE_METHODS:
@@ -124,13 +124,13 @@ class TestJump(unittest.TestCase):
                         if dtype == torch.float32 and method == 'dopri8':
                             continue
 
-                        with self.subTest(dtype=dtype, device=device, method=method):
+                        with self.subTest(dtype=dtype, device=device, method=method, new_options=new_options):
 
                             x0 = torch.tensor([1.0, 2.0], device=device, dtype=dtype)
                             t = torch.tensor([0., 1.0], device=device)
 
                             simple_f = _JumpF()
-                            torchdiffeq.odeint(simple_f, x0, t, method=method)
+                            torchdiffeq.odeint(simple_f, x0, t, atol=1e-7, method=method)
 
                             better_f = _JumpF()
                             if new_options:
@@ -140,9 +140,44 @@ class TestJump(unittest.TestCase):
                             with warnings.catch_warnings():
                                 if not new_options:
                                     warnings.simplefilter('ignore')
-                                torchdiffeq.odeint(better_f, x0, t, method=method, options=options)
+                                torchdiffeq.odeint(better_f, x0, t, atol=1e-7, method=method, options=options)
 
                             self.assertLess(better_f.nfe, simple_f.nfe)
+
+    def test_odeint_perturb(self):
+        for dtype in DTYPES:
+            for device in DEVICES:
+                for method in FIXED_METHODS:
+                    if method in ADAMS_METHODS:
+                        continue
+                    for new_options in (True, False):
+                        for perturb in (True, False):
+                            with self.subTest(dtype=dtype, device=device, method=method, new_options=new_options,
+                                              perturb=perturb):
+                                x0 = torch.tensor([1.0, 2.0], device=device, dtype=dtype)
+                                t = torch.tensor([0., 1.0], device=device)
+                                ts = []
+
+                                def f(t, x):
+                                    ts.append(t.item())
+                                    return -x
+
+                                if new_options:
+                                    options = dict(step_size=0.5, perturb=perturb)
+                                else:
+                                    options = dict(step_size=0.5, eps=1e-5 if perturb else 0.)
+
+                                with warnings.catch_warnings():
+                                    if not new_options:
+                                        warnings.simplefilter('ignore')
+                                    torchdiffeq.odeint(f, x0, t, method=method, options=options)
+
+                                if perturb:
+                                    self.assertNotIn(0., ts)
+                                    self.assertNotIn(0.5, ts)
+                                else:
+                                    self.assertIn(0., ts)
+                                    self.assertIn(0.5, ts)
 
 
 class _NeuralF(torch.nn.Module):

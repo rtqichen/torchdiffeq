@@ -97,23 +97,23 @@ _two_thirds = 2 / 3
 _one_sixth = 1 / 6
 
 
-def rk4_step_func(func, t0, dt, t1, y0, k1=None):
+def rk4_step_func(func, t0, dt, t1, y0, k1=None, perturb=False):
     if k1 is None:
-        k1 = func(t0, y0, True)
+        k1 = func(t0, y0, True if perturb else None)
     half_dt = dt * 0.5
     k2 = func(t0 + half_dt, y0 + half_dt * k1)
     k3 = func(t0 + half_dt, y0 + half_dt * k2)
-    k4 = func(t1, y0 + dt * k3, False)
+    k4 = func(t1, y0 + dt * k3, False if perturb else None)
     return (k1 + 2 * (k2 + k3) + k4) * dt * _one_sixth
 
 
-def rk4_alt_step_func(func, t0, dt, t1, y0, k1=None):
+def rk4_alt_step_func(func, t0, dt, t1, y0, k1=None, perturb=False):
     """Smaller error with slightly more compute."""
     if k1 is None:
-        k1 = func(t0, y0, True)
+        k1 = func(t0, y0, True if perturb else None)
     k2 = func(t0 + dt * _one_third, y0 + dt * k1 * _one_third)
     k3 = func(t0 + dt * _two_thirds, y0 + dt * (k2 - k1 * _one_third))
-    k4 = func(t1, y0 + dt * (k1 - k2 + k3), False)
+    k4 = func(t1, y0 + dt * (k1 - k2 + k3), False if perturb else None)
     return (k1 + 3 * (k2 + k3) + k4) * dt * 0.125
 
 

@@ -17,7 +17,7 @@ For these solvers, `rtol` and `atol` correspond to the tolerances for accepting/
 
 - `step_t=None`: Times that a step must me made to. In particular this is useful when `func` has kinks (derivative discontinuities) at these times, as the solver then does not need to (slowly) discover these for itself. If passed this should be an ordered one dimensional `torch.Tensor`.
 
-- `jump_t=None`: Times that a step must be made to, and `func` re-evaluated at. In particular this is useful when `func` has discontinuites at these times, as then the solver knows that the final function evaluation of the previous step is not equal to the first function evaluation of this step. (i.e. the FSAL property does not hold at this point.) If passed this should be an ordered one dimensional `torch.Tensor`.
+- `jump_t=None`: Times that a step must be made to, and `func` re-evaluated at. In particular this is useful when `func` has discontinuites at these times, as then the solver knows that the final function evaluation of the previous step is not equal to the first function evaluation of this step. (i.e. the FSAL property does not hold at this point.) If passed this should be an ordered one dimensional `torch.Tensor`. Note that this is not efficient on the GPU when using PyTorch 1.6.0 or earlier.
 
 - `norm`: What norm to compute the accept/reject criterion with respect to. Given tensor input, this defaults to an RMS norm. Given tupled input, this defaults to computing an RMS norm over each tensor, and then taking a max over the tuple, producing a mixed L-infinity/RMS norm. If passed this should be a function consuming a single tensor of shape the same as `y0` (given tensor input) or a single tensor of shape `(sum(y.numel() for y in y0),)` (given tupled input), and return a scalar tensor corresponding to its norm. When passed as part of `adjoint_options`, then the special value `"seminorm"` may be used to zero out the contribution from the parameters, as per the ["Hey, that's not an ODE"](https://arxiv.org/abs/2009.09457) paper.
 
@@ -30,7 +30,9 @@ For these solvers, `rtol` and `atol` correspond to the tolerances for accepting/
 Individual solvers also offer certain options.
 
 **euler, midpoint, rk4:**<br>
-For these solvers, `rtol` and `atol` are ignored. Note that these solvers automatically add small perturbations to their evaluation points, so stepping to discontinuities is supported.
+For these solvers, `rtol` and `atol` are ignored. These solvers also support:
+
+- `perturb`: Defaults to False. If True, then automatically add small perturbations to the start and end of each step, so that stepping to discontinuities works. Note that this is not efficient on the GPU when using PyTorch 1.6.0 or earlier.
 
 **explicit_adams:**<br>
 For this solver, `rtol` and `atol` are ignored. This solver also supports:
