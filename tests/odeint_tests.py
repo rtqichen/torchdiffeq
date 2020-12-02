@@ -128,7 +128,7 @@ class TestDiscontinuities(unittest.TestCase):
                             with self.subTest(adjoint=adjoint, dtype=dtype, device=device, method=method,
                                               new_options=new_options):
 
-                                x0 = torch.tensor([1.0, 2.0], device=device, dtype=dtype)
+                                x0 = torch.tensor([1.0, 2.0], device=device, dtype=dtype, requires_grad=True)
                                 t = torch.tensor([0., 1.0], device=device)
 
                                 simple_f = _JumpF()
@@ -143,15 +143,19 @@ class TestDiscontinuities(unittest.TestCase):
                                 with warnings.catch_warnings():
                                     if not new_options:
                                         warnings.simplefilter('ignore')
-                                    better_xs = odeint(better_f, x0, t, atol=1e-7, method=method, options=options)
+                                    better_xs = odeint(better_f, x0, t, rtol=1e-6, atol=1e-6, method=method,
+                                                       options=options)
 
                                 self.assertLess(better_f.nfe, simple_f.nfe)
 
                                 if adjoint:
                                     simple_f.nfe = 0
                                     better_f.nfe = 0
-                                    simple_xs.sum().backward()
-                                    better_xs.sum().backward()
+                                    with warnings.catch_warnings():
+                                        if not new_options:
+                                            warnings.simplefilter('ignore')
+                                        simple_xs.sum().backward()
+                                        better_xs.sum().backward()
                                     self.assertLess(better_f.nfe, simple_f.nfe)
 
     def test_odeint_perturb(self):
@@ -165,7 +169,7 @@ class TestDiscontinuities(unittest.TestCase):
                             for perturb in (True, False):
                                 with self.subTest(adjoint=adjoint, dtype=dtype, device=device, method=method,
                                                   new_options=new_options, perturb=perturb):
-                                    x0 = torch.tensor([1.0, 2.0], device=device, dtype=dtype)
+                                    x0 = torch.tensor([1.0, 2.0], device=device, dtype=dtype, requires_grad=True)
                                     t = torch.tensor([0., 1.0], device=device)
                                     ts = []
 
@@ -193,12 +197,15 @@ class TestDiscontinuities(unittest.TestCase):
 
                                     if adjoint:
                                         ts.clear()
-                                        xs.sum().backward()
+                                        with warnings.catch_warnings():
+                                            if not new_options:
+                                                warnings.simplefilter('ignore')
+                                            xs.sum().backward()
                                         if perturb:
-                                            self.assertNotIn(0., ts)
+                                            self.assertNotIn(1., ts)
                                             self.assertNotIn(0.5, ts)
                                         else:
-                                            self.assertIn(0., ts)
+                                            self.assertIn(1., ts)
                                             self.assertIn(0.5, ts)
 
 

@@ -31,6 +31,8 @@ def _zero_norm(tensor):
 
 
 def _mixed_norm(tensor_tuple):
+    if len(tensor_tuple) == 0:
+        return 0.
     return max([_rms_norm(tensor) for tensor in tensor_tuple])
 
 
