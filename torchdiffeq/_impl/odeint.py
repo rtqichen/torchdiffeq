@@ -101,7 +101,7 @@ def _check_inputs(func, y0, t, rtol, atol, method, options):
     # Normalise time
     t = _check_timelike('t', t, True)
     is_reversed = False
-    if t[0] > t[1]:
+    if len(t) > 1 and t[0] > t[1]:
         is_reversed = True
         t = -t
 
@@ -188,10 +188,11 @@ def _check_inputs(func, y0, t, rtol, atol, method, options):
                     return norm(y)
                 options['norm'] = _norm
         else:
-            # Else just use the default norm.
-            # Technically we don't need to set that here (RKAdaptiveStepsizeODESolver has it as a default), but it makes
-            # it easier to reason about, in the adjoint norm logic, if we know that options['norm'] is definitely set to
-            # something.
-            options['norm'] = _rms_norm
+            if 'norm' not in options:
+                # Else just use the default norm.
+                # Technically we don't need to set that here (RKAdaptiveStepsizeODESolver has it as a default), but it
+                # makes it easier to reason about, in the adjoint norm logic, if we know that options['norm'] is
+                # definitely set to something.
+                options['norm'] = _rms_norm
 
     return shapes, wrapped_func, y0, t, rtol, atol, method, options
