@@ -10,25 +10,11 @@ class Solver(metaclass=abc.ABCMeta):
         unused_kwargs.pop('atol')
         unused_kwargs.pop('state_dtype')
         unused_kwargs.pop('device')
-        unused_kwargs.pop('shapes')
-        unused_kwargs.pop('is_reversed')
         _handle_unused_kwargs(self, unused_kwargs)
 
     @classmethod
     def valid_callbacks(cls):
         return set()
-
-    @classmethod
-    def adjoint_options_from_options(cls, shapes, y0, options, adjoint_params):
-        if options is None:
-            return {}
-        return options.copy()
-
-    @classmethod
-    def adjoint_options_from_adjoint_options(cls, shapes, y0, options, adjoint_options, adjoint_params):
-        if adjoint_options is None:
-            return {}
-        return adjoint_options.copy()
 
     @abc.abstractmethod
     def integrate(self, func, y0, t):
@@ -60,17 +46,14 @@ class AdaptiveStepsizeODESolver(Solver):
 class FixedGridODESolver(Solver):
     order: int
 
-    def __init__(self, is_reversed, step_size=None, grid_constructor=None, **kwargs):
-        super(FixedGridODESolver, self).__init__(is_reversed=is_reversed, **kwargs)
+    def __init__(self, step_size=None, grid_constructor=None, **kwargs):
+        super(FixedGridODESolver, self).__init__(**kwargs)
 
         if step_size is None:
             if grid_constructor is None:
                 self.grid_constructor = lambda f, y0, t: t
             else:
-                if is_reversed:
-                    self.grid_constructor = lambda f, y0, t: -grid_constructor(f, y0, t)
-                else:
-                    self.grid_constructor = grid_constructor
+                self.grid_constructor = grid_constructor
         else:
             if grid_constructor is None:
                 self.grid_constructor = self._grid_constructor_from_step_size(step_size)
@@ -80,29 +63,6 @@ class FixedGridODESolver(Solver):
     @classmethod
     def valid_callbacks(cls):
         return super(FixedGridODESolver, cls).valid_callbacks() | {'callback_step'}
-
-    @classmethod
-    def adjoint_options_from_options(cls, shapes, y0, options, adjoint_params):
-        adjoint_options = super(FixedGridODESolver, cls).adjoint_options_from_options(shapes=shapes,
-                                                                                      y0=y0,
-                                                                                      options=options,
-                                                                                      adjoint_params=adjoint_params)
-        if 'grid_constructor' in adjoint_options:
-            _grid_constructor = adjoint_options['grid_constructor']
-            adjoint_options['grid_constructor'] = lambda func, y0, t: _grid_constructor(func, y0, t).flip(0)
-        return adjoint_options
-
-    @classmethod
-    def adjoint_options_from_adjoint_options(cls, shapes, y0, options, adjoint_options, adjoint_params):
-        adjoint_options = super(FixedGridODESolver, cls).adjoint_options_from_adjoint_options(shapes=shapes,
-                                                                                              y0=y0,
-                                                                                              options=options,
-                                                                                              adjoint_options=adjoint_options,
-                                                                                              adjoint_params=adjoint_params)
-        if 'grid_constructor' in adjoint_options:
-            _grid_constructor = adjoint_options['grid_constructor']
-            adjoint_options['grid_constructor'] = lambda func, y0, t: _grid_constructor(func, y0, t).flip(0)
-        return adjoint_options
 
     @staticmethod
     def _grid_constructor_from_step_size(step_size):

@@ -1,11 +1,25 @@
-from .dopri5 import Dopri5Solver
-from .bosh3 import Bosh3Solver
+import torch
+import warnings
 from .adaptive_heun import AdaptiveHeunSolver
-from .fixed_grid import Euler, Midpoint, RK4
-from .fixed_adams import AdamsBashforth, AdamsBashforthMoulton
+from .bosh3 import Bosh3Solver
+from .dopri5 import Dopri5Solver
 from .dopri8 import Dopri8Solver
+from .fixed_adams import AdamsBashforth, AdamsBashforthMoulton
+from .fixed_grid import Euler, Midpoint, RK4
+from .rk_common import RKAdaptiveStepsizeODESolver
 from .scipy_wrapper import ScipyWrapperODESolver
-from .misc import _check_inputs, _flat_to_shape
+from .misc import (_flat_to_shape,
+                   _shape_to_flat,
+                   _tuple_tol,
+                   _assert_floating,
+                   _check_timelike,
+                   _WrapFunc,
+                   _all_callback_names,
+                   _all_adjoint_callback_names,
+                   _null_callback,
+                   _flip_option,
+                   _rms_norm,
+                   _mixed_norm)
 
 SOLVERS = {
     'dopri8': Dopri8Solver,
@@ -61,13 +75,123 @@ def odeint(func, y0, t, rtol=1e-7, atol=1e-9, method=None, options=None):
     Raises:
         ValueError: if an invalid `method` is provided.
     """
-    shapes, func, y0, t, rtol, atol, method, options, is_reversed = _check_inputs(func, y0, t, rtol, atol, method,
-                                                                                  options, SOLVERS)
-    solver = SOLVERS[method](rtol=rtol, atol=atol, state_dtype=y0.dtype, device=y0.device, shapes=shapes,
-                             is_reversed=is_reversed, **options)
+    shapes, func, y0, t, rtol, atol, method, options = _check_inputs(func, y0, t, rtol, atol, method, options)
+    solver = SOLVERS[method](rtol=rtol, atol=atol, state_dtype=y0.dtype, device=y0.device, **options)
 
     solution = solver.integrate(func, y0, t)
 
     if shapes is not None:
         solution = _flat_to_shape(solution, (len(t),), shapes)
     return solution
+
+
+def _check_inputs(func, y0, t, rtol, atol, method, options):
+    # Normalise to tensor (non-tupled) input
+    is_tuple = False
+    shapes = None
+    if not isinstance(y0, torch.Tensor):
+        assert isinstance(y0, tuple), 'y0 must be either a torch.Tensor or a tuple'
+        shapes = [y0_.shape for y0_ in y0]
+        rtol = _tuple_tol('rtol', rtol, shapes)
+        atol = _tuple_tol('atol', atol, shapes)
+        y0 = _shape_to_flat(y0)
+        is_tuple = True
+    _assert_floating('y0', y0)
+
+    # Normalise time
+    t = _check_timelike('t', t, True)
+    is_reversed = False
+    if t[0] > t[1]:
+        is_reversed = True
+        t = -t
+
+    # Tol checking
+    if isinstance(rtol, torch.Tensor):
+        assert not rtol.requires_grad, "rtol cannot require gradient"
+    if isinstance(atol, torch.Tensor):
+        assert not atol.requires_grad, "atol cannot require gradient"
+
+    # Backward compatibility: Allow t and y0 to be on different devices
+    if t.device != y0.device:
+        warnings.warn("t is not on the same device as y0. Coercing to y0.device.")
+        t = t.to(y0.device)
+    # ~Backward compatibility
+
+    wrapped_func = _WrapFunc(func, is_tuple, is_reversed, shapes)
+
+    callback_names = set()
+    for callback_name in _all_callback_names:
+        try:
+            callback = getattr(func, callback_name)
+        except AttributeError:
+            setattr(wrapped_func, callback_name, _null_callback)
+        else:
+            callback_names.add(callback_name)
+            if is_reversed:
+                # At the moment all callbacks have the arguments (t0, y0, dt).
+                # This will need adjusting on a per-callback basis if that changes in the future.
+                def callback(t0, *args, _callback=callback, **kwargs):
+                    return _callback(-t0, *args, **kwargs)
+            setattr(wrapped_func, callback_name, callback)
+    for callback_name in _all_adjoint_callback_names:
+        try:
+            callback = getattr(func, callback_name)
+        except AttributeError:
+            pass
+        else:
+            setattr(wrapped_func, callback_name, callback)
+
+    # Normalise method and options
+    if options is None:
+        options = {}
+    else:
+        options = options.copy()
+    if method is None:
+        method = 'dopri5'
+    if method not in SOLVERS:
+        raise ValueError('Invalid method "{}". Must be one of {}'
+                         .format(method, '{"' + '", "'.join(SOLVERS.keys()) + '"}.'))
+
+    invalid_callbacks = callback_names - SOLVERS[method].valid_callbacks()
+    if len(invalid_callbacks) > 0:
+        raise ValueError("Solver '{}' does not support callbacks {}.".format(method, invalid_callbacks))
+
+    if is_reversed:
+        try:
+            _grid_constructor = options['grid_constructor']
+        except KeyError:
+            pass
+        else:
+            options['grid_constructor'] = lambda func, y0, t: -_grid_constructor(func, y0, -t)
+        _flip_option(options, 'grid_points')
+        _flip_option(options, 'step_t')
+        _flip_option(options, 'jump_t')
+
+    if issubclass(SOLVERS[method], RKAdaptiveStepsizeODESolver):
+        if is_tuple:
+            # We accept tupled input. This is an abstraction that is hidden from the rest of odeint (exception when
+            # returning values), so here we need to maintain the abstraction by wrapping norm functions.
+
+            try:
+                # If the user passed a norm then get that...
+                norm = options['norm']
+            except KeyError:
+                # ...otherwise we default to a mixed Linf/L2 norm over tupled input, for backward compatibility reasons
+                norm = _mixed_norm
+            finally:
+                # In either case, norm(...) is assumed to take a tuple of tensors as input. (As that's what the state looks
+                # like from the point of view of the user.)
+                # So here we take the tensor that the machinery of odeint has given us, and turn it in the tuple that the
+                # norm function is expecting.
+                def _norm(tensor):
+                    y = _flat_to_shape(tensor, (), shapes)
+                    return norm(y)
+                options['norm'] = _norm
+        else:
+            # Else just use the default norm.
+            # Technically we don't need to set that here (RKAdaptiveStepsizeODESolver has it as a default), but it makes
+            # it easier to reason about, in the adjoint norm logic, if we know that options['norm'] is definitely set to
+            # something.
+            options['norm'] = _rms_norm
+
+    return shapes, wrapped_func, y0, t, rtol, atol, method, options

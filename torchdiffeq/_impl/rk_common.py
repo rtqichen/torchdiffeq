@@ -7,9 +7,7 @@ from .misc import (_compute_error_ratio,
                    _optimal_step_size,
                    _check_timelike,
                    _handle_deprecated_kwargs,
-                   _rms_norm,
-                   _zero_norm,
-                   _mixed_norm)
+                   _rms_norm)
 from .solvers import AdaptiveStepsizeODESolver
 
 
@@ -122,8 +120,8 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
     tableau: _ButcherTableau
     mid: torch.Tensor
 
-    def __init__(self, rtol, atol, state_dtype, device, shapes, is_reversed,
-                 norm=None, first_step=None, safety=0.9, ifactor=10.0, dfactor=0.2, max_num_steps=2 ** 31 - 1,
+    def __init__(self, rtol, atol, state_dtype, device,
+                 norm=_rms_norm, first_step=None, safety=0.9, ifactor=10.0, dfactor=0.2, max_num_steps=2 ** 31 - 1,
                  step_t=None, jump_t=None, dtype=torch.float64, **kwargs):
 
         if 'grid_points' in kwargs:
@@ -143,29 +141,21 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
         dtype = torch.promote_types(dtype, state_dtype)
 
         super(RKAdaptiveStepsizeODESolver, self).__init__(rtol=rtol, atol=atol, state_dtype=state_dtype, device=device,
-                                                          shapes=shapes, is_reversed=is_reversed, dtype=dtype, **kwargs)
+                                                          dtype=dtype, **kwargs)
 
         if step_t is None:
             step_t = torch.tensor([], dtype=dtype, device=device)
         else:
-            step_t, _ = _check_timelike('step_t', step_t, False, lambda x: is_reversed)
+            _check_timelike('step_t', step_t, False)
             step_t = step_t.to(dtype)
         if jump_t is None:
             jump_t = torch.tensor([], dtype=dtype, device=device)
         else:
-            jump_t, _ = _check_timelike('jump_t', jump_t, False, lambda x: is_reversed)
+            _check_timelike('jump_t', jump_t, False)
             jump_t = jump_t.to(dtype)
         counts = torch.cat([step_t, jump_t]).unique(return_counts=True)[1]
         if (counts > 1).any():
             raise ValueError("`step_t` and `jump_t` must not have any repeated elements between them.")
-
-        if norm is None:
-            if shapes is None:
-                # L2 norm over a single input
-                norm = _rms_norm
-            else:
-                # Mixed Linf/L2 norm over tupled input (chosen mostly just for backward compatibility reasons)
-                norm = _mixed_norm([_rms_norm for _ in range(len(shapes))], shapes)
 
         self.rtol = torch.as_tensor(rtol, dtype=dtype, device=device)
         self.atol = torch.as_tensor(atol, dtype=dtype, device=device)
@@ -200,72 +190,6 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeODESolver):
         return super(RKAdaptiveStepsizeODESolver, cls).valid_callbacks() | {'callback_step',
                                                                             'callback_accept_step',
                                                                             'callback_reject_step'}
-
-    @staticmethod
-    def _flip_option(adjoint_options, option_name):
-        # We assume that step_t etc. are given to us ordered in the same direction as for the forward pass (for
-        # compatibility with the default adjoint_options=options), so we need to flip them around here.
-        try:
-            option_value = adjoint_options[option_name]
-        except KeyError:
-            pass
-        else:
-            if torch.is_tensor(option_value) and option_value.ndimension() > 0:
-                adjoint_options[option_name] = option_value.flip(0)
-            # else: an error will be raised when the option is attempted to be used in __init__, but we defer raising
-            # the error until then to keep things tidy.
-
-    @staticmethod
-    def _adjoint_norm(y0, shapes, adjoint_params, state_norm, param_norm):
-        # By default use a mixed L-infinity/RMS norm over the input, where we treat t, each element of y, and each
-        # element of adj_y separately over the Linf, but consider all the parameters together. (Done for backward
-        # compatibility.)
-
-        if shapes is None:
-            shapes = [y0.shape]
-        # adj_t, y, adj_y, adj_params, corresponding to the order in aug_state
-        norm_fns = [_rms_norm] + [state_norm for _ in range(2 * len(shapes))] + [param_norm]
-        adjoint_shapes = [torch.Size(())] + shapes + shapes + [torch.Size([sum(param.numel()
-                                                                               for param in adjoint_params)])]
-        return _mixed_norm(norm_fns, adjoint_shapes)
-
-    @classmethod
-    def adjoint_options_from_options(cls, shapes, y0, options, adjoint_params):
-        adjoint_options = super(AdaptiveStepsizeODESolver, cls).adjoint_options_from_options(shapes=shapes,
-                                                                                             y0=y0,
-                                                                                             options=options,
-                                                                                             adjoint_params=adjoint_params)
-
-        cls._flip_option(adjoint_options, 'grid_points')
-        cls._flip_option(adjoint_options, 'step_t')
-        cls._flip_option(adjoint_options, 'jump_t')
-
-        if 'norm' in adjoint_options:
-            adjoint_options["norm"] = cls._adjoint_norm(y0, shapes, adjoint_params, adjoint_options['norm'], _rms_norm)
-        return adjoint_options
-
-    @classmethod
-    def adjoint_options_from_adjoint_options(cls, shapes, y0, options, adjoint_options, adjoint_params):
-        adjoint_options = super(AdaptiveStepsizeODESolver, cls).adjoint_options_from_adjoint_options(shapes=shapes,
-                                                                                                     y0=y0,
-                                                                                                     options=options,
-                                                                                                     adjoint_options=adjoint_options,
-                                                                                                     adjoint_params=adjoint_params)
-
-        cls._flip_option(adjoint_options, 'grid_points')
-        cls._flip_option(adjoint_options, 'step_t')
-        cls._flip_option(adjoint_options, 'jump_t')
-
-        if 'norm' in options:
-            state_norm = options['norm']
-        else:
-            state_norm = _rms_norm
-        if 'norm' not in adjoint_options:
-            adjoint_options['norm'] = cls._adjoint_norm(y0, shapes, adjoint_params, state_norm, _rms_norm)
-        elif adjoint_options['norm'] == 'seminorm':
-            adjoint_options['norm'] = cls._adjoint_norm(y0, shapes, adjoint_params, state_norm, _zero_norm)
-
-        return adjoint_options
 
     def _before_integrate(self, func, y0, t):
         f0 = func(t[0], y0)

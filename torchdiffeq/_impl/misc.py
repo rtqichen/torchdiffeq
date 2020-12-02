@@ -30,20 +30,8 @@ def _zero_norm(tensor):
     return 0.
 
 
-def _mixed_norm(norm_fns, shapes):
-    assert len(norm_fns) == len(shapes)
-
-    def _norm(tensor):
-        total = 0
-        out = []
-        for norm_fn, shape in zip(norm_fns, shapes):
-            next_total = total + shape.numel()
-            out.append(norm_fn(tensor[total:next_total]))
-            total = next_total
-        assert total == tensor.numel(), "Shapes do not total to the full size of the tensor."
-        return max(out)
-
-    return _norm
+def _mixed_norm(tensor_tuple):
+    return max([_rms_norm(tensor) for tensor in tensor_tuple])
 
 
 def _select_initial_step(func, t0, y0, order, rtol, atol, norm, f0=None):
@@ -105,10 +93,6 @@ def _optimal_step_size(last_step, error_ratio, safety, ifactor, dfactor, order):
     return last_step * factor
 
 
-def _decreasing(t):
-    return (t[1:] < t[:-1]).all()
-
-
 def _assert_floating(name, t):
     if not torch.is_floating_point(t):
         raise TypeError('`{}` must be a floating point Tensor but is a {}'.format(name, t.type()))
@@ -160,122 +144,67 @@ def _flat_to_shape(tensor, length, shapes):
     return tuple(tensor_list)
 
 
-class _TupleFunc(torch.nn.Module):
-    def __init__(self, base_func, shapes):
-        super(_TupleFunc, self).__init__()
-        self.base_func = base_func
-        self.shapes = shapes
-
-    def forward(self, t, y):
-        f = self.base_func(t, _flat_to_shape(y, (), self.shapes))
-        return torch.cat([f_.reshape(-1) for f_ in f])
+def _shape_to_flat(tensor):
+    return torch.cat([tensor_.reshape(-1) for tensor_ in tensor])
 
 
-class _ReverseFunc(torch.nn.Module):
-    def __init__(self, base_func):
-        super(_ReverseFunc, self).__init__()
-        self.base_func = base_func
-
-    def forward(self, t, y):
-        return -self.base_func(-t, y)
-
-
-_all_callback_names = ['callback_step', 'callback_accept_step', 'callback_reject_step']
-_null_callback = lambda *args, **kwargs: None
 _inf = torch.tensor(math.inf)
 _neginf = torch.tensor(-math.inf)
 
 
 class _WrapFunc(torch.nn.Module):
-    def __init__(self, base_func, original_func):
+    def __init__(self, base_func, is_tuple, is_reversed, shapes):
         super(_WrapFunc, self).__init__()
         self.base_func = base_func
-        self.callbacks = set()
-        for callback_name in _all_callback_names:
-            try:
-                callback_func = getattr(original_func, callback_name)
-            except AttributeError:
-                setattr(self, callback_name, _null_callback)
-            else:
-                setattr(self, callback_name, callback_func)
-                self.callbacks.add(callback_name)
-        # Preserve adjoint callbacks so that the adjoint can pick up on them later.
-        for callback_name in _all_callback_names:
-            try:
-                callback_func = getattr(original_func, callback_name + '_adjoint')
-            except AttributeError:
-                pass
-            else:
-                setattr(self, callback_name, callback_func)
+        self.is_tuple = is_tuple
+        self.is_reversed = is_reversed
+        self.shapes = shapes
 
-    def __call__(self, t, y, perturb=None):
+    def forward(self, t, y, perturb=None):
         t = t.to(y.dtype)
         if perturb is True:
             t = _nextafter(t, _inf)
         elif perturb is False:
             t = _nextafter(t, _neginf)
-        return self.base_func(t, y)
+
+        if self.is_reversed:
+            t = -t
+        if self.is_tuple:
+            y = _flat_to_shape(y, (), self.shapes)
+
+        f = self.base_func(t, y)
+
+        if self.is_tuple:
+            f = _shape_to_flat(f)
+        if self.is_reversed:
+            f = -f
+
+        return f
 
 
-def _check_timelike(name, timelike, can_grad, reverse_check):
-    assert torch.is_tensor(timelike), '{} must be a torch.Tensor'.format(name)
+_all_callback_names = ['callback_step', 'callback_accept_step', 'callback_reject_step']
+_all_adjoint_callback_names = [name + '_adjoint' for name in _all_callback_names]
+_null_callback = lambda *args, **kwargs: None
+
+
+def _check_timelike(name, timelike, can_grad):
+    assert isinstance(timelike, torch.Tensor), '{} must be a torch.Tensor'.format(name)
     _assert_floating(name, timelike)
     assert timelike.ndimension() == 1, "{} must be one dimensional".format(name)
     if not can_grad:
         assert not timelike.requires_grad, "{} cannot require gradient".format(name)
-    is_reversed = reverse_check(timelike)
-    if is_reversed:
-        timelike = -timelike
-    assert (timelike[1:] > timelike[:-1]).all(), '{} must be strictly increasing or decreasing'.format(name)
-    return timelike, is_reversed
+    diff = timelike[1:] > timelike[:-1]
+    assert diff.all() or (~diff).all(), '{} must be strictly increasing or decreasing'.format(name)
+    return timelike
 
 
-def _check_inputs(func, y0, t, rtol, atol, method, options, SOLVERS):
-    original_func = func
-
-    # Normalise to tensor (non-tupled) input
-    shapes = None
-    if not torch.is_tensor(y0):
-        assert isinstance(y0, tuple), 'y0 must be either a torch.Tensor or a tuple'
-        shapes = [y0_.shape for y0_ in y0]
-        rtol = _tuple_tol('rtol', rtol, shapes)
-        atol = _tuple_tol('atol', atol, shapes)
-        y0 = torch.cat([y0_.reshape(-1) for y0_ in y0])
-        func = _TupleFunc(func, shapes)
-    _assert_floating('y0', y0)
-
-    # Normalise time
-    t, is_reversed = _check_timelike('t', t, True, _decreasing)
-    if is_reversed:
-        func = _ReverseFunc(func)
-
-    # Tol checking
-    if torch.is_tensor(rtol):
-        assert not rtol.requires_grad, "rtol cannot require gradient"
-    if torch.is_tensor(atol):
-        assert not atol.requires_grad, "atol cannot require gradient"
-
-    # Backward compatibility: Allow t and y0 to be on different devices
-    if t.device != y0.device:
-        warnings.warn("t is not on the same device as y0. Coercing to y0.device.")
-        t = t.to(y0.device)
-    # ~Backward compatibility
-
-    func = _WrapFunc(func, original_func)
-
-    # Normalise method and options
-    if options is None:
-        options = {}
+def _flip_option(options, option_name):
+    try:
+        option_value = options[option_name]
+    except KeyError:
+        pass
     else:
-        options = options.copy()
-    if method is None:
-        method = 'dopri5'
-    if method not in SOLVERS:
-        raise ValueError('Invalid method "{}". Must be one of {}'
-                         .format(method, '{"' + '", "'.join(SOLVERS.keys()) + '"}.'))
-
-    invalid_callbacks = func.callbacks - SOLVERS[method].valid_callbacks()
-    if len(invalid_callbacks) > 0:
-        raise ValueError("Solver '{}' does not support callbacks {}.".format(method, invalid_callbacks))
-
-    return shapes, func, y0, t, rtol, atol, method, options, is_reversed
+        if isinstance(option_value, torch.Tensor):
+            options[option_name] = -option_value
+        # else: an error will be raised when the option is attempted to be used in Solver.__init__, but we defer raising
+        # the error until then to keep things tidy.

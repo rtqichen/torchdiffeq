@@ -1,7 +1,15 @@
 import torch
 import torch.nn as nn
-from .odeint import SOLVERS, odeint
-from .misc import _check_inputs, _flat_to_shape, _all_callback_names
+import warnings
+from .odeint import SOLVERS, odeint, _check_inputs
+from .misc import (_flat_to_shape, _all_callback_names, _all_adjoint_callback_names, _rms_norm, _mixed_norm, _zero_norm)
+from .rk_common import RKAdaptiveStepsizeODESolver
+
+
+def _convert_name(name):
+    assert name.endswith('_adjoint')
+    name = name[:-len('_adjoint')]
+    return name
 
 
 class _AdjointFunc(torch.nn.Module):
@@ -12,13 +20,13 @@ class _AdjointFunc(torch.nn.Module):
         self.t_requires_grad = t_requires_grad
         self.adjoint_params = adjoint_params
 
-        for callback_name in _all_callback_names:
+        for callback_name, adjoint_callback_name in zip(_all_callback_names, _all_adjoint_callback_names):
             try:
-                callback_func = getattr(base_func, callback_name + '_adjoint')
+                callback = getattr(base_func, adjoint_callback_name)
             except AttributeError:
                 pass
             else:
-                setattr(self, callback_name, callback_func)
+                setattr(self, callback_name, callback)
 
     def forward(self, t, y_aug):
         # Dynamics of the original system augmented with
@@ -142,11 +150,25 @@ class _AdjointIntegrate(torch.autograd.Function):
 def odeint_adjoint(func, y0, t, rtol=1e-7, atol=1e-9, method=None, options=None, adjoint_rtol=None, adjoint_atol=None,
                    adjoint_method=None, adjoint_options=None, adjoint_params=None):
 
-    shapes, func, y0, t, rtol, atol, method, options, is_reversed = _check_inputs(func, y0, t, rtol, atol, method,
-                                                                                  options, SOLVERS)
-    solver = SOLVERS[method](rtol=rtol, atol=atol, state_dtype=y0.dtype, device=y0.device, shapes=shapes,
-                             is_reversed=is_reversed, **options)
+    shapes, func, y0, t, rtol, atol, method, options = _check_inputs(func, y0, t, rtol, atol, method, options)
+    solver = SOLVERS[method](rtol=rtol, atol=atol, state_dtype=y0.dtype, device=y0.device, **options)
 
+    (adjoint_rtol, adjoint_atol,
+     adjoint_method, adjoint_options, adjoint_params) = _check_adjoint_inputs(shapes, func, rtol, atol, method,
+                                                                              options, adjoint_rtol, adjoint_atol,
+                                                                              adjoint_method, adjoint_options,
+                                                                              adjoint_params)
+
+    y = _AdjointIntegrate.apply(func, y0, t, solver, adjoint_rtol, adjoint_atol, adjoint_method, adjoint_options,
+                                t.requires_grad, *adjoint_params)
+
+    if shapes is not None:
+        y = _flat_to_shape(y, (len(t),), shapes)
+    return y
+
+
+def _check_adjoint_inputs(shapes, func, rtol, atol, method, options, adjoint_rtol, adjoint_atol, adjoint_method,
+                          adjoint_options, adjoint_params):
     # We need this in order to access the variables inside this module,
     # since we have no other way of getting variables along the execution path.
     if adjoint_params is None and not isinstance(func, nn.Module):
@@ -155,6 +177,7 @@ def odeint_adjoint(func, y0, t, rtol=1e-7, atol=1e-9, method=None, options=None,
                          'parameters then it is allowable to set `adjoint_params=()`.')
 
     # Set up adjoint defaults based on forward settings.
+
     if adjoint_rtol is None:
         try:
             iter(rtol)
@@ -169,39 +192,116 @@ def odeint_adjoint(func, y0, t, rtol=1e-7, atol=1e-9, method=None, options=None,
             adjoint_atol = atol
         else:
             raise ValueError("`adjoint_atol` cannot be inferred from `atol` when `atol` is an iterable.")
+
     if adjoint_method is None:
         adjoint_method = method
+
     if adjoint_method != method and options is not None and adjoint_options is None:
         raise ValueError("If `adjoint_method != method` then we cannot infer `adjoint_options` from `options`. So as "
                          "`options` has been passed then `adjoint_options` must be passed as well.")
 
-    if adjoint_params is None:
-        adjoint_params = tuple(find_parameters(func))
-    else:
-        adjoint_params = tuple(adjoint_params)
-    adjoint_params = tuple(p for p in adjoint_params if p.requires_grad)
-
     if adjoint_options is None:
-        adjoint_options = SOLVERS[adjoint_method].adjoint_options_from_options(shapes=shapes,
-                                                                               y0=y0,
-                                                                               options=options,
-                                                                               adjoint_params=adjoint_params)
+        made_adjoint_options = True
+        adjoint_options = options.copy()
     else:
-        adjoint_options = SOLVERS[adjoint_method].adjoint_options_from_adjoint_options(shapes=shapes,
-                                                                                       y0=y0,
-                                                                                       options=options,
-                                                                                       adjoint_options=adjoint_options,
-                                                                                       adjoint_params=adjoint_params)
+        made_adjoint_options = False
+        adjoint_options = adjoint_options.copy()
 
-    y = _AdjointIntegrate.apply(func, y0, t, solver, adjoint_rtol, adjoint_atol, adjoint_method, adjoint_options,
-                                t.requires_grad, *adjoint_params)
+    if adjoint_params is None:
+        adjoint_params = _find_parameters(func)
+    else:
+        if isinstance(adjoint_params, torch.Tensor):
+            raise ValueError("`adjoint_params` should not be a torch.Tensor; it should be a tuple of torch.Tensors.")
+    adjoint_params_ = []
+    for p in adjoint_params:
+        if p.requires_grad:
+            adjoint_params_.append(p)
+        else:
+            if 'norm' in adjoint_options and adjoint_options['norm'] != 'seminorm':
+                warnings.warn("An adjoint parameter was passed without requiring gradient. For efficiency this will be "
+                              "excluded from the adjoint pass, and will not appear as a tensor in the adjoint norm.")
+    adjoint_params = adjoint_params_
 
-    if shapes is not None:
-        y = _flat_to_shape(y, (len(t),), shapes)
-    return y
+    # Flip timelike options
+    try:
+        _grid_constructor = adjoint_options['grid_constructor']
+    except KeyError:
+        pass
+    else:
+        adjoint_options['grid_constructor'] = lambda func, y0, t: _grid_constructor(func, y0, t).flip(0)
+    _flip_option(adjoint_options, 'step_t')
+    _flip_option(adjoint_options, 'jump_t')
+    _flip_option(adjoint_options, 'grid_points')
+
+    # Handle the 'norm' argument. This is a small can of worms, because it can break the abstraction about whether the
+    # (forward) state is a tensor or a tuple of tensors.
+    if issubclass(SOLVERS[adjoint_method], RKAdaptiveStepsizeODESolver):
+        # Get the norm used in the forward pass.
+        # (Which will always have been set, by _check_inputs)
+        state_norm = options['norm']
+
+        # This is the default adjoint norm on the backward pass: a mixed norm over the tuple of inputs.
+        def default_adjoint_norm(tensor_tuple):
+            t, y, adj_y, *adj_params = tensor_tuple
+            # (If the state is actually a flattened tuple then this will be unpacked again in state_norm.)
+            return max(t.abs(), state_norm(y), state_norm(adj_y), _mixed_norm(adj_params))
+
+        if made_adjoint_options:
+            # `adjoint_options` was not explicitly specified by the user. Use the default norm.
+            adjoint_options["norm"] = default_adjoint_norm
+        else:
+            # `adjoint_options` was explicitly specified by the user...
+            try:
+                adjoint_norm = adjoint_options['norm']
+            except KeyError:
+                # ...but they did not specify the norm argument. Back to plan A: use the default norm.
+                adjoint_options['norm'] = default_adjoint_norm
+            else:
+                # ...and they did specify the norm argument.
+                if adjoint_norm == 'seminorm':
+                    # They told us they want to use seminorms. Slight modification to plan A: use the default norm,
+                    # but ignore the parameter state
+                    def adjoint_seminorm(tensor_tuple):
+                        t, y, adj_y, *adj_params = tensor_tuple
+                        # (If the state is actually a flattened tuple then this will be unpacked again in state_norm.)
+                        return max(t.abs(), state_norm(y), state_norm(adj_y))
+                    adjoint_options['norm'] = adjoint_seminorm
+                else:
+                    # And they're using their own custom norm.
+                    if shapes is None:
+                        # The state on the forward pass was a tensor, not a tuple. We don't need to do anything, they're
+                        # already going to get given the full adjoint state as (t, y, adj_y, adj_params)
+                        pass  # this branch included for clarity
+                    else:
+                        # This is the bit that is tuple/tensor abstraction-breaking, because the odeint machinery
+                        # doesn't know about the tupled nature of the forward state. We need to tell the user's adjoint
+                        # norm about that ourselves.
+
+                        def _adjoint_norm(tensor_tuple):
+                            t, y, adj_y, *adj_params = tensor_tuple
+                            y = _flat_to_shape(y, (), shapes)
+                            adj_y = _flat_to_shape(adj_y, (), shapes)
+                            return adjoint_norm((t, *y, *adj_y, *adj_params))
+                        adjoint_options['norm'] = _adjoint_norm
+
+    return adjoint_rtol, adjoint_atol, adjoint_method, adjoint_options, adjoint_params
 
 
-def find_parameters(module):
+def _flip_option(adjoint_options, option_name):
+    # We assume that step_t etc. are given to us ordered in the same direction as for the forward pass (for
+    # compatibility with the default adjoint_options=options), so we need to flip them around here.
+    try:
+        option_value = adjoint_options[option_name]
+    except KeyError:
+        pass
+    else:
+        if torch.is_tensor(option_value) and option_value.ndimension() > 0:
+            adjoint_options[option_name] = option_value.flip(0)
+        # else: an error will be raised when the option is attempted to be used in Solver.__init__, but we defer raising
+        # the error until then to keep things tidy.
+
+
+def _find_parameters(module):
 
     assert isinstance(module, nn.Module)
 
@@ -212,6 +312,6 @@ def find_parameters(module):
             return tuples
 
         gen = module._named_members(get_members_fn=find_tensor_attributes)
-        return [param for _, param in gen]
+        return (param for _, param in gen)
     else:
-        return list(module.parameters())
+        return module.parameters()
