@@ -127,11 +127,15 @@ def _check_inputs(func, y0, t, rtol, atol, method, options):
             setattr(wrapped_func, callback_name, _null_callback)
         else:
             callback_names.add(callback_name)
+            # At the moment all callbacks have the arguments (t0, y0, dt).
+            # These will need adjusting on a per-callback basis if that changes in the future.
+            if is_tuple:
+                def callback(t0, y0, dt, _callback=callback):
+                    y0 = _flat_to_shape(y0, (), shapes)
+                    return _callback(t0, y0, dt)
             if is_reversed:
-                # At the moment all callbacks have the arguments (t0, y0, dt).
-                # This will need adjusting on a per-callback basis if that changes in the future.
-                def callback(t0, *args, _callback=callback, **kwargs):
-                    return _callback(-t0, *args, **kwargs)
+                def callback(t0, y0, dt, _callback=callback):
+                    return _callback(-t0, y0, dt)
             setattr(wrapped_func, callback_name, callback)
     for callback_name in _all_adjoint_callback_names:
         try:
