@@ -55,10 +55,12 @@ PROBLEMS = {'constant': ConstantODE, 'linear': LinearODE, 'sine': SineODE}
 DTYPES = (torch.float32, torch.float64)
 DEVICES = ['cpu']
 if torch.cuda.is_available():
-    DEVICES.append('cuda:0')
+    DEVICES.append('cuda')
 FIXED_METHODS = ('euler', 'midpoint', 'rk4', 'explicit_adams', 'implicit_adams')
-ADAPTIVE_METHODS = ('dopri5', 'bosh3', 'adaptive_heun', 'dopri8', 'scipy_solver')  # TODO: add in adaptive adams and tsit5 if/when they're fixed
-METHODS = FIXED_METHODS + ADAPTIVE_METHODS
+ADAMS_METHODS = ('explicit_adams', 'implicit_adams')
+ADAPTIVE_METHODS = ('dopri5', 'bosh3', 'adaptive_heun', 'dopri8')
+SCIPY_METHODS = ('scipy_solver',)
+METHODS = FIXED_METHODS + ADAPTIVE_METHODS + SCIPY_METHODS
 
 
 def construct_problem(device, npts=10, ode='constant', reverse=False, dtype=torch.float64):
