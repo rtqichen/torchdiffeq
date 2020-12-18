@@ -19,6 +19,8 @@
   - `explicit_adams` Explicit Adams.
   - `implicit_adams` Implicit Adams.
 
+- `scipy_solver`: Wraps a SciPy solver.
+
 
 **What are `NFE-F` and `NFE-B`?**<br>
 Number of function evaluations for forward and backward pass.
@@ -31,7 +33,7 @@ The basic idea is each adaptive solver can produce an error estimate of the curr
 [Error Tolerances for Variable-Step Solvers](https://www.mathworks.com/help/simulink/ug/types-of-solvers.html#f11-44943)
 
 **How is the error tolerance calculated?**<br>
-The error tolerance is [calculated]((https://github.com/rtqichen/torchdiffeq/blob/master/torchdiffeq/_impl/misc.py#L74)) as `atol + rtol * norm of current state`, where the norm being used is a mixed L-infinity/RMS norm. 
+The error tolerance is [calculated]((https://github.com/rtqichen/torchdiffeq/blob/master/torchdiffeq/_impl/misc.py#L74)) as `atol + rtol * norm of current state`, where the norm being used is a mixed L-infinity/RMS norm.
 
 **Where is the code that computes the error tolerance?**<br>
 It is computed [here.](https://github.com/rtqichen/torchdiffeq/blob/c4c9c61c939c630b9b88267aa56ddaaec319cb16/torchdiffeq/_impl/misc.py#L94)
@@ -72,7 +74,7 @@ https://stackoverflow.com/questions/52528955/installing-a-python-module-from-git
 
 **What is the most memory-expensive operation during training?**<br>
 The most memory-expensive operation is the single [backward call](https://github.com/rtqichen/torchdiffeq/blob/master/torchdiffeq/_impl/adjoint.py#L75) made to the network.
-    
+
 **My Neural ODE's numerical solution is farther away from the target than the initial value**<br>
 Most tricks for initializing residual nets (like zeroing the weights of the last layer) should help for ODEs as well. This will initialize the ODE as an identity.
 
