@@ -52,6 +52,26 @@ odeint(func, y0, t)
 
 The biggest **gotcha** is that `func` must be a `nn.Module` when using the adjoint method. This is used to collect parameters of the differential equation.
 
+## Differentiable event handling
+
+We allow terminating an ODE solution based on an event function. This can be invoked with `odeint_event`:
+```
+from torchdiffeq import odeint_event
+odeint_event(func, y0, t0, *, event_fn, reverse_time=False, odeint_interface=odeint, **kwargs)
+```
+ - `func` and `y0` are the same as `odeint`.
+ - `t0` is a scalar representing the initial time value.
+ - `event_fn(t, y)` returns a tensor, and must be specified as a keyword argument.
+ - `reverse_time` is a boolean specifying whether we should solve in reverse time. Default is `False`.
+ - `odeint_interface` is one of `odeint` or `odeint_adjoint`, specifying whether adjoint mode should be used for differentiating through the ODE solution. Default is `odeint`.
+ - `**kwargs`: any remaining keyword arguments are passed to `odeint_interface`.
+
+The solve is terminated at an event time `t` and state `y` where at least one element of `event_fn(t, y)` is equal to zero. Both the event time and final state are returned from `odeint_event`, and can be differentiated. Gradients will be backpropagated through the event function.
+
+The numerical precision for the event time is determined by the `atol` argument.
+
+See example of a bouncing ball in [`examples/bouncing_ball.py`](./examples/bouncing_ball.py).
+
 ### Keyword Arguments
  - `rtol` Relative tolerance.
  - `atol` Absolute tolerance.
@@ -73,7 +93,7 @@ Fixed-step:
  - `explicit_adams` Explicit Adams-Bashforth.
  - `implicit_adams` Implicit Adams-Bashforth-Moulton.
 
- Additionally, all solvers available through SciPy are wrapped for use with `scipy_solver`.
+Additionally, all solvers available through SciPy are wrapped for use with `scipy_solver`.
 
 For most problems, good choices are the default `dopri5`, or to use `rk4` with `options=dict(step_size=...)` set appropriately small. Adjusting the tolerances (adaptive solvers) or step size (fixed solvers), will allow for trade-offs between speed and accuracy.
 
