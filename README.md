@@ -66,7 +66,9 @@ odeint_event(func, y0, t0, *, event_fn, reverse_time=False, odeint_interface=ode
  - `odeint_interface` is one of `odeint` or `odeint_adjoint`, specifying whether adjoint mode should be used for differentiating through the ODE solution. Default is `odeint`.
  - `**kwargs`: any remaining keyword arguments are passed to `odeint_interface`.
 
-The solve is terminated at an event time `t` and state `y` where at least one element of `event_fn(t, y)` is equal to zero. Both the event time and final state are returned from `odeint_event`, and can be differentiated. Gradients will be backpropagated through the event function.
+The solve is terminated at an event time `t` and state `y` when an element of `event_fn(t, y)` is equal to zero. Multiple outputs from `event_fn` can be used to specify multiple event functions, of which the first to trigger will terminate the solve.
+
+Both the event time and final state are returned from `odeint_event`, and can be differentiated. Gradients will be backpropagated through the event function.
 
 The numerical precision for the event time is determined by the `atol` argument.
 
