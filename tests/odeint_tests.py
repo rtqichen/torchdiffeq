@@ -5,8 +5,7 @@ import warnings
 import torch
 import torchdiffeq
 
-from problems import (construct_problem, PROBLEMS, DTYPES, DEVICES, METHODS, ADAPTIVE_METHODS, FIXED_METHODS,
-                      ADAMS_METHODS)
+from problems import (construct_problem, PROBLEMS, DTYPES, DEVICES, METHODS, ADAPTIVE_METHODS, FIXED_METHODS)
 
 
 def rel_error(true, estimate):
@@ -142,10 +141,6 @@ class TestDiscontinuities(unittest.TestCase):
             for dtype in DTYPES:
                 for device in DEVICES:
                     for method in FIXED_METHODS:
-
-                        # TODO: implement perturb for fixed step adams methods.
-                        if method in ADAMS_METHODS:
-                            continue
                         for perturb in (True, False):
                             with self.subTest(adjoint=adjoint, dtype=dtype, device=device, method=method,
                                               perturb=perturb):
