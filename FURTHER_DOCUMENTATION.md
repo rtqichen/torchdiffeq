@@ -46,10 +46,15 @@ For this solver, `rtol` and `atol` correspond to the tolerance for convergence o
 
 - `max_iters`: The maximum number of iterations to run the Adams-Moulton corrector for.
 
+**scipy_solver:**<br>
+- `solver`: which SciPy solver to use; corresponds to the `'method'` argument of `scipy.integrate.solve_ivp`.
+
  ## Adjoint options
- 
+
  The function `odeint_adjoint` offers some adjoint-specific options.
- 
+
  - `adjoint_rtol`,<br>`adjoint_atol`,<br>`adjoint_method`,<br>`adjoint_options`:<br>The `rtol, atol, method, options` to use for the backward pass. Defaults to the values used for the forward pass.
- 
- - `adjoint_params`: The parameters to compute gradients with respect to in the backward pass. Should be a tuple of tensors. Defaults to `tuple(func.parameters())`. If passed then `func` does not have to be a `torch.nn.Module`.
+
+ - `adjoint_params`: The parameters to compute gradients with respect to in the backward pass. Should be a tuple of tensors. Defaults to `tuple(func.parameters())`.
+   - If passed then `func` does not have to be a `torch.nn.Module`.
+   - If `func` has no parameters, `adjoint_params=()` must be specified.
