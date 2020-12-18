@@ -103,7 +103,15 @@ def odeint_event(func, y0, t0, *, event_fn, reverse_time=False, odeint_interface
     else:
         state_t = solution[-1]
 
+    # Event_fn takes in negated time value if reverse_time is True.
+    if reverse_time:
+        event_t = -event_t
+
     event_t, state_t = ImplicitFnGradientRerouting.apply(_func, event_fn, event_t, state_t)
+
+    # Return the user expected time value.
+    if reverse_time:
+        event_t = -event_t
 
     if shapes is not None:
         state_t = _flat_to_shape(state_t, (), shapes)
