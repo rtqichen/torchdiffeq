@@ -136,6 +136,51 @@ class TestDiscontinuities(unittest.TestCase):
                                     better_xs.sum().backward()
                                 self.assertLess(better_f.nfe, simple_f.nfe)
 
+    # An option for fixed step solvers.
+    def test_odeint_perturb(self):
+        for adjoint in (False, True):
+            for dtype in DTYPES:
+                for device in DEVICES:
+                    for method in FIXED_METHODS:
+
+                        # TODO: implement perturb for fixed step adams methods.
+                        if method in ADAMS_METHODS:
+                            continue
+                        for perturb in (True, False):
+                            with self.subTest(adjoint=adjoint, dtype=dtype, device=device, method=method,
+                                              perturb=perturb):
+                                x0 = torch.tensor([1.0, 2.0], device=device, dtype=dtype, requires_grad=True)
+                                t = torch.tensor([0., 1.0], device=device)
+                                ts = []
+
+                                def f(t, x):
+                                    ts.append(t.item())
+                                    return -x
+
+                                options = dict(step_size=0.5, perturb=perturb)
+
+                                with warnings.catch_warnings():
+                                    odeint = partial(torchdiffeq.odeint_adjoint, adjoint_params=()) if adjoint else torchdiffeq.odeint
+                                    xs = odeint(f, x0, t, method=method, options=options)
+
+                                if perturb:
+                                    self.assertNotIn(0., ts)
+                                    self.assertNotIn(0.5, ts)
+                                else:
+                                    self.assertIn(0., ts)
+                                    self.assertIn(0.5, ts)
+
+                                if adjoint:
+                                    ts.clear()
+                                    with warnings.catch_warnings():
+                                        xs.sum().backward()
+                                    if perturb:
+                                        self.assertNotIn(1., ts)
+                                        self.assertNotIn(0.5, ts)
+                                    else:
+                                        self.assertIn(1., ts)
+                                        self.assertIn(0.5, ts)
+
 
 if __name__ == '__main__':
     unittest.main()
