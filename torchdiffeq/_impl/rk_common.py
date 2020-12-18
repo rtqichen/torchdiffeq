@@ -5,8 +5,7 @@ from .event_handling import find_event
 from .interp import _interp_evaluate, _interp_fit
 from .misc import (_compute_error_ratio,
                    _select_initial_step,
-                   _optimal_step_size,
-                   _check_timelike)
+                   _optimal_step_size)
 from .solvers import AdaptiveStepsizeEventODESolver
 
 
@@ -146,21 +145,6 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeEventODESolver):
         self.max_num_steps = torch.as_tensor(max_num_steps, dtype=torch.int32, device=device)
         self.dtype = dtype
 
-        # Handle step_t and jump_t arguments.
-        if step_t is None:
-            step_t = torch.tensor([], dtype=dtype, device=device)
-        else:
-            _check_timelike('step_t', step_t, False)
-            step_t = step_t.to(dtype)
-        if jump_t is None:
-            jump_t = torch.tensor([], dtype=dtype, device=device)
-        else:
-            _check_timelike('jump_t', jump_t, False)
-            jump_t = jump_t.to(dtype)
-        counts = torch.cat([step_t, jump_t]).unique(return_counts=True)[1]
-        if (counts > 1).any():
-            raise ValueError("`step_t` and `jump_t` must not have any repeated elements between them.")
-
         self.step_t = step_t
         self.jump_t = jump_t
 
@@ -172,6 +156,7 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeEventODESolver):
         self.mid = self.mid.to(device=device, dtype=y0.dtype)
 
     def _before_integrate(self, t):
+        t0 = t[0]
         f0 = self.func(t[0], self.y0)
         if self.first_step is None:
             first_step = _select_initial_step(self.func, t[0], self.y0, self.order - 1, self.rtol, self.atol,
@@ -179,6 +164,24 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeEventODESolver):
         else:
             first_step = self.first_step
         self.rk_state = _RungeKuttaState(self.y0, f0, t[0], t[0], first_step, [self.y0] * 5)
+
+        # Handle step_t and jump_t arguments.
+        if self.step_t is None:
+            step_t = torch.tensor([], dtype=self.dtype, device=self.y0.device)
+        else:
+            step_t = _sort_tvals(self.step_t, t0)
+            step_t = step_t.to(self.dtype)
+        if self.jump_t is None:
+            jump_t = torch.tensor([], dtype=self.dtype, device=self.y0.device)
+        else:
+            jump_t = _sort_tvals(self.jump_t, t0)
+            jump_t = jump_t.to(self.dtype)
+        counts = torch.cat([step_t, jump_t]).unique(return_counts=True)[1]
+        if (counts > 1).any():
+            raise ValueError("`step_t` and `jump_t` must not have any repeated elements between them.")
+
+        self.step_t = step_t
+        self.jump_t = jump_t
         self.next_step_index = min(bisect.bisect(self.step_t.tolist(), t[0]), len(self.step_t) - 1)
         self.next_jump_index = min(bisect.bisect(self.jump_t.tolist(), t[0]), len(self.jump_t) - 1)
 
@@ -295,3 +298,9 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeEventODESolver):
         f0 = k[..., 0]
         f1 = k[..., -1]
         return _interp_fit(y0, y1, y_mid, f0, f1, dt)
+
+
+def _sort_tvals(tvals, t0):
+    # TODO: add warning if tvals come before t0?
+    tvals = tvals[tvals >= t0]
+    return torch.sort(tvals).values

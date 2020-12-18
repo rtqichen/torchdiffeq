@@ -244,7 +244,11 @@ def _check_inputs(func, y0, t, rtol, atol, method, options, event_fn, SOLVERS):
         t_is_reversed = True
 
     if t_is_reversed:
+        # Change the integration times to ascending order.
+        # We do this by negating the time values and all associated arguments.
         t = -t
+
+        # Ensure time values are un-negated when calling functions.
         func = _ReverseFunc(func, mul=-1.0)
         if event_fn is not None:
             event_fn = _ReverseFunc(event_fn)
