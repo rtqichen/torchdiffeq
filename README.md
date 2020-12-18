@@ -72,7 +72,9 @@ The numerical precision for the event time is determined by the `atol` argument.
 
 See example of a bouncing ball in [`examples/bouncing_ball.py`](./examples/bouncing_ball.py).
 
-### Keyword Arguments
+## Arguments
+
+#### Keyword arguments:
  - `rtol` Relative tolerance.
  - `atol` Absolute tolerance.
  - `method` One of the solvers listed below.
