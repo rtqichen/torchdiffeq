@@ -1,8 +1,12 @@
+from functools import partial
 import unittest
+import warnings
+
 import torch
 import torchdiffeq
 
-from problems import construct_problem, PROBLEMS, DTYPES, DEVICES, METHODS, ADAPTIVE_METHODS
+from problems import (construct_problem, PROBLEMS, DTYPES, DEVICES, METHODS, ADAPTIVE_METHODS, FIXED_METHODS,
+                      ADAMS_METHODS)
 
 
 def rel_error(true, estimate):
@@ -83,53 +87,54 @@ class TestNoIntegration(unittest.TestCase):
                                 self.assertLess((sol[0] - y).abs().max(), 1e-12)
 
 
-class TestGridPoints(unittest.TestCase):
-    def test_odeint_grid_points(self):
+class _JumpF():
+    def __init__(self):
+        self.nfe = 0
 
-        for dtype in DTYPES:
-            for device in DEVICES:
-                for method in ADAPTIVE_METHODS:
-                    if dtype == torch.float32 and method == 'dopri8':
-                        continue
-                    if method == 'scipy_solver':
-                        continue
-                    with self.subTest(dtype=dtype, device=device, method=method):
+    def __call__(self, t, x):
+        self.nfe += 1
+        if t < 0.5:
+            return -0.5 * x
+        else:
+            return x ** 2
 
-                        nfe = [0]
 
-                        def f(t, x):
-                            nfe[0] += 1
-                            if t < 0.5:
-                                return -0.5 * x
-                            else:
-                                return 1.0 * x**2
+class TestDiscontinuities(unittest.TestCase):
+    def test_odeint_jump_t(self):
+        for adjoint in (False, True):
+            for dtype in DTYPES:
+                for device in DEVICES:
+                    for method in ADAPTIVE_METHODS:
 
-                        x0 = torch.tensor([1.0, 2.0]).to(device, dtype)
-                        kwargs = dict(rtol=1e-12, atol=1e-14) if method == 'dopri8' else dict()
+                        # Why is this case skipped over?
+                        if dtype == torch.float32 and method == 'dopri8':
+                            continue
 
-                        torchdiffeq.odeint(
-                            f, x0, torch.tensor([0., 1.0]).to(device), method=method,
-                            options={"grid_points": torch.tensor([0.5]).to(device), "eps": 1e-6},
-                            **kwargs)
-                        fixed_eps_nfe = nfe[0]
-                        nfe[0] = 0
+                        with self.subTest(adjoint=adjoint, dtype=dtype, device=device, method=method):
 
-                        torchdiffeq.odeint(
-                            f, x0, torch.tensor([0., 1.0]).to(device), method=method,
-                            options={"grid_points": torch.tensor([0.5]).to(device), "eps": None},
-                            **kwargs)
-                        nextafter_eps_nfe = nfe[0]
-                        nfe[0] = 0
+                            x0 = torch.tensor([1.0, 2.0], device=device, dtype=dtype, requires_grad=True)
+                            t = torch.tensor([0., 1.0], device=device)
 
-                        torchdiffeq.odeint(
-                            f, x0, torch.tensor([0., 1.0]).to(device), method=method,
-                            options={"grid_points": torch.tensor([0.5]).to(device), "eps": 0.0},
-                            **kwargs)
-                        zero_eps_nfe = nfe[0]
-                        nfe[0] = 0
+                            simple_f = _JumpF()
+                            odeint = partial(torchdiffeq.odeint_adjoint, adjoint_params=()) if adjoint else torchdiffeq.odeint
+                            simple_xs = odeint(simple_f, x0, t, atol=1e-7, method=method)
 
-                        self.assertLessEqual(nextafter_eps_nfe, fixed_eps_nfe)
-                        self.assertLess(nextafter_eps_nfe, zero_eps_nfe)
+                            better_f = _JumpF()
+                            options = dict(jump_t=torch.tensor([0.5], device=device))
+
+                            with warnings.catch_warnings():
+                                better_xs = odeint(better_f, x0, t, rtol=1e-6, atol=1e-6, method=method,
+                                                   options=options)
+
+                            self.assertLess(better_f.nfe, simple_f.nfe)
+
+                            if adjoint:
+                                simple_f.nfe = 0
+                                better_f.nfe = 0
+                                with warnings.catch_warnings():
+                                    simple_xs.sum().backward()
+                                    better_xs.sum().backward()
+                                self.assertLess(better_f.nfe, simple_f.nfe)
 
 
 if __name__ == '__main__':

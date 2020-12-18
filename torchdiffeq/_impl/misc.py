@@ -1,3 +1,4 @@
+import math
 import numpy as np
 import torch
 import warnings
@@ -176,6 +177,25 @@ class _ReverseFunc(torch.nn.Module):
         return self.mul * self.base_func(-t, y)
 
 
+class _PerturbFunc(torch.nn.Module):
+    _inf = torch.tensor(math.inf)
+    _neginf = torch.tensor(-math.inf)
+
+    def __init__(self, base_func):
+        super(_PerturbFunc, self).__init__()
+        self.base_func = base_func
+
+    def forward(self, t, y, *, perturb=None):
+        t = t.to(y.dtype)
+        if perturb is True:
+            t = _nextafter(t, self._inf)
+        elif perturb is False:
+            t = _nextafter(t, self._neginf)
+        # Don't modify t if perturb is None.
+
+        return self.base_func(t, y)
+
+
 def _check_inputs(func, y0, t, rtol, atol, method, options, event_fn, SOLVERS):
 
     if event_fn is not None:
@@ -209,16 +229,6 @@ def _check_inputs(func, y0, t, rtol, atol, method, options, event_fn, SOLVERS):
         raise ValueError('Invalid method "{}". Must be one of {}'.format(method,
                                                                          '{"' + '", "'.join(SOLVERS.keys()) + '"}.'))
 
-    try:
-        grid_points = options['grid_points']
-    except KeyError:
-        pass
-    else:
-        assert torch.is_tensor(grid_points), 'grid_points must be a torch.Tensor'
-        _assert_one_dimensional('grid_points', grid_points)
-        assert not grid_points.requires_grad, "grid_points cannot require gradient"
-        _assert_floating('grid_points', grid_points)
-
     if 'norm' not in options:
         if shapes is None:
             # L2 norm over a single input
@@ -228,31 +238,31 @@ def _check_inputs(func, y0, t, rtol, atol, method, options, event_fn, SOLVERS):
             options['norm'] = _mixed_linf_rms_norm(shapes)
 
     # Normalise time
-    assert torch.is_tensor(t), 't must be a torch.Tensor'
-    _assert_one_dimensional('t', t)
-    _assert_floating('t', t)
-    decreasing_time = False
-    if _decreasing(t):
-        decreasing_time = True
+    t = _check_timelike('t', t, True)
+    t_is_reversed = False
+    if len(t) > 1 and t[0] > t[1]:
+        t_is_reversed = True
+
+    if t_is_reversed:
         t = -t
         func = _ReverseFunc(func, mul=-1.0)
         if event_fn is not None:
             event_fn = _ReverseFunc(event_fn)
+
+        # For fixed step solvers.
         try:
-            grid_points = options['grid_points']
+            _grid_constructor = options['grid_constructor']
         except KeyError:
             pass
         else:
-            options['grid_points'] = -grid_points
+            options['grid_constructor'] = lambda func, y0, t: -_grid_constructor(func, y0, -t)
+
+        # For RK solvers.
+        _flip_option(options, 'step_t')
+        _flip_option(options, 'jump_t')
 
     # Can only do after having normalised time
     _assert_increasing('t', t)
-    try:
-        grid_points = options['grid_points']
-    except KeyError:
-        pass
-    else:
-        _assert_increasing('grid_points', grid_points)
 
     # Tol checking
     if torch.is_tensor(rtol):
@@ -266,7 +276,10 @@ def _check_inputs(func, y0, t, rtol, atol, method, options, event_fn, SOLVERS):
         t = t.to(y0.device)
     # ~Backward compatibility
 
-    return shapes, func, y0, t, rtol, atol, method, options, event_fn, decreasing_time
+    # Add perturb argument to func.
+    func = _PerturbFunc(func)
+
+    return shapes, func, y0, t, rtol, atol, method, options, event_fn, t_is_reversed
 
 
 def _nextafter(x1, x2):
@@ -282,3 +295,26 @@ def np_nextafter(x1, x2):
     x2_np = x2.detach().cpu().numpy()
     out = torch.tensor(np.nextafter(x1_np, x2_np)).to(x1)
     return out.detach() + (x1 - x1.detach())  # stitch gradients.
+
+
+def _check_timelike(name, timelike, can_grad):
+    assert isinstance(timelike, torch.Tensor), '{} must be a torch.Tensor'.format(name)
+    _assert_floating(name, timelike)
+    assert timelike.ndimension() == 1, "{} must be one dimensional".format(name)
+    if not can_grad:
+        assert not timelike.requires_grad, "{} cannot require gradient".format(name)
+    diff = timelike[1:] > timelike[:-1]
+    assert diff.all() or (~diff).all(), '{} must be strictly increasing or decreasing'.format(name)
+    return timelike
+
+
+def _flip_option(options, option_name):
+    try:
+        option_value = options[option_name]
+    except KeyError:
+        pass
+    else:
+        if isinstance(option_value, torch.Tensor):
+            options[option_name] = -option_value
+        # else: an error will be raised when the option is attempted to be used in Solver.__init__, but we defer raising
+        # the error until then to keep things tidy.
