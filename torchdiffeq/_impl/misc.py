@@ -186,6 +186,9 @@ class _PerturbFunc(torch.nn.Module):
         self.base_func = base_func
 
     def forward(self, t, y, *, perturb=None):
+        # This dtype change here might be buggy.
+        # The exact time value should be determined inside the solver,
+        # but this can slightly change it due to numerical differences during casting.
         t = t.to(y.dtype)
         if perturb is True:
             t = _nextafter(t, self._inf)
