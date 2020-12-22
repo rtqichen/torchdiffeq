@@ -15,9 +15,9 @@ For these solvers, `rtol` and `atol` correspond to the tolerances for accepting/
 
 - `dtype=torch.float64`: what dtype to use for timelike quantities. Setting this to `torch.float32` will improve speed but may produce underflow errors more easily.
 
-- `step_t=None`: Times that a step must me made to. In particular this is useful when `func` has kinks (derivative discontinuities) at these times, as the solver then does not need to (slowly) discover these for itself. If passed this should be an ordered one dimensional `torch.Tensor`.
+- `step_t=None`: Times that a step must me made to. In particular this is useful when `func` has kinks (derivative discontinuities) at these times, as the solver then does not need to (slowly) discover these for itself. If passed this should be a `torch.Tensor`.
 
-- `jump_t=None`: Times that a step must be made to, and `func` re-evaluated at. In particular this is useful when `func` has discontinuites at these times, as then the solver knows that the final function evaluation of the previous step is not equal to the first function evaluation of this step. (i.e. the FSAL property does not hold at this point.) If passed this should be an ordered one dimensional `torch.Tensor`. Note that this is not efficient on the GPU when using PyTorch 1.6.0 or earlier.
+- `jump_t=None`: Times that a step must be made to, and `func` re-evaluated at. In particular this is useful when `func` has discontinuites at these times, as then the solver knows that the final function evaluation of the previous step is not equal to the first function evaluation of this step. (i.e. the FSAL property does not hold at this point.) If passed this should be a `torch.Tensor`. Note that this may not be efficient when using PyTorch 1.6.0 or earlier.
 
 - `norm`: What norm to compute the accept/reject criterion with respect to. Given tensor input, this defaults to an RMS norm. Given tupled input, it computes an RMS norm over each tensor, and then takes a max over the tuple, producing a mixed L-infinity/RMS norm. If passed this should be a function consuming a single tensor of shape the same as `y0` (given tensor input) or a single tensor of shape `(sum(y.numel() for y in y0),)` (given tupled input), and return a scalar tensor corresponding to its norm.
 
@@ -27,12 +27,9 @@ For these solvers, `rtol` and `atol` correspond to the tolerances for accepting/
 
 - `grid_constructor=None`: A more fine-grained way of setting the steps, by setting these particular locations as the locations of the steps. Should be a callable `func, y0, t -> grid`, transforming the arguments `func, y0, t` of `odeint` into the desired grid (which should be a one dimensional tensor).
 
+- `perturb`: Defaults to False. If True, then automatically add small perturbations to the start and end of each step, so that stepping to discontinuities works. Note that this this may not be efficient when using PyTorch 1.6.0 or earlier.
+
 Individual solvers also offer certain options.
-
-**euler, midpoint, rk4:**<br>
-For these solvers, `rtol` and `atol` are ignored. These solvers also support:
-
-- `perturb`: Defaults to False. If True, then automatically add small perturbations to the start and end of each step, so that stepping to discontinuities works. Note that this is not efficient on the GPU when using PyTorch 1.6.0 or earlier.
 
 **explicit_adams:**<br>
 For this solver, `rtol` and `atol` are ignored. This solver also supports:
