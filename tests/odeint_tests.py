@@ -18,9 +18,14 @@ class TestSolverError(unittest.TestCase):
             for dtype in DTYPES:
                 for device in DEVICES:
                     for method in METHODS:
-                        if dtype == torch.float32 and method == 'dopri8':
-                            continue
-                        kwargs = dict(rtol=1e-12, atol=1e-14) if method == 'dopri8' else dict()
+
+                        kwargs = dict()
+                        # Have to increase tolerance for dopri8.
+                        if method == 'dopri8' and dtype == torch.float64:
+                            kwargs = dict(rtol=1e-12, atol=1e-14)
+                        if method == 'dopri8' and dtype == torch.float32:
+                            kwargs = dict(rtol=1e-7, atol=1e-7)
+
                         problems = PROBLEMS if method in ADAPTIVE_METHODS else ('constant',)
                         for ode in problems:
                             if method in ['adaptive_heun', 'bosh3']:
@@ -104,10 +109,6 @@ class TestDiscontinuities(unittest.TestCase):
             for dtype in DTYPES:
                 for device in DEVICES:
                     for method in ADAPTIVE_METHODS:
-
-                        # Why is this case skipped over?
-                        if dtype == torch.float32 and method == 'dopri8':
-                            continue
 
                         with self.subTest(adjoint=adjoint, dtype=dtype, device=device, method=method):
 
