@@ -4,6 +4,7 @@ import torch
 import warnings
 from .solvers import FixedGridODESolver
 from .misc import _compute_error_ratio, _linf_norm
+from .misc import Perturb
 from .rk_common import rk4_alt_step_func
 
 _BASHFORTH_COEFFICIENTS = [
@@ -192,7 +193,7 @@ class AdamsBashforthMoulton(FixedGridODESolver):
         return error_ratio < 1
 
     def _step_func(self, func, t0, dt, t1, y0):
-        f0 = func(t0, y0, perturb=True if self.perturb else None)
+        f0 = func(t0, y0, perturb=Perturb.NEXT if self.perturb else Perturb.NONE)
         self._update_history(t0, f0)
         order = min(len(self.prev_f), self.max_order - 1)
         if order < _MIN_ORDER - 1:
@@ -210,7 +211,7 @@ class AdamsBashforthMoulton(FixedGridODESolver):
                 converged = False
                 for _ in range(self.max_iters):
                     dy_old = dy
-                    f = func(t1, y0 + dy, perturb=False if self.perturb else None)
+                    f = func(t1, y0 + dy, perturb=Perturb.PREV if self.perturb else Perturb.NONE)
                     dy = (dt * (moulton_coeffs[0]) * f).type_as(y0) + delta  # moulton is float64 so cast back
                     converged = self._has_converged(dy_old, dy)
                     if converged:

@@ -6,6 +6,7 @@ from .interp import _interp_evaluate, _interp_fit
 from .misc import (_compute_error_ratio,
                    _select_initial_step,
                    _optimal_step_size)
+from .misc import Perturb
 from .solvers import AdaptiveStepsizeEventODESolver
 
 
@@ -67,10 +68,10 @@ def _runge_kutta_step(func, y0, f0, t0, dt, t1, tableau):
         if alpha_i == 1.:
             # Always step to perturbing just before the end time, in case of discontinuities.
             ti = t1
-            perturb = False
+            perturb = Perturb.PREV
         else:
             ti = t0 + alpha_i * dt
-            perturb = None
+            perturb = Perturb.NONE
         yi = y0 + k[..., :i + 1].matmul(beta_i * dt).view_as(f0)
         f = func(ti, yi, perturb=perturb)
         k = _UncheckedAssign.apply(k, f, (..., i + 1))
@@ -94,11 +95,11 @@ _one_sixth = 1 / 6
 def rk4_step_func(func, t0, dt, t1, y0, f0=None, perturb=False):
     k1 = f0
     if k1 is None:
-        k1 = func(t0, y0, perturb=True if perturb else None)
+        k1 = func(t0, y0, perturb=Perturb.NEXT if perturb else Perturb.NONE)
     half_dt = dt * 0.5
     k2 = func(t0 + half_dt, y0 + half_dt * k1)
     k3 = func(t0 + half_dt, y0 + half_dt * k2)
-    k4 = func(t1, y0 + dt * k3, perturb=False if perturb else None)
+    k4 = func(t1, y0 + dt * k3, perturb=Perturb.PREV if perturb else Perturb.NONE)
     return (k1 + 2 * (k2 + k3) + k4) * dt * _one_sixth
 
 
@@ -106,10 +107,10 @@ def rk4_alt_step_func(func, t0, dt, t1, y0, f0=None, perturb=False):
     """Smaller error with slightly more compute."""
     k1 = f0
     if k1 is None:
-        k1 = func(t0, y0, perturb=True if perturb else None)
+        k1 = func(t0, y0, perturb=Perturb.NEXT if perturb else Perturb.NONE)
     k2 = func(t0 + dt * _one_third, y0 + dt * k1 * _one_third)
     k3 = func(t0 + dt * _two_thirds, y0 + dt * (k2 - k1 * _one_third))
-    k4 = func(t1, y0 + dt * (k1 - k2 + k3), perturb=False if perturb else None)
+    k4 = func(t1, y0 + dt * (k1 - k2 + k3), perturb=Perturb.PREV if perturb else Perturb.NONE)
     return (k1 + 3 * (k2 + k3) + k4) * dt * 0.125
 
 
@@ -145,8 +146,8 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeEventODESolver):
         self.max_num_steps = torch.as_tensor(max_num_steps, dtype=torch.int32, device=device)
         self.dtype = dtype
 
-        self.step_t = step_t
-        self.jump_t = jump_t
+        self.step_t = None if step_t is None else torch.as_tensor(step_t, dtype=dtype, device=device)
+        self.jump_t = None if jump_t is None else torch.as_tensor(jump_t, dtype=dtype, device=device)
 
         # Copy from class to instance to set device
         self.tableau = _ButcherTableau(alpha=self.tableau.alpha.to(device=device, dtype=y0.dtype),
@@ -281,7 +282,7 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeEventODESolver):
                     self.next_jump_index += 1
                 # We've just passed a discontinuity in f; we should update f to match the side of the discontinuity
                 # we're now on.
-                f1 = self.func(t_next, y_next, perturb=True)
+                f1 = self.func(t_next, y_next, perturb=Perturb.NEXT)
             f_next = f1
         else:
             t_next = t0

@@ -1,3 +1,4 @@
+from enum import Enum
 import math
 import numpy as np
 import torch
@@ -177,6 +178,12 @@ class _ReverseFunc(torch.nn.Module):
         return self.mul * self.base_func(-t, y)
 
 
+class Perturb(Enum):
+    NONE = 0
+    PREV = 1
+    NEXT = 2
+
+
 class _PerturbFunc(torch.nn.Module):
     _inf = torch.tensor(math.inf)
     _neginf = torch.tensor(-math.inf)
@@ -185,17 +192,21 @@ class _PerturbFunc(torch.nn.Module):
         super(_PerturbFunc, self).__init__()
         self.base_func = base_func
 
-    def forward(self, t, y, *, perturb=None):
+    def forward(self, t, y, *, perturb=Perturb.NONE):
+        assert isinstance(perturb, Perturb), "perturb argument must be of type Perturb enum"
         # This dtype change here might be buggy.
         # The exact time value should be determined inside the solver,
         # but this can slightly change it due to numerical differences during casting.
         t = t.to(y.dtype)
-        if perturb is True:
+        if perturb is Perturb.NEXT:
+            # Replace with next smallest representable value.
             t = _nextafter(t, self._inf)
-        elif perturb is False:
+        elif perturb is Perturb.PREV:
+            # Replace with prev largest representable value.
             t = _nextafter(t, self._neginf)
-        # Don't modify t if perturb is None.
-
+        else:
+            # Do nothing.
+            pass
         return self.base_func(t, y)
 
 
@@ -241,7 +252,7 @@ def _check_inputs(func, y0, t, rtol, atol, method, options, event_fn, SOLVERS):
             options['norm'] = _mixed_linf_rms_norm(shapes)
 
     # Normalise time
-    t = _check_timelike('t', t, True)
+    _check_timelike('t', t, True)
     t_is_reversed = False
     if len(t) > 1 and t[0] > t[1]:
         t_is_reversed = True
@@ -312,7 +323,6 @@ def _check_timelike(name, timelike, can_grad):
         assert not timelike.requires_grad, "{} cannot require gradient".format(name)
     diff = timelike[1:] > timelike[:-1]
     assert diff.all() or (~diff).all(), '{} must be strictly increasing or decreasing'.format(name)
-    return timelike
 
 
 def _flip_option(options, option_name):
