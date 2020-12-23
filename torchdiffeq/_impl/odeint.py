@@ -44,8 +44,8 @@ def odeint(func, y0, t, *, rtol=1e-7, atol=1e-9, method=None, options=None, even
         y0: N-D Tensor giving starting value of `y` at time point `t[0]`. Optionally, `y0`
             can also be a tuple of Tensors.
         t: 1-D Tensor holding a sequence of time points for which to solve for
-            `y`. The initial time point should be the first element of this sequence,
-            and each time must be larger than the previous time.
+            `y`, in either increasing or decreasing order. The first element of
+            this sequence is taken to be the initial time point.
         rtol: optional float64 Tensor specifying an upper bound on relative error,
             per element of `y`.
         atol: optional float64 Tensor specifying an upper bound on absolute error,
@@ -53,6 +53,9 @@ def odeint(func, y0, t, *, rtol=1e-7, atol=1e-9, method=None, options=None, even
         method: optional string indicating the integration method to use.
         options: optional dict of configuring options for the indicated integration
             method. Can only be provided if a `method` is explicitly set.
+        event_fn: Function that maps the state `y` to a Tensor. The solve terminates when
+            event_fn evaluates to zero. If this is not None, all but the first elements of
+            `t` are ignored.
 
     Returns:
         y: Tensor, where the first dimension corresponds to different
@@ -86,7 +89,7 @@ def odeint(func, y0, t, *, rtol=1e-7, atol=1e-9, method=None, options=None, even
 
 
 def odeint_event(func, y0, t0, *, event_fn, reverse_time=False, odeint_interface=odeint, **kwargs):
-    """Automatically links up the gradient from the event_time."""
+    """Automatically links up the gradient from the event time."""
 
     if reverse_time:
         t = torch.cat([t0.reshape(-1), t0.reshape(-1).detach() - 1.0])
