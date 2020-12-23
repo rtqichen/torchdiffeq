@@ -269,11 +269,23 @@ def _check_inputs(func, y0, t, rtol, atol, method, options, event_fn, SOLVERS):
     return shapes, func, y0, t, rtol, atol, method, options, event_fn, decreasing_time
 
 
+class _StitchGradient(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x1, out):
+        return out
+
+    @staticmethod
+    def backward(ctx, grad_out):
+        return grad_out, None
+
+
 def _nextafter(x1, x2):
-    if hasattr(torch, "nextafter"):
-        return torch.nextafter(x1, x2)
-    else:
-        return np_nextafter(x1, x2)
+    with torch.no_grad():
+        if hasattr(torch, "nextafter"):
+            out = torch.nextafter(x1, x2)
+        else:
+            out = np_nextafter(x1, x2)
+    return _StitchGradient.apply(x1, out)
 
 
 def np_nextafter(x1, x2):
@@ -281,4 +293,4 @@ def np_nextafter(x1, x2):
     x1_np = x1.detach().cpu().numpy()
     x2_np = x2.detach().cpu().numpy()
     out = torch.tensor(np.nextafter(x1_np, x2_np)).to(x1)
-    return out.detach() + (x1 - x1.detach())  # stitch gradients.
+    return out
