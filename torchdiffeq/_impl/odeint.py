@@ -67,7 +67,7 @@ def odeint(func, y0, t, *, rtol=1e-7, atol=1e-9, method=None, options=None, even
         ValueError: if an invalid `method` is provided.
     """
 
-    shapes, func, y0, t, rtol, atol, method, options, event_fn, decreasing_time = _check_inputs(func, y0, t, rtol, atol, method, options, event_fn, SOLVERS)
+    shapes, func, y0, t, rtol, atol, method, options, event_fn, t_is_reversed = _check_inputs(func, y0, t, rtol, atol, method, options, event_fn, SOLVERS)
 
     solver = SOLVERS[method](func=func, y0=y0, rtol=rtol, atol=atol, **options)
 
@@ -76,7 +76,7 @@ def odeint(func, y0, t, *, rtol=1e-7, atol=1e-9, method=None, options=None, even
     else:
         event_t, solution = solver.integrate_until_event(t[0], event_fn)
         event_t = event_t.to(t)
-        if decreasing_time:
+        if t_is_reversed:
             event_t = -event_t
 
     if shapes is not None:

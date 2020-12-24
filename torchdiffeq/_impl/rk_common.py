@@ -5,8 +5,8 @@ from .event_handling import find_event
 from .interp import _interp_evaluate, _interp_fit
 from .misc import (_compute_error_ratio,
                    _select_initial_step,
-                   _optimal_step_size,
-                   _nextafter)
+                   _optimal_step_size)
+from .misc import Perturb
 from .solvers import AdaptiveStepsizeEventODESolver
 
 
@@ -38,17 +38,17 @@ class _UncheckedAssign(torch.autograd.Function):
         return grad_scratch, grad_scratch[ctx.index], None
 
 
-def _runge_kutta_step(func, y0, f0, t0, dt, tableau):
+def _runge_kutta_step(func, y0, f0, t0, dt, t1, tableau):
     """Take an arbitrary Runge-Kutta step and estimate error.
-
     Args:
         func: Function to evaluate like `func(t, y)` to compute the time derivative of `y`.
         y0: Tensor initial value for the state.
         f0: Tensor initial value for the derivative, computed from `func(t0, y0)`.
         t0: float64 scalar Tensor giving the initial time.
         dt: float64 scalar Tensor giving the size of the desired time step.
+        t1: float64 scalar Tensor giving the end time; equal to t0 + dt. This is used (rather than t0 + dt) to ensure
+            floating point accuracy when needed.
         tableau: _ButcherTableau describing how to take the Runge-Kutta step.
-
     Returns:
         Tuple `(y1, f1, y1_error, k)` giving the estimated function value after
         the Runge-Kutta step at `t1 = t0 + dt`, the derivative of the state at `t1`,
@@ -56,17 +56,24 @@ def _runge_kutta_step(func, y0, f0, t0, dt, tableau):
         calculating these terms.
     """
 
-    t0 = t0.type_as(y0)
-    dt = dt.type_as(y0)
+    t0 = t0.to(y0.dtype)
+    dt = dt.to(y0.dtype)
+    t1 = t1.to(y0.dtype)
 
     # We use an unchecked assign to put data into k without incrementing its _version counter, so that the backward
     # doesn't throw an (overzealous) error about in-place correctness. We know that it's actually correct.
     k = torch.empty(*f0.shape, len(tableau.alpha) + 1, dtype=y0.dtype, device=y0.device)
     k = _UncheckedAssign.apply(k, f0, (..., 0))
     for i, (alpha_i, beta_i) in enumerate(zip(tableau.alpha, tableau.beta)):
-        ti = t0 + alpha_i * dt
+        if alpha_i == 1.:
+            # Always step to perturbing just before the end time, in case of discontinuities.
+            ti = t1
+            perturb = Perturb.PREV
+        else:
+            ti = t0 + alpha_i * dt
+            perturb = Perturb.NONE
         yi = y0 + k[..., :i + 1].matmul(beta_i * dt).view_as(f0)
-        f = func(ti, yi)
+        f = func(ti, yi, perturb=perturb)
         k = _UncheckedAssign.apply(k, f, (..., i + 1))
 
     if not (tableau.c_sol[-1] == 0 and (tableau.c_sol[:-1] == tableau.beta[-1]).all()):
@@ -85,23 +92,25 @@ _two_thirds = 2 / 3
 _one_sixth = 1 / 6
 
 
-def rk4_step_func(func, t, dt, y, k1=None):
+def rk4_step_func(func, t0, dt, t1, y0, f0=None, perturb=False):
+    k1 = f0
     if k1 is None:
-        k1 = func(t, y)
+        k1 = func(t0, y0, perturb=Perturb.NEXT if perturb else Perturb.NONE)
     half_dt = dt * 0.5
-    k2 = func(t + half_dt, y + half_dt * k1)
-    k3 = func(t + half_dt, y + half_dt * k2)
-    k4 = func(t + dt, y + dt * k3)
+    k2 = func(t0 + half_dt, y0 + half_dt * k1)
+    k3 = func(t0 + half_dt, y0 + half_dt * k2)
+    k4 = func(t1, y0 + dt * k3, perturb=Perturb.PREV if perturb else Perturb.NONE)
     return (k1 + 2 * (k2 + k3) + k4) * dt * _one_sixth
 
 
-def rk4_alt_step_func(func, t, dt, y, k1=None):
+def rk4_alt_step_func(func, t0, dt, t1, y0, f0=None, perturb=False):
     """Smaller error with slightly more compute."""
+    k1 = f0
     if k1 is None:
-        k1 = func(t, y)
-    k2 = func(t + dt * _one_third, y + dt * k1 * _one_third)
-    k3 = func(t + dt * _two_thirds, y + dt * (k2 - k1 * _one_third))
-    k4 = func(t + dt, y + dt * (k1 - k2 + k3))
+        k1 = func(t0, y0, perturb=Perturb.NEXT if perturb else Perturb.NONE)
+    k2 = func(t0 + dt * _one_third, y0 + dt * k1 * _one_third)
+    k3 = func(t0 + dt * _two_thirds, y0 + dt * (k2 - k1 * _one_third))
+    k4 = func(t1, y0 + dt * (k1 - k2 + k3), perturb=Perturb.PREV if perturb else Perturb.NONE)
     return (k1 + 3 * (k2 + k3) + k4) * dt * 0.125
 
 
@@ -110,8 +119,16 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeEventODESolver):
     tableau: _ButcherTableau
     mid: torch.Tensor
 
-    def __init__(self, func, y0, rtol, atol, first_step=None, safety=0.9, ifactor=10.0, dfactor=0.2,
-                 max_num_steps=2 ** 31 - 1, grid_points=None, eps=0.0, dtype=torch.float64, **kwargs):
+    def __init__(self, func, y0, rtol, atol,
+                 first_step=None,
+                 step_t=None,
+                 jump_t=None,
+                 safety=0.9,
+                 ifactor=10.0,
+                 dfactor=0.2,
+                 max_num_steps=2 ** 31 - 1,
+                 dtype=torch.float64,
+                 **kwargs):
         super(RKAdaptiveStepsizeODESolver, self).__init__(dtype=dtype, y0=y0, **kwargs)
 
         # We use mixed precision. y has its original dtype (probably float32), whilst all 'time'-like objects use
@@ -119,7 +136,7 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeEventODESolver):
         dtype = torch.promote_types(dtype, y0.dtype)
         device = y0.device
 
-        self.func = lambda t, y: func(t.type_as(y), y)
+        self.func = func
         self.rtol = torch.as_tensor(rtol, dtype=dtype, device=device)
         self.atol = torch.as_tensor(atol, dtype=dtype, device=device)
         self.first_step = None if first_step is None else torch.as_tensor(first_step, dtype=dtype, device=device)
@@ -127,10 +144,10 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeEventODESolver):
         self.ifactor = torch.as_tensor(ifactor, dtype=dtype, device=device)
         self.dfactor = torch.as_tensor(dfactor, dtype=dtype, device=device)
         self.max_num_steps = torch.as_tensor(max_num_steps, dtype=torch.int32, device=device)
-        grid_points = torch.tensor([], dtype=dtype, device=device) if grid_points is None else grid_points.to(dtype)
-        self.grid_points = grid_points
-        self.eps = eps if eps is None else torch.as_tensor(eps, dtype=dtype, device=device)
         self.dtype = dtype
+
+        self.step_t = None if step_t is None else torch.as_tensor(step_t, dtype=dtype, device=device)
+        self.jump_t = None if jump_t is None else torch.as_tensor(jump_t, dtype=dtype, device=device)
 
         # Copy from class to instance to set device
         self.tableau = _ButcherTableau(alpha=self.tableau.alpha.to(device=device, dtype=y0.dtype),
@@ -140,6 +157,7 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeEventODESolver):
         self.mid = self.mid.to(device=device, dtype=y0.dtype)
 
     def _before_integrate(self, t):
+        t0 = t[0]
         f0 = self.func(t[0], self.y0)
         if self.first_step is None:
             first_step = _select_initial_step(self.func, t[0], self.y0, self.order - 1, self.rtol, self.atol,
@@ -147,7 +165,26 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeEventODESolver):
         else:
             first_step = self.first_step
         self.rk_state = _RungeKuttaState(self.y0, f0, t[0], t[0], first_step, [self.y0] * 5)
-        self.next_grid_index = min(bisect.bisect(self.grid_points.tolist(), t[0]), len(self.grid_points) - 1)
+
+        # Handle step_t and jump_t arguments.
+        if self.step_t is None:
+            step_t = torch.tensor([], dtype=self.dtype, device=self.y0.device)
+        else:
+            step_t = _sort_tvals(self.step_t, t0)
+            step_t = step_t.to(self.dtype)
+        if self.jump_t is None:
+            jump_t = torch.tensor([], dtype=self.dtype, device=self.y0.device)
+        else:
+            jump_t = _sort_tvals(self.jump_t, t0)
+            jump_t = jump_t.to(self.dtype)
+        counts = torch.cat([step_t, jump_t]).unique(return_counts=True)[1]
+        if (counts > 1).any():
+            raise ValueError("`step_t` and `jump_t` must not have any repeated elements between them.")
+
+        self.step_t = step_t
+        self.jump_t = jump_t
+        self.next_step_index = min(bisect.bisect(self.step_t.tolist(), t[0]), len(self.step_t) - 1)
+        self.next_jump_index = min(bisect.bisect(self.jump_t.tolist(), t[0]), len(self.jump_t) - 1)
 
     def _advance(self, next_t):
         """Interpolate through the next time point, integrating as necessary."""
@@ -175,6 +212,7 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeEventODESolver):
     def _adaptive_step(self, rk_state):
         """Take an adaptive Runge-Kutta step to integrate the ODE."""
         y0, f0, _, t0, dt, interp_coeff = rk_state
+        t1 = t0 + dt
         # dtypes: self.y0.dtype (probably float32); self.dtype (probably float64)
         # used for state and timelike objects respectively.
         # Then:
@@ -193,21 +231,28 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeEventODESolver):
         ########################################################
         #     Make step, respecting prescribed grid points     #
         ########################################################
-        on_grid = len(self.grid_points) and t0 < self.grid_points[self.next_grid_index] < t0 + dt
-        eps = 0
-        _func = self.func
-        if on_grid:
-            t_grid = self.grid_points[self.next_grid_index].type_as(y0)
-            dt = self.grid_points[self.next_grid_index] - t0
-            if self.eps is None:
-                dt = _nextafter(dt.type_as(y0), dt.type_as(y0) - 1.0).type_as(dt)
-                # Ensure the time value never exceeds or equals the grid time.
-                _func = lambda t, y: self.func(min(t, _nextafter(t_grid, t_grid - 1.0)), y)
-            else:
-                eps = min(0.5 * dt, self.eps)
-                dt = dt - eps
 
-        y1, f1, y1_error, k = _runge_kutta_step(_func, y0, f0, t0, dt, tableau=self.tableau)
+        on_step_t = False
+        if len(self.step_t):
+            next_step_t = self.step_t[self.next_step_index]
+            on_step_t = t0 < next_step_t < t0 + dt
+            if on_step_t:
+                t1 = next_step_t
+                dt = t1 - t0
+
+        on_jump_t = False
+        if len(self.jump_t):
+            next_jump_t = self.jump_t[self.next_jump_index]
+            on_jump_t = t0 < next_jump_t < t0 + dt
+            if on_jump_t:
+                on_step_t = False
+                t1 = next_jump_t
+                dt = t1 - t0
+
+        # Must be arranged as doing all the step_t handling, then all the jump_t handling, in case we
+        # trigger both. (i.e. interleaving them would be wrong.)
+
+        y1, f1, y1_error, k = _runge_kutta_step(self.func, y0, f0, t0, dt, t1, tableau=self.tableau)
         # dtypes:
         # y1.dtype == self.y0.dtype
         # f1.dtype == self.y0.dtype
@@ -225,19 +270,24 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeEventODESolver):
         ########################################################
         #                   Update RK State                    #
         ########################################################
-        t_next = t0 + dt + 2 * eps if accept_step else t0
-        y_next = y1 if accept_step else y0
-        if on_grid and accept_step:
-            # We've just passed a discontinuity in f; we should update f to match the side of the discontinuity we're
-            # now on.
-            if self.eps is None:
-                t_next = _nextafter(t_grid, t_grid + 1.0)
-            if self.eps != 0:
-                f1 = self.func(t_next, y_next)
-            if self.next_grid_index != len(self.grid_points) - 1:
-                self.next_grid_index += 1
-        f_next = f1 if accept_step else f0
-        interp_coeff = self._interp_fit(y0, y1, k, dt) if accept_step else interp_coeff
+        if accept_step:
+            t_next = t1
+            y_next = y1
+            interp_coeff = self._interp_fit(y0, y_next, k, dt)
+            if on_step_t:
+                if self.next_step_index != len(self.step_t) - 1:
+                    self.next_step_index += 1
+            if on_jump_t:
+                if self.next_jump_index != len(self.jump_t) - 1:
+                    self.next_jump_index += 1
+                # We've just passed a discontinuity in f; we should update f to match the side of the discontinuity
+                # we're now on.
+                f1 = self.func(t_next, y_next, perturb=Perturb.NEXT)
+            f_next = f1
+        else:
+            t_next = t0
+            y_next = y0
+            f_next = f0
         dt_next = _optimal_step_size(dt, error_ratio, self.safety, self.ifactor, self.dfactor, self.order)
         rk_state = _RungeKuttaState(y_next, f_next, t0, t_next, dt_next, interp_coeff)
         return rk_state
@@ -249,3 +299,9 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeEventODESolver):
         f0 = k[..., 0]
         f1 = k[..., -1]
         return _interp_fit(y0, y1, y_mid, f0, f1, dt)
+
+
+def _sort_tvals(tvals, t0):
+    # TODO: add warning if tvals come before t0?
+    tvals = tvals[tvals >= t0]
+    return torch.sort(tvals).values

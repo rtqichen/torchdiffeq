@@ -65,15 +65,6 @@ class OdeintAdjointMethod(torch.autograd.Function):
             else:
                 adjoint_options = adjoint_options.copy()
 
-            # We assume that any grid points are given to us ordered in the same direction as for the forward pass (for
-            # compatibility with setting adjoint_options = options), so we need to flip them around here.
-            try:
-                grid_points = adjoint_options['grid_points']
-            except KeyError:
-                pass
-            else:
-                adjoint_options['grid_points'] = grid_points.flip(0)
-
             # Backward compatibility: by default use a mixed L-infinity/RMS norm over the input, where we treat t, each
             # element of y, and each element of adj_y separately over the Linf, but consider all the parameters
             # together.
