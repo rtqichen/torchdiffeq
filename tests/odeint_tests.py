@@ -178,5 +178,46 @@ class TestDiscontinuities(unittest.TestCase):
                                         self.assertIn(0.5, ts)
 
 
+class TestGridConstructor(unittest.TestCase):
+    def test_grid_constructor(self):
+        def f(t, x):
+            return x
+
+        for adjoint in (False, True):
+            with self.subTest(adjoint=adjoint):
+                x0 = torch.tensor(1., requires_grad=True)
+                t = torch.tensor([0., 1.])
+
+                first = True
+
+                def grid_constructor(f, y0, t):
+                    nonlocal first
+                    self.assertEqual(t.shape, (2,))
+                    if first:
+                        first = False
+                        self.assertEqual(t[0], 0.)
+                        self.assertEqual(t[1], 1.)
+                        return torch.linspace(0, 1, 11)
+                    else:
+                        # adjoint pass
+                        self.assertEqual(t[0], 1.)
+                        self.assertEqual(t[1], 0.)
+                        return torch.linspace(1, 0, 11)
+
+                odeint = torchdiffeq.odeint_adjoint if adjoint else torchdiffeq.odeint
+                kwargs = {"adjoint_params": ()} if adjoint else {}
+                xs = odeint(f, x0, t, method='euler', options=dict(grid_constructor=grid_constructor), **kwargs)
+                x1 = xs[1]
+
+                # 'true' wrt the use of the Euler scheme
+                true_x1 = x0 * 1.1 ** 10
+                self.assertLess((x1 - true_x1).abs().max(), 1e-6)
+                if adjoint:
+                    x1.backward()
+                    # 'true' wrt the use of the Euler scheme
+                    true_x0_grad = 1.1 ** 10
+                    self.assertLess((x0.grad - true_x0_grad).abs().max(), 1e-6)
+
+
 if __name__ == '__main__':
     unittest.main()
