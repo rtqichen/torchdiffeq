@@ -61,7 +61,7 @@ odeint_event(func, y0, t0, *, event_fn, reverse_time=False, odeint_interface=ode
 ```
  - `func` and `y0` are the same as `odeint`.
  - `t0` is a scalar representing the initial time value.
- - `event_fn(t, y)` returns a tensor, and must be specified as a keyword argument.
+ - `event_fn(t, y)` returns a tensor, and is a required keyword argument.
  - `reverse_time` is a boolean specifying whether we should solve in reverse time. Default is `False`.
  - `odeint_interface` is one of `odeint` or `odeint_adjoint`, specifying whether adjoint mode should be used for differentiating through the ODE solution. Default is `odeint`.
  - `**kwargs`: any remaining keyword arguments are passed to `odeint_interface`.
