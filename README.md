@@ -74,6 +74,10 @@ The numerical precision for the event time is determined by the `atol` argument.
 
 See example of a bouncing ball in [`examples/bouncing_ball.py`](./examples/bouncing_ball.py).
 
+<p align="center">
+<img align="middle" src="./assets/bouncing_ball.png" alt="Bouncing Ball" width="500" height="250" />
+</p>
+
 ## Arguments
 
 #### Keyword arguments:
