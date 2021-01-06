@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import argparse
 import matplotlib.pyplot as plt
 
@@ -65,19 +66,21 @@ class BouncingBallExample(nn.Module):
         # get dense path
         t0, state = self.get_initial_state()
         trajectory = [state[0][None]]
+        velocity = [state[1][None]]
         times = [t0.reshape(-1)]
         for event_t in event_times:
-            tt = torch.linspace(float(t0), float(event_t), 100)[1:-1]
+            tt = torch.linspace(float(t0), float(event_t), int((float(event_t) - float(t0)) * 50))[1:-1]
             tt = torch.cat([t0.reshape(-1), tt, event_t.reshape(-1)])
             solution = odeint(self, state, tt, atol=1e-8, rtol=1e-8)
 
-            trajectory.append(solution[0][1:])
-            times.append(tt[1:])
+            trajectory.append(solution[0])
+            velocity.append(solution[1])
+            times.append(tt)
 
             state = self.state_update(tuple(s[-1] for s in solution))
             t0 = event_t
 
-        return torch.cat(times), torch.cat(trajectory, dim=0).reshape(-1)
+        return torch.cat(times), torch.cat(trajectory, dim=0).reshape(-1), torch.cat(velocity, dim=0).reshape(-1), event_times
 
 
 def gradcheck(nbounces):
@@ -132,16 +135,45 @@ def gradcheck(nbounces):
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Process some integers.")
-    parser.add_argument("nbounces", type=int, nargs="?", default=1)
+    parser.add_argument("nbounces", type=int, nargs="?", default=10)
     parser.add_argument("--adjoint", action="store_true")
     args = parser.parse_args()
 
     gradcheck(args.nbounces)
 
     system = BouncingBallExample()
-    times, trajectory = system.simulate(nbounces=args.nbounces)
+    times, trajectory, velocity, event_times = system.simulate(nbounces=args.nbounces)
     times = times.detach().cpu().numpy()
     trajectory = trajectory.detach().cpu().numpy()
+    velocity = velocity.detach().cpu().numpy()
+    event_times = torch.stack(event_times).detach().cpu().numpy()
 
-    plt.plot(times, trajectory)
+    plt.figure(figsize=(7, 3.5))
+
+    # Event locations.
+    for event_t in event_times:
+        plt.plot(event_t, 0.0, color="C0", marker="o", markersize=7, fillstyle='none', linestyle="")
+
+    vel, = plt.plot(times, velocity, color="C1", alpha=0.7, linestyle="--", linewidth=2.0)
+    pos, = plt.plot(times, trajectory, color="C0", linewidth=2.0)
+
+    plt.hlines(0, 0, 100)
+    plt.xlim([times[0], times[-1]])
+    plt.ylim([velocity.min() - 0.02, velocity.max() + 0.02])
+    plt.ylabel("Markov State", fontsize=16)
+    plt.xlabel("Time", fontsize=13)
+    plt.legend([pos, vel], ["Position", "Velocity"], fontsize=16)
+
+    plt.gca().xaxis.set_tick_params(direction='in', which='both')  # The bottom will maintain the default of 'out'
+    plt.gca().yaxis.set_tick_params(direction='in', which='both')  # The bottom will maintain the default of 'out'
+
+    # Hide the right and top spines
+    plt.gca().spines['right'].set_visible(False)
+    plt.gca().spines['top'].set_visible(False)
+
+    # Only show ticks on the left and bottom spines
+    plt.gca().yaxis.set_ticks_position('left')
+    plt.gca().xaxis.set_ticks_position('bottom')
+
+    plt.tight_layout()
     plt.savefig("bouncing_ball.png")
