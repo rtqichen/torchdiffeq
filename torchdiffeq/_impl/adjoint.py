@@ -219,6 +219,7 @@ def find_parameters(module):
 
     assert isinstance(module, nn.Module)
 
+    # If called within DataParallel, parameters won't appear in module.parameters().
     if getattr(module, '_is_replica', False):
 
         def find_tensor_attributes(module):
