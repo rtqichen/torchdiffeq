@@ -11,41 +11,22 @@ def _handle_unused_kwargs(solver, unused_kwargs):
         warnings.warn('{}: Unexpected arguments {}'.format(solver.__class__.__name__, unused_kwargs))
 
 
+def _linf_norm(tensor):
+    return tensor.max()
+
+
 def _rms_norm(tensor):
     return tensor.pow(2).mean().sqrt()
 
 
-def _mixed_linf_rms_norm(shapes):
-    def _norm(tensor):
-        total = 0
-        out = []
-        for shape in shapes:
-            next_total = total + shape.numel()
-            out.append(_rms_norm(tensor[total:next_total]))
-            total = next_total
-        assert total == tensor.numel(), "Shapes do not total to the full size of the tensor."
-        return max(out)
-    return _norm
+def _zero_norm(tensor):
+    return 0.
 
 
-def _wrap_norm(norm_fns, shapes):
-    def _norm(tensor):
-        total = 0
-        out = []
-        for i, shape in enumerate(shapes):
-            next_total = total + shape.numel()
-            if i < len(norm_fns):
-                out.append(norm_fns[i](tensor[total:next_total]))
-            else:
-                out.append(_rms_norm(tensor[total:next_total]))
-            total = next_total
-        assert total == tensor.numel(), "Shapes do not total to the full size of the tensor."
-        return max(out)
-    return _norm
-
-
-def _linf_norm(tensor):
-    return tensor.max()
+def _mixed_norm(tensor_tuple):
+    if len(tensor_tuple) == 0:
+        return 0.
+    return max([_rms_norm(tensor) for tensor in tensor_tuple])
 
 
 def _select_initial_step(func, t0, y0, order, rtol, atol, norm, f0=None):
@@ -221,7 +202,8 @@ def _check_inputs(func, y0, t, rtol, atol, method, options, event_fn, SOLVERS):
 
     # Normalise to tensor (non-tupled) input
     shapes = None
-    if not torch.is_tensor(y0):
+    is_tuple = not isinstance(y0, torch.Tensor)
+    if is_tuple:
         assert isinstance(y0, tuple), 'y0 must be either a torch.Tensor or a tuple'
         shapes = [y0_.shape for y0_ in y0]
         rtol = _tuple_tol('rtol', rtol, shapes)
@@ -243,13 +225,36 @@ def _check_inputs(func, y0, t, rtol, atol, method, options, event_fn, SOLVERS):
         raise ValueError('Invalid method "{}". Must be one of {}'.format(method,
                                                                          '{"' + '", "'.join(SOLVERS.keys()) + '"}.'))
 
-    if 'norm' not in options:
-        if shapes is None:
-            # L2 norm over a single input
-            options['norm'] = _rms_norm
+    if is_tuple:
+        # We accept tupled input. This is an abstraction that is hidden from the rest of odeint (exception when
+        # returning values), so here we need to maintain the abstraction by wrapping norm functions.
+
+        if 'norm' in options:
+            # If the user passed a norm then get that...
+            norm = options['norm']
         else:
-            # Mixed Linf/L2 norm over tupled input (chosen mostly just for backward compatibility reasons)
-            options['norm'] = _mixed_linf_rms_norm(shapes)
+            # ...otherwise we default to a mixed Linf/L2 norm over tupled input.
+            norm = _mixed_norm
+
+        # In either case, norm(...) is assumed to take a tuple of tensors as input. (As that's what the state looks
+        # like from the point of view of the user.)
+        # So here we take the tensor that the machinery of odeint has given us, and turn it in the tuple that the
+        # norm function is expecting.
+        def _norm(tensor):
+            y = _flat_to_shape(tensor, (), shapes)
+            return norm(y)
+        options['norm'] = _norm
+
+    else:
+        if 'norm' in options:
+            # No need to change the norm function.
+            pass
+        else:
+            # Else just use the default norm.
+            # Technically we don't need to set that here (RKAdaptiveStepsizeODESolver has it as a default), but it
+            # makes it easier to reason about, in the adjoint norm logic, if we know that options['norm'] is
+            # definitely set to something.
+            options['norm'] = _rms_norm
 
     # Normalise time
     _check_timelike('t', t, True)
