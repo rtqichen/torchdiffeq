@@ -1,7 +1,9 @@
+import warnings
 import torch
 import torch.nn as nn
 from .odeint import SOLVERS, odeint
-from .misc import _check_inputs, _flat_to_shape, _rms_norm, _mixed_linf_rms_norm, _wrap_norm
+from .misc import _check_inputs, _flat_to_shape
+from .misc import _mixed_norm
 
 
 class OdeintAdjointMethod(torch.autograd.Function):
@@ -34,7 +36,6 @@ class OdeintAdjointMethod(torch.autograd.Function):
     @staticmethod
     def backward(ctx, *grad_y):
         with torch.no_grad():
-            shapes = ctx.shapes
             func = ctx.func
             adjoint_rtol = ctx.adjoint_rtol
             adjoint_atol = ctx.adjoint_atol
@@ -55,27 +56,6 @@ class OdeintAdjointMethod(torch.autograd.Function):
                 grad_y = grad_y[1]
             else:
                 grad_y = grad_y[0]
-
-            ##################################
-            #     Set up adjoint_options     #
-            ##################################
-
-            if adjoint_options is None:
-                adjoint_options = {}
-            else:
-                adjoint_options = adjoint_options.copy()
-
-            # Backward compatibility: by default use a mixed L-infinity/RMS norm over the input, where we treat t, each
-            # element of y, and each element of adj_y separately over the Linf, but consider all the parameters
-            # together.
-            if 'norm' not in adjoint_options:
-                if shapes is None:
-                    shapes = [y[-1].shape]  # [-1] because y has shape (len(t), *y0.shape)
-                # adj_t, y, adj_y, adj_params, corresponding to the order in aug_state below
-                adjoint_shapes = [torch.Size(())] + shapes + shapes + [torch.Size([sum(param.numel()
-                                                                                       for param in adjoint_params)])]
-                adjoint_options['norm'] = _mixed_linf_rms_norm(adjoint_shapes)
-            # ~Backward compatibility
 
             ##################################
             #      Set up initial state      #
@@ -108,9 +88,9 @@ class OdeintAdjointMethod(torch.autograd.Function):
                     func_eval = func(t if t_requires_grad else t_, y)
 
                     # Workaround for PyTorch bug #39784
-                    _t = torch.as_strided(t, (), ())
-                    _y = torch.as_strided(y, (), ())
-                    _params = tuple(torch.as_strided(param, (), ()) for param in adjoint_params)
+                    _t = torch.as_strided(t, (), ())  # noqa
+                    _y = torch.as_strided(y, (), ())  # noqa
+                    _params = tuple(torch.as_strided(param, (), ()) for param in adjoint_params)  # noqa
 
                     vjp_t, vjp_y, *vjp_params = torch.autograd.grad(
                         func_eval, (t, y) + adjoint_params, -adj_y,
@@ -182,22 +162,38 @@ def odeint_adjoint(func, y0, t, *, rtol=1e-7, atol=1e-9, method=None, options=No
         adjoint_atol = atol
     if adjoint_method is None:
         adjoint_method = method
+
+    if adjoint_method != method and options is not None and adjoint_options is None:
+        raise ValueError("If `adjoint_method != method` then we cannot infer `adjoint_options` from `options`. So as "
+                         "`options` has been passed then `adjoint_options` must be passed as well.")
+
     if adjoint_options is None:
         adjoint_options = {k: v for k, v in options.items() if k != "norm"} if options is not None else {}
+    else:
+        # Avoid in-place modifying a user-specified dict.
+        adjoint_options = adjoint_options.copy()
+
     if adjoint_params is None:
         adjoint_params = tuple(find_parameters(func))
     else:
         adjoint_params = tuple(adjoint_params)  # in case adjoint_params is a generator.
 
     # Filter params that don't require gradients.
+    oldlen_ = len(adjoint_params)
     adjoint_params = tuple(p for p in adjoint_params if p.requires_grad)
+    if len(adjoint_params) != oldlen_:
+        # Some params were excluded.
+        # Issue a warning if a user-specified norm is specified.
+        if 'norm' in adjoint_options and callable(adjoint_options['norm']):
+            warnings.warn("An adjoint parameter was passed without requiring gradient. For efficiency this will be "
+                          "excluded from the adjoint pass, and will not appear as a tensor in the adjoint norm.")
 
-    # Normalise to non-tupled input
+    # Convert to flattened state.
     shapes, func, y0, t, rtol, atol, method, options, event_fn, decreasing_time = _check_inputs(func, y0, t, rtol, atol, method, options, event_fn, SOLVERS)
 
-    if "norm" in options and "norm" not in adjoint_options:
-        adjoint_shapes = [torch.Size(()), y0.shape, y0.shape] + [torch.Size([sum(param.numel() for param in adjoint_params)])]
-        adjoint_options["norm"] = _wrap_norm([_rms_norm, options["norm"], options["norm"]], adjoint_shapes)
+    # Handle the adjoint norm function.
+    state_norm = options["norm"]
+    handle_adjoint_norm_(adjoint_options, shapes, state_norm)
 
     ans = OdeintAdjointMethod.apply(shapes, func, y0, t, rtol, atol, method, options, event_fn, adjoint_rtol, adjoint_atol,
                                     adjoint_method, adjoint_options, t.requires_grad, *adjoint_params)
@@ -233,3 +229,51 @@ def find_parameters(module):
         return [param for _, param in gen]
     else:
         return list(module.parameters())
+
+
+def handle_adjoint_norm_(adjoint_options, shapes, state_norm):
+    """In-place modifies the adjoint options to choose or wrap the norm function."""
+
+    # This is the default adjoint norm on the backward pass: a mixed norm over the tuple of inputs.
+    def default_adjoint_norm(tensor_tuple):
+        t, y, adj_y, *adj_params = tensor_tuple
+        # (If the state is actually a flattened tuple then this will be unpacked again in state_norm.)
+        return max(t.abs(), state_norm(y), state_norm(adj_y), _mixed_norm(adj_params))
+
+    if "norm" not in adjoint_options:
+        # `adjoint_options` was not explicitly specified by the user. Use the default norm.
+        adjoint_options["norm"] = default_adjoint_norm
+    else:
+        # `adjoint_options` was explicitly specified by the user...
+        try:
+            adjoint_norm = adjoint_options['norm']
+        except KeyError:
+            # ...but they did not specify the norm argument. Back to plan A: use the default norm.
+            adjoint_options['norm'] = default_adjoint_norm
+        else:
+            # ...and they did specify the norm argument.
+            if adjoint_norm == 'seminorm':
+                # They told us they want to use seminorms. Slight modification to plan A: use the default norm,
+                # but ignore the parameter state
+                def adjoint_seminorm(tensor_tuple):
+                    t, y, adj_y, *adj_params = tensor_tuple
+                    # (If the state is actually a flattened tuple then this will be unpacked again in state_norm.)
+                    return max(t.abs(), state_norm(y), state_norm(adj_y))
+                adjoint_options['norm'] = adjoint_seminorm
+            else:
+                # And they're using their own custom norm.
+                if shapes is None:
+                    # The state on the forward pass was a tensor, not a tuple. We don't need to do anything, they're
+                    # already going to get given the full adjoint state as (t, y, adj_y, adj_params)
+                    pass  # this branch included for clarity
+                else:
+                    # This is the bit that is tuple/tensor abstraction-breaking, because the odeint machinery
+                    # doesn't know about the tupled nature of the forward state. We need to tell the user's adjoint
+                    # norm about that ourselves.
+
+                    def _adjoint_norm(tensor_tuple):
+                        t, y, adj_y, *adj_params = tensor_tuple
+                        y = _flat_to_shape(y, (), shapes)
+                        adj_y = _flat_to_shape(adj_y, (), shapes)
+                        return adjoint_norm((t, *y, *adj_y, *adj_params))
+                    adjoint_options['norm'] = _adjoint_norm
