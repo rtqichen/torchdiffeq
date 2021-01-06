@@ -288,3 +288,7 @@ class TestNorms(unittest.TestCase):
                         out.sum().backward()
 
                         self.assertLessEqual(seminorm_f.nfe, norm_f.nfe)
+
+
+if __name__ == '__main__':
+    unittest.main()
