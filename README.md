@@ -78,7 +78,7 @@ See example of a bouncing ball in [`examples/bouncing_ball.py`](./examples/bounc
 <img align="middle" src="./assets/bouncing_ball.png" alt="Bouncing Ball" width="500" height="250" />
 </p>
 
-## Arguments
+## Keyword arguments for odeint(_adjoint)
 
 #### Keyword arguments:
  - `rtol` Relative tolerance.
