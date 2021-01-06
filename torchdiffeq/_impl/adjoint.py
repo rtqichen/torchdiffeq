@@ -163,9 +163,14 @@ def odeint_adjoint(func, y0, t, *, rtol=1e-7, atol=1e-9, method=None, options=No
     if adjoint_method is None:
         adjoint_method = method
 
+    if adjoint_method != method and options is not None and adjoint_options is None:
+        raise ValueError("If `adjoint_method != method` then we cannot infer `adjoint_options` from `options`. So as "
+                         "`options` has been passed then `adjoint_options` must be passed as well.")
+
     if adjoint_options is None:
         adjoint_options = {k: v for k, v in options.items() if k != "norm"} if options is not None else {}
     else:
+        # Avoid in-place modifying a user-specified dict.
         adjoint_options = adjoint_options.copy()
 
     if adjoint_params is None:
@@ -174,20 +179,18 @@ def odeint_adjoint(func, y0, t, *, rtol=1e-7, atol=1e-9, method=None, options=No
         adjoint_params = tuple(adjoint_params)  # in case adjoint_params is a generator.
 
     # Filter params that don't require gradients.
-    for p in adjoint_params:
-        if not p.requires_grad:
-            # Issue a warning if a user-specified norm is specified.
-            if 'norm' in adjoint_options and adjoint_options['norm'] != 'seminorm':
-                warnings.warn("An adjoint parameter was passed without requiring gradient. For efficiency this will be "
-                              "excluded from the adjoint pass, and will not appear as a tensor in the adjoint norm.")
-
+    oldlen_ = len(adjoint_params)
     adjoint_params = tuple(p for p in adjoint_params if p.requires_grad)
+    if len(adjoint_params) != oldlen_:
+        # Some params were excluded.
+        # Issue a warning if a user-specified norm is specified.
+        if 'norm' in adjoint_options and callable(adjoint_options['norm']):
+            warnings.warn("An adjoint parameter was passed without requiring gradient. For efficiency this will be "
+                          "excluded from the adjoint pass, and will not appear as a tensor in the adjoint norm.")
 
-    # Normalise to non-tupled state.
+    # Convert to flattened state.
     shapes, func, y0, t, rtol, atol, method, options, event_fn, decreasing_time = _check_inputs(func, y0, t, rtol, atol, method, options, event_fn, SOLVERS)
 
-    # Avoid in-place modifying a user-specified dict.
-    adjoint_options = adjoint_options.copy()
     # Handle the adjoint norm function.
     state_norm = options["norm"]
     handle_adjoint_norm_(adjoint_options, shapes, state_norm)
