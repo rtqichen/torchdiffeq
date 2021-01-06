@@ -19,7 +19,7 @@ For these solvers, `rtol` and `atol` correspond to the tolerances for accepting/
 
 - `jump_t=None`: Times that a step must be made to, and `func` re-evaluated at. In particular this is useful when `func` has discontinuites at these times, as then the solver knows that the final function evaluation of the previous step is not equal to the first function evaluation of this step. (i.e. the FSAL property does not hold at this point.) If passed this should be a `torch.Tensor`. Note that this may not be efficient when using PyTorch 1.6.0 or earlier.
 
-- `norm`: What norm to compute the accept/reject criterion with respect to. Given tensor input, this defaults to an RMS norm. Given tupled input, it computes an RMS norm over each tensor, and then takes a max over the tuple, producing a mixed L-infinity/RMS norm. If passed this should be a function consuming a single tensor of shape the same as `y0` (given tensor input) or a single tensor of shape `(sum(y.numel() for y in y0),)` (given tupled input), and return a scalar tensor corresponding to its norm.
+- `norm`: What norm to compute the accept/reject criterion with respect to. Given tensor input, this defaults to an RMS norm. Given tupled input, this defaults to computing an RMS norm over each tensor, and then taking a max over the tuple, producing a mixed L-infinity/RMS norm. If passed this should be a function consuming a tensor/tuple with the same shape as `y0`, and return a scalar corresponding to its norm. When passed as part of `adjoint_options`, then the special value `"seminorm"` may be used to zero out the contribution from the parameters, as per the ["Hey, that's not an ODE"](https://arxiv.org/abs/2009.09457) paper.
 
 **Fixed solvers (euler, midpoint, rk4, explicit_adams, implicit_adams):**<br>
 
@@ -51,6 +51,8 @@ For this solver, `rtol` and `atol` correspond to the tolerance for convergence o
  The function `odeint_adjoint` offers some adjoint-specific options.
 
  - `adjoint_rtol`,<br>`adjoint_atol`,<br>`adjoint_method`,<br>`adjoint_options`:<br>The `rtol, atol, method, options` to use for the backward pass. Defaults to the values used for the forward pass.
+
+ - `adjoint_options` has the special key-value pair `{"norm": "seminorm"}` that provides a more efficient adjoint solve when using adaptive step solvers, as described in the ["Hey, that's not an ODE"](https://arxiv.org/abs/2009.09457) paper.
 
  - `adjoint_params`: The parameters to compute gradients with respect to in the backward pass. Should be a tuple of tensors. Defaults to `tuple(func.parameters())`.
    - If passed then `func` does not have to be a `torch.nn.Module`.
