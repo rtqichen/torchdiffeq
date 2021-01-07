@@ -4,13 +4,6 @@ This library provides ordinary differential equation (ODE) solvers implemented i
 
 As the solvers are implemented in PyTorch, algorithms in this repository are fully supported to run on the GPU.
 
----
-
-<p align="center">
-  <img align="middle" src="./assets/resnet_0_viz.png" alt="Discrete-depth network" width="240" height="330" />
-  <img align="middle" src="./assets/odenet_0_viz.png" alt="Continuous-depth network" width="240" height="330" />
-</p>
-
 ## Installation
 ```
 pip install torchdiffeq
