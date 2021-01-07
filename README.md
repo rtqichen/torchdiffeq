@@ -65,7 +65,7 @@ Both the event time and final state are returned from `odeint_event`, and can be
 
 The numerical precision for the event time is determined by the `atol` argument.
 
-See example of a bouncing ball in [`examples/bouncing_ball.py`](./examples/bouncing_ball.py).
+See example of simulating and differentiating through a bouncing ball in [`examples/bouncing_ball.py`](./examples/bouncing_ball.py).
 
 <p align="center">
 <img align="middle" src="./assets/bouncing_ball.png" alt="Bouncing Ball" width="500" height="250" />
