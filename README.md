@@ -5,8 +5,15 @@ This library provides ordinary differential equation (ODE) solvers implemented i
 As the solvers are implemented in PyTorch, algorithms in this repository are fully supported to run on the GPU.
 
 ## Installation
+
+To install latest stable version:
 ```
 pip install torchdiffeq
+```
+
+To install latest on GitHub:
+```
+pip install git+https://github.com/rtqichen/torchdiffeq
 ```
 
 ## Examples
