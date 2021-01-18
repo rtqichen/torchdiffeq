@@ -105,13 +105,13 @@ Additionally, all solvers available through SciPy are wrapped for use with `scip
 
 For most problems, good choices are the default `dopri5`, or to use `rk4` with `options=dict(step_size=...)` set appropriately small. Adjusting the tolerances (adaptive solvers) or step size (fixed solvers), will allow for trade-offs between speed and accuracy.
 
-#### Frequently Asked Questions
+## Frequently Asked Questions
 Take a look at our [FAQ](FAQ.md) for frequently asked questions.
 
-#### Further documentation
+## Further documentation
 For details of the adjoint-specific and solver-specific options, check out the [further documentation](FURTHER_DOCUMENTATION.md).
 
-### References
+## References
 [1] Ricky T. Q. Chen, Yulia Rubanova, Jesse Bettencourt, David Duvenaud. "Neural Ordinary Differential Equations." *Advances in Neural Information Processing Systems.* 2018. [[arxiv]](https://arxiv.org/abs/1806.07366)
 
 ---
