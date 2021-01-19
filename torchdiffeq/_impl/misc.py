@@ -325,7 +325,8 @@ def _nextafter(x1, x2):
 
 
 def np_nextafter(x1, x2):
-    warnings.warn("torch.nextafter is only available in PyTorch 1.7 or newer. Falling back to numpy.nextafter.")
+    warnings.warn("torch.nextafter is only available in PyTorch 1.7 or newer."
+                  "Falling back to numpy.nextafter. Upgrade PyTorch to remove this warning.")
     x1_np = x1.detach().cpu().numpy()
     x2_np = x2.detach().cpu().numpy()
     out = torch.tensor(np.nextafter(x1_np, x2_np)).to(x1)
