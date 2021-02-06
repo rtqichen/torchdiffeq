@@ -89,10 +89,11 @@ See example of simulating and differentiating through a bouncing ball in [`examp
 #### List of ODE Solvers:
 
 Adaptive-step:
- - `dopri8` Runge-Kutta 7(8) of Dormand-Prince-Shampine
- - `dopri5` Runge-Kutta 4(5) of Dormand-Prince **[default]**.
- - `bosh3` Runge-Kutta 2(3) of Bogacki-Shampine
- - `adaptive_heun` Runge-Kutta 1(2)
+ - `dopri8` Runge-Kutta of order 8 of Dormand-Prince-Shampine.
+ - `dopri5` Runge-Kutta of order 5 of Dormand-Prince-Shampine **[default]**.
+ - `bosh3` Runge-Kutta of order 3 of Bogacki-Shampine.
+ - `fehlberg2` Runge-Kutta-Fehlberg of order 2.
+ - `adaptive_heun` Runge-Kutta of order 2.
 
 Fixed-step:
  - `euler` Euler method.
