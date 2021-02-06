@@ -2,6 +2,7 @@
 .installed.cfg
 *.egg
 *__pycache__*
+*.pyc
 .vscode
 build
 dist

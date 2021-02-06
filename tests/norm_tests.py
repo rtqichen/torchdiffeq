@@ -1,3 +1,4 @@
+import contextlib
 import unittest
 
 import torch
@@ -6,13 +7,27 @@ import torchdiffeq
 from problems import (DTYPES, DEVICES, ADAPTIVE_METHODS)
 
 
+@contextlib.contextmanager
+def random_seed_torch(seed):
+    cpu_rng_state = torch.get_rng_state()
+    torch.manual_seed(seed)
+
+    try:
+        yield
+    finally:
+        torch.set_rng_state(cpu_rng_state)
+
+
 class _NeuralF(torch.nn.Module):
     def __init__(self, width, oscillate):
         super(_NeuralF, self).__init__()
-        self.linears = torch.nn.Sequential(torch.nn.Linear(2, width),
-                                           torch.nn.Tanh(),
-                                           torch.nn.Linear(width, 2),
-                                           torch.nn.Tanh())
+
+        # Use the same set of random weights for every instance.
+        with random_seed_torch(0):
+            self.linears = torch.nn.Sequential(torch.nn.Linear(2, width),
+                                               torch.nn.Tanh(),
+                                               torch.nn.Linear(width, 2),
+                                               torch.nn.Tanh())
         self.nfe = 0
         self.oscillate = oscillate
 
@@ -20,7 +35,7 @@ class _NeuralF(torch.nn.Module):
         self.nfe += 1
         out = self.linears(x)
         if self.oscillate:
-            out = out * t.mul(20).sin()
+            out = out * t.mul(2).sin()
         return out
 
 
@@ -227,7 +242,6 @@ class TestNorms(unittest.TestCase):
         self.assertTrue(is_called)
 
     def test_large_norm(self):
-        torch.manual_seed(3456789)  # test can be flaky
 
         def norm(tensor):
             return tensor.abs().max()
@@ -256,38 +270,34 @@ class TestNorms(unittest.TestCase):
                         self.assertLessEqual(norm_f.nfe, large_norm_f.nfe)
 
     def test_seminorm(self):
-        torch.manual_seed(3456786)  # test can be flaky
         for dtype in DTYPES:
             for device in DEVICES:
                 for method in ADAPTIVE_METHODS:
-                    if method == 'adaptive_heun':
-                        # Adaptive heun is consistently an awful choice with seminorms, it seems. My guess is that it's
-                        # consistently overconfident with its step sizes, and that having seminorms turned off means
-                        # that it actually gets it right more often.
-                        continue
-                    if dtype == torch.float32 and method == 'dopri8':
-                        continue
 
                     with self.subTest(dtype=dtype, device=device, method=method):
+
+                        if dtype == torch.float32:
+                            tol = 1e-6
+                        else:
+                            tol = 1e-8
 
                         x0 = torch.tensor([1.0, 2.0], device=device, dtype=dtype)
                         t = torch.tensor([0., 1.0], device=device, dtype=dtype)
 
-                        norm_f = _NeuralF(width=256, oscillate=True).to(device, dtype)
-                        out = torchdiffeq.odeint_adjoint(norm_f, x0, t, atol=3e-7, method=method)
-                        norm_f.nfe = 0
-                        out.sum().backward()
+                        ode_f = _NeuralF(width=1024, oscillate=True).to(device, dtype)
 
-                        seminorm_f = _NeuralF(width=256, oscillate=True).to(device, dtype)
-                        with torch.no_grad():
-                            for norm_param, seminorm_param in zip(norm_f.parameters(), seminorm_f.parameters()):
-                                seminorm_param.copy_(norm_param)
-                        out = torchdiffeq.odeint_adjoint(seminorm_f, x0, t, atol=1e-6, method=method,
+                        out = torchdiffeq.odeint_adjoint(ode_f, x0, t, atol=tol, rtol=tol, method=method)
+                        ode_f.nfe = 0
+                        out.sum().backward()
+                        default_nfe = ode_f.nfe
+
+                        out = torchdiffeq.odeint_adjoint(ode_f, x0, t, atol=tol, rtol=tol, method=method,
                                                          adjoint_options=dict(norm='seminorm'))
-                        seminorm_f.nfe = 0
+                        ode_f.nfe = 0
                         out.sum().backward()
+                        seminorm_nfe = ode_f.nfe
 
-                        self.assertLessEqual(seminorm_f.nfe, norm_f.nfe)
+                        self.assertLessEqual(seminorm_nfe, default_nfe)
 
 
 if __name__ == '__main__':

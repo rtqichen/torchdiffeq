@@ -33,7 +33,7 @@ class TestSolverError(unittest.TestCase):
                             elif ode == 'linear':
                                 eps = 2e-3
                             else:
-                                eps = 1e-4
+                                eps = 3e-4
 
                             with self.subTest(reverse=reverse, dtype=dtype, device=device, ode=ode, method=method):
                                 f, y0, t_points, sol = construct_problem(dtype=dtype, device=device, ode=ode,
@@ -117,7 +117,7 @@ class TestDiscontinuities(unittest.TestCase):
 
                             simple_f = _JumpF()
                             odeint = partial(torchdiffeq.odeint_adjoint, adjoint_params=()) if adjoint else torchdiffeq.odeint
-                            simple_xs = odeint(simple_f, x0, t, atol=1e-7, method=method)
+                            simple_xs = odeint(simple_f, x0, t, atol=1e-6, method=method)
 
                             better_f = _JumpF()
                             options = dict(jump_t=torch.tensor([0.5], device=device))
