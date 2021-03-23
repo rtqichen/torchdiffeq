@@ -1,6 +1,6 @@
 # PyTorch Implementation of Differentiable ODE Solvers
 
-This library provides ordinary differential equation (ODE) solvers implemented in PyTorch. Backpropagation through all solvers is supported using the adjoint method. For usage of ODE solvers in deep learning applications, see [1].
+This library provides ordinary differential equation (ODE) solvers implemented in PyTorch. Backpropagation through ODE solutions is supported using the adjoint method for constant memory cost. For usage of ODE solvers in deep learning applications, see reference [1].
 
 As the solvers are implemented in PyTorch, algorithms in this repository are fully supported to run on the GPU.
 
@@ -54,7 +54,9 @@ The biggest **gotcha** is that `func` must be a `nn.Module` when using the adjoi
 
 ## Differentiable event handling
 
-We allow terminating an ODE solution based on an event function. This can be invoked with `odeint_event`:
+We allow terminating an ODE solution based on an event function. Backpropagation through most solvers is supported. For usage of event handling in deep learning applications, see reference [2].
+
+This can be invoked with `odeint_event`:
 ```
 from torchdiffeq import odeint_event
 odeint_event(func, y0, t0, *, event_fn, reverse_time=False, odeint_interface=odeint, **kwargs)
@@ -113,16 +115,28 @@ Take a look at our [FAQ](FAQ.md) for frequently asked questions.
 For details of the adjoint-specific and solver-specific options, check out the [further documentation](FURTHER_DOCUMENTATION.md).
 
 ## References
+
+Applications of differentiable ODE solvers and event handling are discussed in these two papers:
+
 [1] Ricky T. Q. Chen, Yulia Rubanova, Jesse Bettencourt, David Duvenaud. "Neural Ordinary Differential Equations." *Advances in Neural Information Processing Systems.* 2018. [[arxiv]](https://arxiv.org/abs/1806.07366)
+
+[2] Ricky T. Q. Chen, Brandon Amos, Maximilian Nickel. "Learning Neural Event Functions for Ordinary Differential Equations." *International Conference on Learning Representations.* 2021. [[arxiv]](https://arxiv.org/abs/2011.03902)
 
 ---
 
-If you found this library useful in your research, please consider citing
+If you found this library useful in your research, please consider citing.
 ```
-@article{chen2018neural,
+@article{chen2018neuralode,
   title={Neural Ordinary Differential Equations},
   author={Chen, Ricky T. Q. and Rubanova, Yulia and Bettencourt, Jesse and Duvenaud, David},
   journal={Advances in Neural Information Processing Systems},
   year={2018}
+}
+
+@article{chen2018eventfn,
+  title={Learning Neural Event Functions for Ordinary Differential Equations},
+  author={Chen, Ricky T. Q. and Amos, Brandon and Nickel, Maximilian},
+  journal={International Conference on Learning Representations},
+  year={2021}
 }
 ```
