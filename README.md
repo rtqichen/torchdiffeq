@@ -133,7 +133,7 @@ If you found this library useful in your research, please consider citing.
   year={2018}
 }
 
-@article{chen2018eventfn,
+@article{chen2021eventfn,
   title={Learning Neural Event Functions for Ordinary Differential Equations},
   author={Chen, Ricky T. Q. and Amos, Brandon and Nickel, Maximilian},
   journal={International Conference on Learning Representations},
