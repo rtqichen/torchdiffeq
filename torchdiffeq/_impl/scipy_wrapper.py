@@ -22,11 +22,11 @@ class ScipyWrapperODESolver(metaclass=abc.ABCMeta):
         self.solver = solver
         self.func = convert_func_to_numpy(func, self.shape, self.device, self.dtype)
 
-    def integrate(self, t):
+    def integrate(self, t, info=False):
         if t.numel() == 1:
             return torch.tensor(self.y0)[None].to(self.device, self.dtype)
         t = t.detach().cpu().numpy()
-        sol = solve_ivp(
+        oderesult = solve_ivp(
             self.func,
             t_span=[t.min(), t.max()],
             y0=self.y0,
@@ -35,9 +35,12 @@ class ScipyWrapperODESolver(metaclass=abc.ABCMeta):
             rtol=self.rtol,
             atol=self.atol,
         )
-        sol = torch.tensor(sol.y).T.to(self.device, self.dtype)
+        sol = torch.tensor(oderesult.y).T.to(self.device, self.dtype)
         sol = sol.reshape(-1, *self.shape)
-        return sol
+        if info:
+            return sol, oderesult
+        else:
+            return sol
 
 
 def convert_func_to_numpy(func, shape, device, dtype):
