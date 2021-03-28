@@ -1,6 +1,6 @@
 import torch
 from torch.autograd.functional import vjp
-from .dopri5 import Dopri5Solver
+from .dopri5 import ClassicDopri5Solver, Dopri5Solver
 from .bosh3 import Bosh3Solver
 from .adaptive_heun import AdaptiveHeunSolver
 from .fehlberg2 import Fehlberg2
@@ -13,6 +13,7 @@ from .misc import _check_inputs, _flat_to_shape
 SOLVERS = {
     'dopri8': Dopri8Solver,
     'dopri5': Dopri5Solver,
+    'classic_dopri5': ClassicDopri5Solver,
     'bosh3': Bosh3Solver,
     'fehlberg2': Fehlberg2,
     'adaptive_heun': AdaptiveHeunSolver,

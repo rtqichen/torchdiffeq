@@ -22,8 +22,8 @@ class NFEDiffEq:
 def main():
 
     sol = dict()
-    for method in ['dopri5', 'adams']:
-        for tol in [1e-3, 1e-6, 1e-9]:
+    for method in ['dopri5', 'classic_dopri5']:
+        for tol in [1e-3, 1e-4, 1e-4, 1e-5, 1e-6]:
             print('======= {} | tol={:e} ======='.format(method, tol))
             nfes = []
             times = []
