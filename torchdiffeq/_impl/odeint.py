@@ -78,8 +78,15 @@ def odeint(func, y0, t, *, rtol=1e-7, atol=1e-9, method=None, options=None, even
 
     solver = SOLVERS[method](func=func, y0=y0, rtol=rtol, atol=atol, **options)
 
+    if method is not None:
+        if (method[0:5] != "scipy") and (info == True):
+            raise ValueError("The info parameter may only be used for scipy solvers!")
+        
     if event_fn is None:
-        solution = solver.integrate(t, info=info)
+        if info:
+            solution, OdeResult = solver.integrate(t, info=info)
+        else:
+            solution = solver.integrate(t, info=info)
     else:
         event_t, solution = solver.integrate_until_event(t[0], event_fn)
         event_t = event_t.to(t)
@@ -90,7 +97,7 @@ def odeint(func, y0, t, *, rtol=1e-7, atol=1e-9, method=None, options=None, even
         solution = _flat_to_shape(solution, (len(t),), shapes)
 
     if event_fn is None:
-        return solution
+        return solution, OdeResult
     else:
         return event_t, solution
 
