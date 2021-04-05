@@ -219,5 +219,26 @@ class TestGridConstructor(unittest.TestCase):
                     self.assertLess((x0.grad - true_x0_grad).abs().max(), 1e-6)
 
 
+class TestMinMaxStep(unittest.TestCase):
+    def test_min_max_step(self):
+        # LSODA will complain about convergence otherwise
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            for device in DEVICES:
+                for min_step in (0, 2):
+                    for max_step in (float('inf'), 5):
+                        for method, options in [('dopri5', {}), ('scipy_solver', {"solver": "LSODA"})]:
+                            options['min_step'] = min_step
+                            options['max_step'] = max_step
+                            f, y0, t_points, sol = construct_problem(device=device, ode="linear")
+                            torchdiffeq.odeint(f, y0, t_points, method=method, options=options)
+                            # Check min step produces far fewer evaluations
+                            if min_step > 0:
+                                self.assertLess(f.nfe, 50)
+                            else:
+                                self.assertGreater(f.nfe, 100)
+
+
 if __name__ == '__main__':
-    unittest.main()
+    TestMinMaxStep().test_min_max_step()
+    # unittest.main()
