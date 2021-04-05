@@ -240,5 +240,4 @@ class TestMinMaxStep(unittest.TestCase):
 
 
 if __name__ == '__main__':
-    TestMinMaxStep().test_min_max_step()
-    # unittest.main()
+    unittest.main()
