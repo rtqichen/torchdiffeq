@@ -26,11 +26,11 @@ class OdeintAdjointMethod(torch.autograd.Function):
 
             if event_fn is None:
                 y = ans
+                ctx.save_for_backward(t, y, *adjoint_params)
             else:
                 event_t, y = ans
-                ctx.event_t = event_t
+                ctx.save_for_backward(t, y, event_t, *adjoint_params)
 
-        ctx.save_for_backward(t, y, *adjoint_params)
         return ans
 
     @staticmethod
@@ -43,19 +43,19 @@ class OdeintAdjointMethod(torch.autograd.Function):
             adjoint_options = ctx.adjoint_options
             t_requires_grad = ctx.t_requires_grad
 
-            t, y, *adjoint_params = ctx.saved_tensors
-            adjoint_params = tuple(adjoint_params)
-
             # Backprop as if integrating up to event time.
             # Does NOT backpropagate through the event time.
             event_mode = ctx.event_mode
             if event_mode:
-                event_t = ctx.event_t
+                t, y, event_t, *adjoint_params = ctx.saved_params
                 _t = t
                 t = torch.cat([t[0].reshape(-1), event_t.reshape(-1)])
                 grad_y = grad_y[1]
             else:
+                t, y, *adjoint_params = ctx.saved_tensors
                 grad_y = grad_y[0]
+
+            adjoint_params = tuple(adjoint_params)
 
             ##################################
             #      Set up initial state      #
