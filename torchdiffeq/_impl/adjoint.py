@@ -47,7 +47,7 @@ class OdeintAdjointMethod(torch.autograd.Function):
             # Does NOT backpropagate through the event time.
             event_mode = ctx.event_mode
             if event_mode:
-                t, y, event_t, *adjoint_params = ctx.saved_params
+                t, y, event_t, *adjoint_params = ctx.saved_tensors
                 _t = t
                 t = torch.cat([t[0].reshape(-1), event_t.reshape(-1)])
                 grad_y = grad_y[1]
