@@ -217,7 +217,7 @@ class AdamsBashforthMoulton(FixedGridODESolver):
                     if converged:
                         break
                 if not converged:
-                    warnings.warn('Functional iteration did not converge. Solution may be incorrect.', file=sys.stderr)
+                    warnings.warn('Functional iteration did not converge. Solution may be incorrect.')
                     self.prev_f.pop()
                 self._update_history(t0, f)
             return dy, f0
