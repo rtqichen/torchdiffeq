@@ -120,6 +120,8 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeEventODESolver):
     mid: torch.Tensor
 
     def __init__(self, func, y0, rtol, atol,
+                 min_step=0,
+                 max_step=float('inf'),
                  first_step=None,
                  step_t=None,
                  jump_t=None,
@@ -139,6 +141,8 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeEventODESolver):
         self.func = func
         self.rtol = torch.as_tensor(rtol, dtype=dtype, device=device)
         self.atol = torch.as_tensor(atol, dtype=dtype, device=device)
+        self.min_step = torch.as_tensor(min_step, dtype=dtype, device=device)
+        self.max_step = torch.as_tensor(max_step, dtype=dtype, device=device)
         self.first_step = None if first_step is None else torch.as_tensor(first_step, dtype=dtype, device=device)
         self.safety = torch.as_tensor(safety, dtype=dtype, device=device)
         self.ifactor = torch.as_tensor(ifactor, dtype=dtype, device=device)
@@ -264,6 +268,13 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeEventODESolver):
         ########################################################
         error_ratio = _compute_error_ratio(y1_error, self.rtol, self.atol, y0, y1, self.norm)
         accept_step = error_ratio <= 1
+
+        # Handle min max stepping
+        if dt > self.max_step:
+            accept_step = False
+        if dt <= self.min_step:
+            accept_step = True
+
         # dtypes:
         # error_ratio.dtype == self.dtype
 
@@ -289,6 +300,7 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeEventODESolver):
             y_next = y0
             f_next = f0
         dt_next = _optimal_step_size(dt, error_ratio, self.safety, self.ifactor, self.dfactor, self.order)
+        dt_next = dt_next.clamp(self.min_step, self.max_step)
         rk_state = _RungeKuttaState(y_next, f_next, t0, t_next, dt_next, interp_coeff)
         return rk_state
 

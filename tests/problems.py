@@ -38,8 +38,10 @@ class LinearODE(torch.nn.Module):
         A = 2 * U - (U + U.transpose(0, 1))
         self.A = torch.nn.Parameter(A)
         self.initial_val = np.ones((dim, 1))
+        self.nfe = 0
 
     def forward(self, t, y):
+        self.nfe += 1
         return torch.mm(self.A, y.reshape(self.dim, 1)).reshape(-1)
 
     def y_exact(self, t):
