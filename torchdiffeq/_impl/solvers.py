@@ -21,7 +21,7 @@ class AdaptiveStepsizeODESolver(metaclass=abc.ABCMeta):
     def _advance(self, next_t):
         raise NotImplementedError
 
-    def integrate(self, t):
+    def integrate(self, t, **kwargs):
         solution = torch.empty(len(t), *self.y0.shape, dtype=self.y0.dtype, device=self.y0.device)
         solution[0] = self.y0
         t = t.to(self.dtype)
@@ -91,7 +91,7 @@ class FixedGridODESolver(metaclass=abc.ABCMeta):
     def _step_func(self, func, t0, dt, t1, y0):
         pass
 
-    def integrate(self, t):
+    def integrate(self, t, **kwargs):
         time_grid = self.grid_constructor(self.func, self.y0, t)
         assert time_grid[0] == t[0] and time_grid[-1] == t[-1]
 

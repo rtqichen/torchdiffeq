@@ -28,7 +28,7 @@ SOLVERS = {
 }
 
 
-def odeint(func, y0, t, *, rtol=1e-7, atol=1e-9, method=None, options=None, event_fn=None):
+def odeint(func, y0, t, *, rtol=1e-7, atol=1e-9, method=None, options=None, event_fn=None, info=False):
     """Integrate a system of ordinary differential equations.
 
     Solves the initial value problem for a non-stiff system of first order ODEs:
@@ -58,12 +58,17 @@ def odeint(func, y0, t, *, rtol=1e-7, atol=1e-9, method=None, options=None, even
         event_fn: Function that maps the state `y` to a Tensor. The solve terminates when
             event_fn evaluates to zero. If this is not None, all but the first elements of
             `t` are ignored.
+        info: scipy.solve_ivp by default returns a class OdeResult with informatino about
+            the solve. If info=True, this will return not just the solution vector `y`, but 
+            the original `OdeResult` as well.
 
     Returns:
         y: Tensor, where the first dimension corresponds to different
             time points. Contains the solved value of y for each desired time point in
             `t`, with the initial value `y0` being the first element along the first
             dimension.
+        OdeResult: Only returned if info=True. See the following link for details. 
+            https://docs.scipy.org/doc/scipy/reference/generated/scipy.integrate.solve_ivp.html
 
     Raises:
         ValueError: if an invalid `method` is provided.
@@ -73,8 +78,15 @@ def odeint(func, y0, t, *, rtol=1e-7, atol=1e-9, method=None, options=None, even
 
     solver = SOLVERS[method](func=func, y0=y0, rtol=rtol, atol=atol, **options)
 
+    if method is not None:
+        if (method[0:5] != "scipy") and (info == True):
+            raise ValueError("The info parameter may only be used for scipy solvers!")
+        
     if event_fn is None:
-        solution = solver.integrate(t)
+        if info:
+            solution, OdeResult = solver.integrate(t, info=info)
+        else:
+            solution = solver.integrate(t, info=info)
     else:
         event_t, solution = solver.integrate_until_event(t[0], event_fn)
         event_t = event_t.to(t)
@@ -85,7 +97,10 @@ def odeint(func, y0, t, *, rtol=1e-7, atol=1e-9, method=None, options=None, even
         solution = _flat_to_shape(solution, (len(t),), shapes)
 
     if event_fn is None:
-        return solution
+        if info:
+            return solution, OdeResult
+        else:
+            return solution
     else:
         return event_t, solution
 
