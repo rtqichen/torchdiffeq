@@ -57,3 +57,21 @@ For this solver, `rtol` and `atol` correspond to the tolerance for convergence o
  - `adjoint_params`: The parameters to compute gradients with respect to in the backward pass. Should be a tuple of tensors. Defaults to `tuple(func.parameters())`.
    - If passed then `func` does not have to be a `torch.nn.Module`.
    - If `func` has no parameters, `adjoint_params=()` must be specified.
+
+
+ ## Callbacks
+
+ Callbacks can be triggered during the solve. Callbacks should be specified as methods of the `func` argument to `odeint` and `odeint_adjoint`.
+
+ At the moment support for this is minimal: let us know if you'd find additional callbacks useful.
+
+ **callback_step(self, t0, y0, dt):**<br>
+ This is called immediately before taking a step of size `dt`, at time `t0`, with current solution value `y0`. This is supported by every solver except `scipy_solver`.
+
+ **callback_accept_step(self, t0, y0, dt):**<br>
+ This is called when accepting a step of size `dt` at time `t0`, with current solution value `y0`. This is supported by the adaptive solvers (dopri8, dopri5, bosh3, adaptive_heun).
+
+ **callback_reject_step(self, t0, y0, dt):**<br>
+ As `callback_accept_step`, except called when rejecting steps.
+
+ In addition callbacks can be trigged during the adjoint pass by adding `_adjoint` to the name of any one of the supported callbacks, e.g. `callback_step_adjoint`.

@@ -6,6 +6,10 @@ import warnings
 from .event_handling import combine_event_functions
 
 
+_all_callback_names = ['callback_step', 'callback_accept_step', 'callback_reject_step']
+_all_adjoint_callback_names = [name + '_adjoint' for name in _all_callback_names]
+_null_callback = lambda *args, **kwargs: None
+
 def _handle_unused_kwargs(solver, unused_kwargs):
     if len(unused_kwargs) > 0:
         warnings.warn('{}: Unexpected arguments {}'.format(solver.__class__.__name__, unused_kwargs))
@@ -298,9 +302,40 @@ def _check_inputs(func, y0, t, rtol, atol, method, options, event_fn, SOLVERS):
     # ~Backward compatibility
 
     # Add perturb argument to func.
-    func = _PerturbFunc(func)
+    wrapped_func = _PerturbFunc(func)
 
-    return shapes, func, y0, t, rtol, atol, method, options, event_fn, t_is_reversed
+    # Add callbacks to wrapped_func
+    callback_names = set()
+    for callback_name in _all_callback_names:
+        try:
+            callback = getattr(func, callback_name)
+        except AttributeError:
+            setattr(wrapped_func, callback_name, _null_callback)
+        else:
+            callback_names.add(callback_name)
+            # At the moment all callbacks have the arguments (t0, y0, dt).
+            # These will need adjusting on a per-callback basis if that changes in the future.
+            if is_tuple:
+                def callback(t0, y0, dt, _callback=callback):
+                    y0 = _flat_to_shape(y0, (), shapes)
+                    return _callback(t0, y0, dt)
+            if t_is_reversed:
+                def callback(t0, y0, dt, _callback=callback):
+                    return _callback(-t0, y0, dt)
+            setattr(wrapped_func, callback_name, callback)
+    for callback_name in _all_adjoint_callback_names:
+        try:
+            callback = getattr(func, callback_name)
+        except AttributeError:
+            pass
+        else:
+            setattr(wrapped_func, callback_name, callback)
+
+    invalid_callbacks = callback_names - SOLVERS[method].valid_callbacks()
+    if len(invalid_callbacks) > 0:
+        warnings.warn("Solver '{}' does not support callbacks {}".format(method, invalid_callbacks))
+
+    return shapes, wrapped_func, y0, t, rtol, atol, method, options, event_fn, t_is_reversed
 
 
 class _StitchGradient(torch.autograd.Function):
