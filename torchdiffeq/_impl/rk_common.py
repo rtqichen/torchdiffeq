@@ -160,6 +160,12 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeEventODESolver):
                                        c_error=self.tableau.c_error.to(device=device, dtype=y0.dtype))
         self.mid = self.mid.to(device=device, dtype=y0.dtype)
 
+    @classmethod
+    def valid_callbacks(cls):
+        return super(RKAdaptiveStepsizeODESolver, cls).valid_callbacks() | {'callback_step',
+                                                                            'callback_accept_step',
+                                                                            'callback_reject_step'}
+
     def _before_integrate(self, t):
         t0 = t[0]
         f0 = self.func(t[0], self.y0)
@@ -216,6 +222,7 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeEventODESolver):
     def _adaptive_step(self, rk_state):
         """Take an adaptive Runge-Kutta step to integrate the ODE."""
         y0, f0, _, t0, dt, interp_coeff = rk_state
+        self.func.callback_step(t0, y0, dt)
         t1 = t0 + dt
         # dtypes: self.y0.dtype (probably float32); self.dtype (probably float64)
         # used for state and timelike objects respectively.
@@ -282,6 +289,7 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeEventODESolver):
         #                   Update RK State                    #
         ########################################################
         if accept_step:
+            self.func.callback_accept_step(t0, y0, dt)
             t_next = t1
             y_next = y1
             interp_coeff = self._interp_fit(y0, y_next, k, dt)
@@ -296,6 +304,7 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeEventODESolver):
                 f1 = self.func(t_next, y_next, perturb=Perturb.NEXT)
             f_next = f1
         else:
+            self.func.callback_reject_step(t0, y0, dt)
             t_next = t0
             y_next = y0
             f_next = f0

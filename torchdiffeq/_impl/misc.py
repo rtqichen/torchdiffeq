@@ -6,6 +6,10 @@ import warnings
 from .event_handling import combine_event_functions
 
 
+_all_callback_names = ['callback_step', 'callback_accept_step', 'callback_reject_step']
+_all_adjoint_callback_names = [name + '_adjoint' for name in _all_callback_names]
+_null_callback = lambda *args, **kwargs: None
+
 def _handle_unused_kwargs(solver, unused_kwargs):
     if len(unused_kwargs) > 0:
         warnings.warn('{}: Unexpected arguments {}'.format(solver.__class__.__name__, unused_kwargs))
@@ -198,6 +202,9 @@ def _check_inputs(func, y0, t, rtol, atol, method, options, event_fn, SOLVERS):
         # Combine event functions if the output is multivariate.
         event_fn = combine_event_functions(event_fn, t[0], y0)
 
+    # Keep reference to original func as passed in
+    original_func = func
+
     # Normalise to tensor (non-tupled) input
     shapes = None
     is_tuple = not isinstance(y0, torch.Tensor)
@@ -299,6 +306,38 @@ def _check_inputs(func, y0, t, rtol, atol, method, options, event_fn, SOLVERS):
 
     # Add perturb argument to func.
     func = _PerturbFunc(func)
+
+    # Add callbacks to wrapped_func
+    callback_names = set()
+    for callback_name in _all_callback_names:
+        try:
+            callback = getattr(original_func, callback_name)
+        except AttributeError:
+            setattr(func, callback_name, _null_callback)
+        else:
+            if callback is not _null_callback:
+                callback_names.add(callback_name)
+                # At the moment all callbacks have the arguments (t0, y0, dt).
+                # These will need adjusting on a per-callback basis if that changes in the future.
+                if is_tuple:
+                    def callback(t0, y0, dt, _callback=callback):
+                        y0 = _flat_to_shape(y0, (), shapes)
+                        return _callback(t0, y0, dt)
+                if t_is_reversed:
+                    def callback(t0, y0, dt, _callback=callback):
+                        return _callback(-t0, y0, dt)
+            setattr(func, callback_name, callback)
+    for callback_name in _all_adjoint_callback_names:
+        try:
+            callback = getattr(original_func, callback_name)
+        except AttributeError:
+            pass
+        else:
+            setattr(func, callback_name, callback)
+
+    invalid_callbacks = callback_names - SOLVERS[method].valid_callbacks()
+    if len(invalid_callbacks) > 0:
+        warnings.warn("Solver '{}' does not support callbacks {}".format(method, invalid_callbacks))
 
     return shapes, func, y0, t, rtol, atol, method, options, event_fn, t_is_reversed
 

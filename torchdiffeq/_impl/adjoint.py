@@ -2,8 +2,7 @@ import warnings
 import torch
 import torch.nn as nn
 from .odeint import SOLVERS, odeint
-from .misc import _check_inputs, _flat_to_shape
-from .misc import _mixed_norm
+from .misc import _check_inputs, _flat_to_shape, _mixed_norm, _all_callback_names, _all_adjoint_callback_names
 
 
 class OdeintAdjointMethod(torch.autograd.Function):
@@ -104,6 +103,15 @@ class OdeintAdjointMethod(torch.autograd.Function):
                               for param, vjp_param in zip(adjoint_params, vjp_params)]
 
                 return (vjp_t, func_eval, vjp_y, *vjp_params)
+
+            # Add adjoint callbacks
+            for callback_name, adjoint_callback_name in zip(_all_callback_names, _all_adjoint_callback_names):
+                try:
+                    callback = getattr(func, adjoint_callback_name)
+                except AttributeError:
+                    pass
+                else:
+                    setattr(augmented_dynamics, callback_name, callback)
 
             ##################################
             #       Solve adjoint ODE        #
