@@ -74,4 +74,4 @@ For this solver, `rtol` and `atol` correspond to the tolerance for convergence o
  **callback_reject_step(self, t0, y0, dt):**<br>
  As `callback_accept_step`, except called when rejecting steps.
 
- In addition callbacks can be trigged during the adjoint pass by adding `_adjoint` to the name of any one of the supported callbacks, e.g. `callback_step_adjoint`.
+ In addition, callbacks can be triggered during the adjoint pass by adding `_adjoint` to the name of any one of the supported callbacks, e.g. `callback_step_adjoint`.
