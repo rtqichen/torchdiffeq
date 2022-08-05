@@ -140,7 +140,7 @@ Ricky T. Q. Chen, Brandon Amos, Maximilian Nickel. "Learning Neural Event Functi
 }
 ```
 
-The `seminorm` option for computing adjoints is discussed in
+The seminorm option for computing adjoints is discussed in
 
 Patrick Kidger, Ricky T. Q. Chen, Terry Lyons. "'Hey, that’s not an ODE': Faster ODE Adjoints via Seminorms." *International Conference on Machine
 Learning* 2021. [[arxiv]](https://arxiv.org/abs/2009.09457)
