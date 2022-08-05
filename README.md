@@ -118,13 +118,8 @@ For details of the adjoint-specific and solver-specific options, check out the [
 
 Applications of differentiable ODE solvers and event handling are discussed in these two papers:
 
-[1] Ricky T. Q. Chen, Yulia Rubanova, Jesse Bettencourt, David Duvenaud. "Neural Ordinary Differential Equations." *Advances in Neural Information Processing Systems.* 2018. [[arxiv]](https://arxiv.org/abs/1806.07366)
+Ricky T. Q. Chen, Yulia Rubanova, Jesse Bettencourt, David Duvenaud. "Neural Ordinary Differential Equations." *Advances in Neural Information Processing Systems.* 2018. [[arxiv]](https://arxiv.org/abs/1806.07366)
 
-[2] Ricky T. Q. Chen, Brandon Amos, Maximilian Nickel. "Learning Neural Event Functions for Ordinary Differential Equations." *International Conference on Learning Representations.* 2021. [[arxiv]](https://arxiv.org/abs/2011.03902)
-
----
-
-If you found this library useful in your research, please consider citing.
 ```
 @article{chen2018neuralode,
   title={Neural Ordinary Differential Equations},
@@ -132,11 +127,40 @@ If you found this library useful in your research, please consider citing.
   journal={Advances in Neural Information Processing Systems},
   year={2018}
 }
+```
 
+Ricky T. Q. Chen, Brandon Amos, Maximilian Nickel. "Learning Neural Event Functions for Ordinary Differential Equations." *International Conference on Learning Representations.* 2021. [[arxiv]](https://arxiv.org/abs/2011.03902)
+
+```
 @article{chen2021eventfn,
   title={Learning Neural Event Functions for Ordinary Differential Equations},
   author={Chen, Ricky T. Q. and Amos, Brandon and Nickel, Maximilian},
   journal={International Conference on Learning Representations},
   year={2021}
+}
+```
+
+The `seminorm` option for computing adjoints is discussed in
+
+Patrick Kidger, Ricky T. Q. Chen, Terry Lyons. "'Hey, that’s not an ODE': Faster ODE Adjoints via Seminorms." *International Conference on Machine
+Learning* 2021. [[arxiv]](https://arxiv.org/abs/2009.09457)
+```
+@article{kidger2021hey,
+  title={"Hey, that's not an ODE": Faster ODE Adjoints via Seminorms.},
+  author={Kidger, Patrick and Chen, Ricky T. Q. and Lyons, Terry J.},
+  journal={International Conference on Machine Learning},
+  year={2021}
+}
+```
+
+---
+
+If you found this library useful in your research, please consider citing.
+```
+@misc{torchdiffeq,
+	author={Chen, Ricky T. Q.},
+	title={torchdiffeq},
+	year={2018},
+	url={https://github.com/rtqichen/torchdiffeq},
 }
 ```
