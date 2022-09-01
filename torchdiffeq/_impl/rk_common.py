@@ -273,8 +273,12 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeEventODESolver):
             # f1.dtype == self.y0.dtype
             # y1_error.dtype == self.dtype
             # k.dtype == self.y0.dtype
-        except RejectStepError:
+        except RejectStepError as ex:
             # self.func requested the step be rejected
+            # If already at minimum step size, stop integration as can't proceed
+            if dt <= self.min_step:
+                raise(ex)
+            error_ratio = torch.tensor(10.0, dtype=self.dtype, device=self.y0.device)
             accept_step = False
         else:
             ########################################################
