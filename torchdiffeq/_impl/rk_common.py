@@ -38,6 +38,10 @@ class _UncheckedAssign(torch.autograd.Function):
         return grad_scratch, grad_scratch[ctx.index], None
 
 
+class RejectStepError(Exception):
+    pass
+
+
 def _runge_kutta_step(func, y0, f0, t0, dt, t1, tableau):
     """Take an arbitrary Runge-Kutta step and estimate error.
     Args:
@@ -262,28 +266,31 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeEventODESolver):
 
         # Must be arranged as doing all the step_t handling, then all the jump_t handling, in case we
         # trigger both. (i.e. interleaving them would be wrong.)
-
-        y1, f1, y1_error, k = _runge_kutta_step(self.func, y0, f0, t0, dt, t1, tableau=self.tableau)
-        # dtypes:
-        # y1.dtype == self.y0.dtype
-        # f1.dtype == self.y0.dtype
-        # y1_error.dtype == self.dtype
-        # k.dtype == self.y0.dtype
-
-        ########################################################
-        #                     Error Ratio                      #
-        ########################################################
-        error_ratio = _compute_error_ratio(y1_error, self.rtol, self.atol, y0, y1, self.norm)
-        accept_step = error_ratio <= 1
-
-        # Handle min max stepping
-        if dt > self.max_step:
+        try:
+            y1, f1, y1_error, k = _runge_kutta_step(self.func, y0, f0, t0, dt, t1, tableau=self.tableau)
+            # dtypes:
+            # y1.dtype == self.y0.dtype
+            # f1.dtype == self.y0.dtype
+            # y1_error.dtype == self.dtype
+            # k.dtype == self.y0.dtype
+        except RejectStepError:
+            # self.func requested the step be rejected
             accept_step = False
-        if dt <= self.min_step:
-            accept_step = True
+        else:
+            ########################################################
+            #                     Error Ratio                      #
+            ########################################################
+            error_ratio = _compute_error_ratio(y1_error, self.rtol, self.atol, y0, y1, self.norm)
+            accept_step = error_ratio <= 1
 
-        # dtypes:
-        # error_ratio.dtype == self.dtype
+            # Handle min max stepping
+            if dt > self.max_step:
+                accept_step = False
+            if dt <= self.min_step:
+                accept_step = True
+
+            # dtypes:
+            # error_ratio.dtype == self.dtype
 
         ########################################################
         #                   Update RK State                    #
