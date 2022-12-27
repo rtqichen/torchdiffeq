@@ -12,7 +12,6 @@ torch.set_default_dtype(torch.float64)
 
 
 class BouncingBallExample(nn.Module):
-
     def __init__(self, radius=0.2, gravity=9.8, adjoint=False):
         super().__init__()
         self.gravity = nn.Parameter(torch.as_tensor([gravity]))
@@ -39,9 +38,11 @@ class BouncingBallExample(nn.Module):
         return self.t0, state
 
     def state_update(self, state):
-        """ Updates state based on an event (collision)."""
+        """Updates state based on an event (collision)."""
         pos, vel, log_radius = state
-        pos = pos + 1e-7  # need to add a small eps so as not to trigger the event function immediately.
+        pos = (
+            pos + 1e-7
+        )  # need to add a small eps so as not to trigger the event function immediately.
         vel = -vel * (1 - self.absorption)
         return (pos, vel, log_radius)
 
@@ -52,7 +53,16 @@ class BouncingBallExample(nn.Module):
         t0, state = self.get_initial_state()
 
         for i in range(nbounces):
-            event_t, solution = odeint_event(self, state, t0, event_fn=self.event_fn, reverse_time=False, atol=1e-8, rtol=1e-8, odeint_interface=self.odeint)
+            event_t, solution = odeint_event(
+                self,
+                state,
+                t0,
+                event_fn=self.event_fn,
+                reverse_time=False,
+                atol=1e-8,
+                rtol=1e-8,
+                odeint_interface=self.odeint,
+            )
             event_times.append(event_t)
 
             state = self.state_update(tuple(s[-1] for s in solution))
@@ -69,18 +79,25 @@ class BouncingBallExample(nn.Module):
         velocity = [state[1][None]]
         times = [t0.reshape(-1)]
         for event_t in event_times:
-            tt = torch.linspace(float(t0), float(event_t), int((float(event_t) - float(t0)) * 50))[1:-1]
+            tt = torch.linspace(
+                float(t0), float(event_t), int((float(event_t) - float(t0)) * 50)
+            )[1:-1]
             tt = torch.cat([t0.reshape(-1), tt, event_t.reshape(-1)])
             solution = odeint(self, state, tt, atol=1e-8, rtol=1e-8)
 
-            trajectory.append(solution[0])
-            velocity.append(solution[1])
-            times.append(tt)
+            trajectory.append(solution[0][1:])
+            velocity.append(solution[1][1:])
+            times.append(tt[1:])
 
             state = self.state_update(tuple(s[-1] for s in solution))
             t0 = event_t
 
-        return torch.cat(times), torch.cat(trajectory, dim=0).reshape(-1), torch.cat(velocity, dim=0).reshape(-1), event_times
+        return (
+            torch.cat(times),
+            torch.cat(trajectory, dim=0).reshape(-1),
+            torch.cat(velocity, dim=0).reshape(-1),
+            event_times,
+        )
 
 
 def gradcheck(nbounces):
@@ -124,7 +141,9 @@ def gradcheck(nbounces):
         fd = fd_grads[var]
         if torch.norm(analytical - fd) > 1e-4:
             success = False
-            print(f"Got analytical grad {analytical.item()} for {var} param but finite difference is {fd.item()}")
+            print(
+                f"Got analytical grad {analytical.item()} for {var} param but finite difference is {fd.item()}"
+            )
 
     if not success:
         raise Exception("Gradient check failed.")
@@ -152,10 +171,20 @@ if __name__ == "__main__":
 
     # Event locations.
     for event_t in event_times:
-        plt.plot(event_t, 0.0, color="C0", marker="o", markersize=7, fillstyle='none', linestyle="")
+        plt.plot(
+            event_t,
+            0.0,
+            color="C0",
+            marker="o",
+            markersize=7,
+            fillstyle="none",
+            linestyle="",
+        )
 
-    vel, = plt.plot(times, velocity, color="C1", alpha=0.7, linestyle="--", linewidth=2.0)
-    pos, = plt.plot(times, trajectory, color="C0", linewidth=2.0)
+    (vel,) = plt.plot(
+        times, velocity, color="C1", alpha=0.7, linestyle="--", linewidth=2.0
+    )
+    (pos,) = plt.plot(times, trajectory, color="C0", linewidth=2.0)
 
     plt.hlines(0, 0, 100)
     plt.xlim([times[0], times[-1]])
@@ -164,16 +193,20 @@ if __name__ == "__main__":
     plt.xlabel("Time", fontsize=13)
     plt.legend([pos, vel], ["Position", "Velocity"], fontsize=16)
 
-    plt.gca().xaxis.set_tick_params(direction='in', which='both')  # The bottom will maintain the default of 'out'
-    plt.gca().yaxis.set_tick_params(direction='in', which='both')  # The bottom will maintain the default of 'out'
+    plt.gca().xaxis.set_tick_params(
+        direction="in", which="both"
+    )  # The bottom will maintain the default of 'out'
+    plt.gca().yaxis.set_tick_params(
+        direction="in", which="both"
+    )  # The bottom will maintain the default of 'out'
 
     # Hide the right and top spines
-    plt.gca().spines['right'].set_visible(False)
-    plt.gca().spines['top'].set_visible(False)
+    plt.gca().spines["right"].set_visible(False)
+    plt.gca().spines["top"].set_visible(False)
 
     # Only show ticks on the left and bottom spines
-    plt.gca().yaxis.set_ticks_position('left')
-    plt.gca().xaxis.set_ticks_position('bottom')
+    plt.gca().yaxis.set_ticks_position("left")
+    plt.gca().xaxis.set_ticks_position("bottom")
 
     plt.tight_layout()
     plt.savefig("bouncing_ball.png")

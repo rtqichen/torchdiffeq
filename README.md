@@ -70,11 +70,11 @@ odeint_event(func, y0, t0, *, event_fn, reverse_time=False, odeint_interface=ode
 
 The solve is terminated at an event time `t` and state `y` when an element of `event_fn(t, y)` is equal to zero. Multiple outputs from `event_fn` can be used to specify multiple event functions, of which the first to trigger will terminate the solve.
 
-Both the event time and final state are returned from `odeint_event`, and can be differentiated. Gradients will be backpropagated through the event function.
+Both the event time and final state are returned from `odeint_event`, and can be differentiated. Gradients will be backpropagated through the event function. **NOTE**: parameters for the event function must be in the state itself to obtain gradients. 
 
 The numerical precision for the event time is determined by the `atol` argument.
 
-See example of simulating and differentiating through a bouncing ball in [`examples/bouncing_ball.py`](./examples/bouncing_ball.py).
+See example of simulating and differentiating through a bouncing ball in [`examples/bouncing_ball.py`](./examples/bouncing_ball.py). See example code for learning a simple event function in [`examples/learn_physics.py`](./examples/learn_physics.py).
 
 <p align="center">
 <img align="middle" src="./assets/bouncing_ball.png" alt="Bouncing Ball" width="500" height="250" />
