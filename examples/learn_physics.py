@@ -33,7 +33,7 @@ class EventFn(nn.Module):
         return [self.radius]
 
     def forward(self, t, state):
-        # IMPORTANT: event computation must be variables from the state.
+        # IMPORTANT: event computation must use variables from the state.
         pos, _, radius = state
         return pos - radius.reshape_as(pos) ** 2
 
