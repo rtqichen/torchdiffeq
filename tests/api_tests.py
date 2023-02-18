@@ -5,7 +5,7 @@ import torchdiffeq
 from problems import construct_problem, DTYPES, DEVICES, ADAPTIVE_METHODS
 
 
-EPS = {torch.float32: 1e-5, torch.float64: 1e-12}
+EPS = {torch.float32: 1e-4, torch.float64: 1e-12, torch.complex64: 1e-4}
 
 
 class TestCollectionState(unittest.TestCase):
@@ -20,8 +20,8 @@ class TestCollectionState(unittest.TestCase):
 
                     with self.subTest(dtype=dtype, device=device, method=method):
                         tuple_y = torchdiffeq.odeint(tuple_f, tuple_y0, t_points, method=method)
-                        max_error0 = (sol - tuple_y[0]).max()
-                        max_error1 = (sol - tuple_y[1]).max()
+                        max_error0 = (sol - tuple_y[0]).abs().max()
+                        max_error1 = (sol - tuple_y[1]).abs().max()
                         self.assertLess(max_error0, eps)
                         self.assertLess(max_error1, eps)
 

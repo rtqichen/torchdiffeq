@@ -16,11 +16,11 @@ def _handle_unused_kwargs(solver, unused_kwargs):
 
 
 def _linf_norm(tensor):
-    return tensor.max()
+    return tensor.abs().max()
 
 
 def _rms_norm(tensor):
-    return tensor.pow(2).mean().sqrt()
+    return tensor.abs().pow(2).mean().sqrt()
 
 
 def _zero_norm(tensor):
@@ -47,37 +47,39 @@ def _select_initial_step(func, t0, y0, order, rtol, atol, norm, f0=None):
     dtype = y0.dtype
     device = y0.device
     t_dtype = t0.dtype
-    t0 = t0.to(dtype)
+    t0 = t0.to(t_dtype)
 
     if f0 is None:
         f0 = func(t0, y0)
 
     scale = atol + torch.abs(y0) * rtol
 
-    d0 = norm(y0 / scale)
-    d1 = norm(f0 / scale)
+    d0 = norm(y0 / scale).abs()
+    d1 = norm(f0 / scale).abs()
 
     if d0 < 1e-5 or d1 < 1e-5:
         h0 = torch.tensor(1e-6, dtype=dtype, device=device)
     else:
         h0 = 0.01 * d0 / d1
+    h0 = h0.abs()
 
     y1 = y0 + h0 * f0
     f1 = func(t0 + h0, y1)
 
-    d2 = norm((f1 - f0) / scale) / h0
+    d2 = torch.abs(norm((f1 - f0) / scale) / h0)
 
     if d1 <= 1e-15 and d2 <= 1e-15:
         h1 = torch.max(torch.tensor(1e-6, dtype=dtype, device=device), h0 * 1e-3)
     else:
         h1 = (0.01 / max(d1, d2)) ** (1. / float(order + 1))
+    h1 = h1.abs()
 
     return torch.min(100 * h0, h1).to(t_dtype)
 
 
 def _compute_error_ratio(error_estimate, rtol, atol, y0, y1, norm):
     error_tol = atol + rtol * torch.max(y0.abs(), y1.abs())
-    return norm(error_estimate / error_tol)
+    return norm(error_estimate / error_tol).abs()
 
 
 @torch.no_grad()
@@ -180,7 +182,7 @@ class _PerturbFunc(torch.nn.Module):
         # This dtype change here might be buggy.
         # The exact time value should be determined inside the solver,
         # but this can slightly change it due to numerical differences during casting.
-        t = t.to(y.dtype)
+        t = t.real.to(y.abs().dtype)
         if perturb is Perturb.NEXT:
             # Replace with next smallest representable value.
             t = _nextafter(t, t + 1)
@@ -217,7 +219,6 @@ def _check_inputs(func, y0, t, rtol, atol, method, options, event_fn, SOLVERS):
         func = _TupleFunc(func, shapes)
         if event_fn is not None:
             event_fn = _TupleInputOnlyFunc(event_fn, shapes)
-    _assert_floating('y0', y0)
 
     # Normalise method and options
     if options is None:

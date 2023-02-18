@@ -130,7 +130,7 @@ class FixedGridODESolver(metaclass=abc.ABCMeta):
     def integrate_until_event(self, t0, event_fn):
         assert self.step_size is not None, "Event handling for fixed step solvers currently requires `step_size` to be provided in options."
 
-        t0 = t0.type_as(self.y0)
+        t0 = t0.type_as(self.y0.abs())
         y0 = self.y0
         dt = self.step_size
 

@@ -102,7 +102,6 @@ class TestCompareAdjointGradient(unittest.TestCase):
         return func, y0, t_points
 
     def test_against_dopri5(self):
-        # TODO: add in adaptive adams if/when it's fixed.
         method_eps = {
             'dopri5': (3e-4, 1e-4, 2e-3),
             'scipy_solver': (3e-4, 1e-4, 2e-3),

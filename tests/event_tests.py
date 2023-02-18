@@ -34,7 +34,7 @@ class TestEventHandling(unittest.TestCase):
                                                                          reverse=reverse)
 
                                 def event_fn(t, y):
-                                    return torch.sum(y - sol[2])
+                                    return torch.sum(y - sol[2]).real
 
                                 if method in FIXED_METHODS:
                                     options = {"step_size": 0.01, "interp": "cubic"}

@@ -54,7 +54,7 @@ class LinearODE(torch.nn.Module):
 
 
 PROBLEMS = {'constant': ConstantODE, 'linear': LinearODE, 'sine': SineODE}
-DTYPES = (torch.float32, torch.float64)
+DTYPES = (torch.float32, torch.float64, torch.complex64)
 DEVICES = ['cpu']
 if torch.cuda.is_available():
     DEVICES.append('cuda')
@@ -69,8 +69,8 @@ def construct_problem(device, npts=10, ode='constant', reverse=False, dtype=torc
 
     f = PROBLEMS[ode]().to(dtype=dtype, device=device)
 
-    t_points = torch.linspace(1, 8, npts, dtype=dtype, device=device, requires_grad=True)
-    sol = f.y_exact(t_points)
+    t_points = torch.linspace(1, 8, npts, dtype=torch.float64, device=device, requires_grad=True)
+    sol = f.y_exact(t_points).to(dtype)
 
     def _flip(x, dim):
         indices = [slice(None)] * x.dim()

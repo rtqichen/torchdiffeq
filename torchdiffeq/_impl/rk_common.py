@@ -56,9 +56,11 @@ def _runge_kutta_step(func, y0, f0, t0, dt, t1, tableau):
         calculating these terms.
     """
 
-    t0 = t0.to(y0.dtype)
-    dt = dt.to(y0.dtype)
-    t1 = t1.to(y0.dtype)
+    t_dtype = y0.abs().dtype
+
+    t0 = t0.to(t_dtype)
+    dt = dt.to(t_dtype)
+    t1 = t1.to(t_dtype)
 
     # We use an unchecked assign to put data into k without incrementing its _version counter, so that the backward
     # doesn't throw an (overzealous) error about in-place correctness. We know that it's actually correct.
@@ -135,7 +137,7 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeEventODESolver):
 
         # We use mixed precision. y has its original dtype (probably float32), whilst all 'time'-like objects use
         # `dtype` (defaulting to float64).
-        dtype = torch.promote_types(dtype, y0.dtype)
+        dtype = torch.promote_types(dtype, y0.abs().dtype)
         device = y0.device
 
         self.func = func
