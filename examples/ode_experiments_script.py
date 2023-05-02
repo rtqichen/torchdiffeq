@@ -61,6 +61,9 @@ class LambdaFVDP(nn.Module):
         return y_dot
 
 
+class LambdaLorenz(nn.Module):
+    pass
+
 with torch.no_grad():
     true_y = odeint(LambdaFVDP(), true_y0, t, method='dopri5')
 
@@ -173,7 +176,9 @@ class RunningAverageMeter(object):
         self.val = val
 
 
-# TODO Debug
+# TODO
+#   1. Understand how get_batch works
+#   2. Understand how loss and loss_avg is calculated
 if __name__ == '__main__':
 
     ii = 0
