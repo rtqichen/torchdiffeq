@@ -18,7 +18,7 @@ parser.add_argument('--data_size', type=int, default=1000)
 parser.add_argument('--batch_time', type=int, default=10)
 parser.add_argument('--batch_size', type=int, default=20)
 parser.add_argument('--niters', type=int, default=10000)
-parser.add_argument('--test_freq', type=int, default=20)
+parser.add_argument('--test_freq', type=int, default=10)
 parser.add_argument('--viz', action='store_true')
 parser.add_argument('--gpu', type=int, default=0)
 parser.add_argument('--adjoint', default=False, action='store_true')
@@ -40,10 +40,29 @@ class Lambda(nn.Module):
 
     def forward(self, t, y):
         return torch.mm(y ** 3, true_A)
+        # vdp
+        mio = 1.0
+
+
+class LambdaFVDP(nn.Module):
+    def __init__(self, *args, **kwargs):
+        # https://en.wikipedia.org/wiki/Van_der_Pol_oscillator
+        self.mio = 1.0  # 8.53
+        self.a = 1.2  # 1.2
+        self.omega = 2.0 * torch.pi / 10
+        super().__init__(*args, **kwargs)
+
+    def forward(self, t, y):
+        y1 = y[:, 0]
+        y2 = y[:, 1]
+        y1_dot = y2.view(-1, 1)
+        y2_dot = (self.mio * (1 - y1 ** 2) * y2 - y1 + self.a * torch.sin(self.omega * t)).view(-1, 1)
+        y_dot = torch.cat([y1_dot, y2_dot], dim=1)
+        return y_dot
 
 
 with torch.no_grad():
-    true_y = odeint(Lambda(), true_y0, t, method='dopri5')
+    true_y = odeint(LambdaFVDP(), true_y0, t, method='dopri5')
 
 
 def get_batch():
@@ -184,7 +203,6 @@ if __name__ == '__main__':
                 pred_y = odeint(func, true_y0, t)
                 loss = torch.mean(torch.abs(pred_y - true_y))
                 print('Iter {:04d} | Total Loss {:.6f}'.format(itr, loss.item()))
+                print(f'loss_meter_avg = {loss_meter.avg}')
                 visualize(true_y, pred_y, func, ii)
                 ii += 1
-
-        end = time.time()
