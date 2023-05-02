@@ -146,7 +146,7 @@ class RunningAverageMeter(object):
             self.avg = self.avg * self.momentum + val * (1 - self.momentum)
         self.val = val
 
-
+# TODO Debug
 if __name__ == '__main__':
 
     ii = 0
