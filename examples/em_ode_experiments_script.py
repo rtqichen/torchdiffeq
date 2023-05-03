@@ -38,7 +38,7 @@ t = torch.linspace(0., 25., args.data_size).to(device)
 true_A = torch.tensor([[-0.1, 2.0], [-2.0, -0.1]]).to(device)
 
 
-class Lambda(nn.Module):
+class LambdaAmulty3(nn.Module):
 
     def forward(self, t, y):
         return torch.mm(y ** 3, true_A)
@@ -68,7 +68,7 @@ class LambdaLorenz(nn.Module):
 
 
 with torch.no_grad():
-    true_y = odeint(Lambda(), true_y0, t, method='dopri5')
+    true_y = odeint(LambdaAmulty3(), true_y0, t, method='dopri5')
     # true_y = odeint(LambdaFVDP(), true_y0, t, method='dopri5')
 
 
@@ -184,25 +184,32 @@ def em_euler_ode_forward(func, batch_y0, batch_t):
     t0 = batch_t[0]
     pred_y_list = [batch_y0]
     for i in range(1, batch_t.size()[0]):
-        T = batch_t[i]
-        T_1 = batch_t[i - 1]
-        delta_t_T_1 = T - T_1
+        t_T = batch_t[i]
+        t_T_1 = batch_t[i - 1]
+        delta_t_T = t_T - t_T_1
         with torch.no_grad():
-            traj = odeint(func, batch_y0, torch.tensor([t0, T])).to(device)
-            zT_1 = traj[-1]
-        dzdt = func(T_1, zT_1)
-        zT = zT_1 + dzdt * delta_t_T_1
+            if i==1:
+                zT_1 = batch_y0
+            else:
+                traj = odeint(func, batch_y0, torch.tensor([t0, t_T_1])).to(device)
+                zT_1 = traj[-1]
+        dzdt = func(t_T_1, zT_1)
+        zT = zT_1 + dzdt * delta_t_T
         pred_y_list.append(zT)
     pred_y_tensor = torch.stack(pred_y_list, dim=0)
     return pred_y_tensor
 
 
 # TODO
+#   0. review the code line by line
 #   1. quick experiment with TT-RBF
 #   2. add configs to select ode_forward and true_y0
 #   3. epochs plots
 #   4. document work
 #   5. test with hidden_dim 50,100,200
+#   6. trace computational graph to make sure we have computation graph of the shape zT = C + dzdt*delta_t
+#   7. test with lorenz systems
+#   8. test with other "stiff odes" ???
 if __name__ == '__main__':
 
     ii = 0
