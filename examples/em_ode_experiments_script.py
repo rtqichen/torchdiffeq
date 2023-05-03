@@ -198,8 +198,11 @@ def em_euler_ode_forward(func, batch_y0, batch_t):
 
 
 # TODO
-#   1. Understand how get_batch works
-#   2. Understand how loss and loss_avg is calculated
+#   1. quick experiment with TT-RBF
+#   2. add configs to select ode_forward and true_y0
+#   3. epochs plots
+#   4. document work
+#   5. test with hidden_dim 50,100,200
 if __name__ == '__main__':
 
     ii = 0
