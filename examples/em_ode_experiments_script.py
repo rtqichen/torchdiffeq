@@ -232,6 +232,7 @@ def em_euler_ode_forward(func, batch_y0, batch_t):
 
 
 # TODO
+#   0. re-debug the code with the two fw methods and 3 datasets to make sure exec path is as expected
 #   1. quick experiment with TT-RBF
 #   2. add configs to select ode_forward and true_y0
 #   3. epochs plots
