@@ -132,14 +132,14 @@ class ImplicitFnGradientRerouting(torch.autograd.Function):
     @staticmethod
     def forward(ctx, func, event_fn, event_t, state_t):
         """ event_t is the solution to event_fn """
-        ctx.func = func
+        ctx.learnable_ode_func = func
         ctx.event_fn = event_fn
         ctx.save_for_backward(event_t, state_t)
         return event_t.detach(), state_t.detach()
 
     @staticmethod
     def backward(ctx, grad_t, grad_state):
-        func = ctx.func
+        func = ctx.learnable_ode_func
         event_fn = ctx.event_fn
         event_t, state_t = ctx.saved_tensors
 

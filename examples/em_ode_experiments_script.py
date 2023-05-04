@@ -17,13 +17,13 @@ parser.add_argument('--method', type=str, choices=['dopri5', 'adams'], default='
 parser.add_argument('--data_size', type=int, default=1000)
 parser.add_argument('--batch_time', type=int, default=10)
 parser.add_argument('--batch_size', type=int, default=20)
-parser.add_argument('--niters', type=int, default=1000)
+parser.add_argument('--epochs', type=int, default=1000)
 parser.add_argument('--test_freq', type=int, default=10)
 parser.add_argument('--viz', action='store_true')
 parser.add_argument('--gpu', type=int, default=0)
+parser.add_argument('--nn-hidden-dim', type=int, default=100)  # for NN-ODE
+# FIXME , now I disable adjoint completely to make sure the opt in this script is based on Gradient Descent Only
 parser.add_argument('--adjoint', default=False, action='store_true')
-args = parser.parse_args()
-
 
 # FIXME , find a better way to activate adjoint method
 # if args.adjoint:
@@ -31,17 +31,23 @@ args = parser.parse_args()
 # else:
 from torchdiffeq import odeint
 
-device = torch.device('cuda:' + str(args.gpu) if torch.cuda.is_available() else 'cpu')
 
-true_y0 = torch.tensor([[2., 0.]]).to(device)
-t = torch.linspace(0., 25., args.data_size).to(device)
-true_A = torch.tensor([[-0.1, 2.0], [-2.0, -0.1]]).to(device)
+class Constants:
+    def __init__(self, device):
+        self.true_ode_method = 'dopri5'
+        self.true_t0 = 0.0
+        self.true_t_T = 25.0
+        self.true_y0 = torch.tensor([[2., 0.]]).to(device)
+        self.true_A = torch.tensor([[-0.1, 2.0], [-2.0, -0.1]]).to(device)
 
 
 class LambdaAmulty3(nn.Module):
+    def __init__(self, true_A: torch.Tensor, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.true_A = true_A
 
     def forward(self, t, y):
-        return torch.mm(y ** 3, true_A)
+        return torch.mm(y ** 3, self.true_A)
         # vdp
         mio = 1.0
 
@@ -64,20 +70,44 @@ class LambdaFVDP(nn.Module):
 
 
 class LambdaLorenz(nn.Module):
-    pass
+    def __init__(self, sigma, rho, beta, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.beta = beta
+        self.rho = rho
+        self.sigma = sigma
+        #
+        # https://en.wikipedia.org/wiki/Lorenz_system
+        self.beta = 8.0/3
+        self.rho = 28
+        self.sigma = 10
+
+    def forward(self, t, y):
+        y1 = y[0]
+        y2 = y[1]
+        y3 = y[2]
+        #
+        y1_dot = self.sigma * (y2 - y1)
+        y2_dot = y1 * (self.rho - y3) - y2
+        y3_dot = y1 * y2 - self.beta * y3
+        y_dot = torch.cat([y1_dot, y2_dot, y3_dot], dim=1)
+        return y_dot
 
 
-with torch.no_grad():
-    true_y = odeint(LambdaAmulty3(), true_y0, t, method='dopri5')
-    # true_y = odeint(LambdaFVDP(), true_y0, t, method='dopri5')
+def get_true_y(true_ode_model: torch.nn.Module, true_t0: float, true_t_T: float, true_y0: torch.Tensor, method: str,
+               args):
+    t = torch.linspace(true_t0, true_t_T, args.data_size).to(device)
+    with torch.no_grad():
+        true_y = odeint(true_ode_model, true_y0, t, method=method)
+        print(f'Generating true_y of size = {true_y.size()}')
+        return true_y, t
 
 
-def get_batch():
+def get_batch(true_y: torch.Tensor, t: torch.Tensor, args):
     s = torch.from_numpy(
         np.random.choice(np.arange(args.data_size - args.batch_time, dtype=np.int64), args.batch_size, replace=False))
-    batch_y0 = true_y[s]  # (M, D)
+    batch_y0 = true_y[s]  # (N, D)
     batch_t = t[:args.batch_time]  # (T)
-    batch_y = torch.stack([true_y[s + i] for i in range(args.batch_time)], dim=0)  # (T, M, D)
+    batch_y = torch.stack([true_y[s + i] for i in range(args.batch_time)], dim=0)  # (T, N, D)
     return batch_y0.to(device), batch_t.to(device), batch_y.to(device)
 
 
@@ -86,70 +116,69 @@ def makedirs(dirname):
         os.makedirs(dirname)
 
 
-if args.viz:
-    makedirs('png')
-    import matplotlib.pyplot as plt
-
-    fig = plt.figure(figsize=(12, 4), facecolor='white')
-    ax_traj = fig.add_subplot(131, frameon=False)
-    ax_phase = fig.add_subplot(132, frameon=False)
-    ax_vecfield = fig.add_subplot(133, frameon=False)
-    plt.show(block=False)
-
-
-def visualize(true_y, pred_y, odefunc, itr):
-    if args.viz:
-        ax_traj.cla()
-        ax_traj.set_title('Trajectories')
-        ax_traj.set_xlabel('t')
-        ax_traj.set_ylabel('x,y')
-        ax_traj.plot(t.cpu().numpy(), true_y.cpu().numpy()[:, 0, 0], t.cpu().numpy(), true_y.cpu().numpy()[:, 0, 1],
-                     'g-')
-        ax_traj.plot(t.cpu().numpy(), pred_y.cpu().numpy()[:, 0, 0], '--', t.cpu().numpy(),
-                     pred_y.cpu().numpy()[:, 0, 1], 'b--')
-        ax_traj.set_xlim(t.cpu().min(), t.cpu().max())
-        ax_traj.set_ylim(-2, 2)
-        ax_traj.legend()
-
-        ax_phase.cla()
-        ax_phase.set_title('Phase Portrait')
-        ax_phase.set_xlabel('x')
-        ax_phase.set_ylabel('y')
-        ax_phase.plot(true_y.cpu().numpy()[:, 0, 0], true_y.cpu().numpy()[:, 0, 1], 'g-')
-        ax_phase.plot(pred_y.cpu().numpy()[:, 0, 0], pred_y.cpu().numpy()[:, 0, 1], 'b--')
-        ax_phase.set_xlim(-2, 2)
-        ax_phase.set_ylim(-2, 2)
-
-        ax_vecfield.cla()
-        ax_vecfield.set_title('Learned Vector Field')
-        ax_vecfield.set_xlabel('x')
-        ax_vecfield.set_ylabel('y')
-
-        y, x = np.mgrid[-2:2:21j, -2:2:21j]
-        dydt = odefunc(0, torch.Tensor(np.stack([x, y], -1).reshape(21 * 21, 2)).to(device)).cpu().detach().numpy()
-        mag = np.sqrt(dydt[:, 0] ** 2 + dydt[:, 1] ** 2).reshape(-1, 1)
-        dydt = (dydt / mag)
-        dydt = dydt.reshape(21, 21, 2)
-
-        ax_vecfield.streamplot(x, y, dydt[:, :, 0], dydt[:, :, 1], color="black")
-        ax_vecfield.set_xlim(-2, 2)
-        ax_vecfield.set_ylim(-2, 2)
-
-        fig.tight_layout()
-        plt.savefig('png/{:03d}'.format(itr))
-        plt.draw()
-        plt.pause(0.001)
+# if args.viz:
+#     makedirs('png')
+#     import matplotlib.pyplot as plt
+#
+#     fig = plt.figure(figsize=(12, 4), facecolor='white')
+#     ax_traj = fig.add_subplot(131, frameon=False)
+#     ax_phase = fig.add_subplot(132, frameon=False)
+#     ax_vecfield = fig.add_subplot(133, frameon=False)
+#     plt.show(block=False)
 
 
-class ODEFunc(nn.Module):
+# def visualize(true_y, pred_y, odefunc, itr, t):
+#     if args.viz:
+#         ax_traj.cla()
+#         ax_traj.set_title('Trajectories')
+#         ax_traj.set_xlabel('t')
+#         ax_traj.set_ylabel('x,y')
+#         ax_traj.plot(t.cpu().numpy(), true_y.cpu().numpy()[:, 0, 0], t.cpu().numpy(), true_y.cpu().numpy()[:, 0, 1],
+#                      'g-')
+#         ax_traj.plot(t.cpu().numpy(), pred_y.cpu().numpy()[:, 0, 0], '--', t.cpu().numpy(),
+#                      pred_y.cpu().numpy()[:, 0, 1], 'b--')
+#         ax_traj.set_xlim(t.cpu().min(), t.cpu().max())
+#         ax_traj.set_ylim(-2, 2)
+#         ax_traj.legend()
+#
+#         ax_phase.cla()
+#         ax_phase.set_title('Phase Portrait')
+#         ax_phase.set_xlabel('x')
+#         ax_phase.set_ylabel('y')
+#         ax_phase.plot(true_y.cpu().numpy()[:, 0, 0], true_y.cpu().numpy()[:, 0, 1], 'g-')
+#         ax_phase.plot(pred_y.cpu().numpy()[:, 0, 0], pred_y.cpu().numpy()[:, 0, 1], 'b--')
+#         ax_phase.set_xlim(-2, 2)
+#         ax_phase.set_ylim(-2, 2)
+#
+#         ax_vecfield.cla()
+#         ax_vecfield.set_title('Learned Vector Field')
+#         ax_vecfield.set_xlabel('x')
+#         ax_vecfield.set_ylabel('y')
+#
+#         y, x = np.mgrid[-2:2:21j, -2:2:21j]
+#         dydt = odefunc(0, torch.Tensor(np.stack([x, y], -1).reshape(21 * 21, 2)).to(device)).cpu().detach().numpy()
+#         mag = np.sqrt(dydt[:, 0] ** 2 + dydt[:, 1] ** 2).reshape(-1, 1)
+#         dydt = (dydt / mag)
+#         dydt = dydt.reshape(21, 21, 2)
+#
+#         ax_vecfield.streamplot(x, y, dydt[:, :, 0], dydt[:, :, 1], color="black")
+#         ax_vecfield.set_xlim(-2, 2)
+#         ax_vecfield.set_ylim(-2, 2)
+#
+#         fig.tight_layout()
+#         plt.savefig('png/{:03d}'.format(itr))
+#         plt.draw()
+#         plt.pause(0.001)
 
-    def __init__(self):
-        super(ODEFunc, self).__init__()
-        hidden_dim = 200
+
+class NeuralNetOdeFunc(nn.Module):
+
+    def __init__(self, input_dim, output_dim, hidden_dim):
+        super(NeuralNetOdeFunc, self).__init__()
         self.net = nn.Sequential(
-            nn.Linear(2, hidden_dim),
+            nn.Linear(input_dim, hidden_dim),
             nn.Tanh(),
-            nn.Linear(hidden_dim, 2),
+            nn.Linear(hidden_dim, output_dim),
         )
 
         for m in self.net.modules():
@@ -188,20 +217,21 @@ def em_euler_ode_forward(func, batch_y0, batch_t):
         t_T_1 = batch_t[i - 1]
         delta_t_T = t_T - t_T_1
         with torch.no_grad():
-            if i==1:
+            if i == 1:
                 zT_1 = batch_y0
             else:
                 traj = odeint(func, batch_y0, torch.tensor([t0, t_T_1])).to(device)
                 zT_1 = traj[-1]
+        assert zT_1.requires_grad == False
         dzdt = func(t_T_1, zT_1)
-        zT = zT_1 + dzdt * delta_t_T
+        assert dzdt.requires_grad == True
+        zT = zT_1 + dzdt * delta_t_T  # grad only comes from the dzdt part
         pred_y_list.append(zT)
     pred_y_tensor = torch.stack(pred_y_list, dim=0)
     return pred_y_tensor
 
 
 # TODO
-#   0. review the code line by line
 #   1. quick experiment with TT-RBF
 #   2. add configs to select ode_forward and true_y0
 #   3. epochs plots
@@ -211,43 +241,58 @@ def em_euler_ode_forward(func, batch_y0, batch_t):
 #   7. test with lorenz systems
 #   8. test with other "stiff odes" ???
 if __name__ == '__main__':
-
+    args = parser.parse_args()
+    device = torch.device('cuda:' + str(args.gpu) if torch.cuda.is_available() else 'cpu')
+    constants = Constants(device=device)
+    ##
     ii = 0
-
-    func = ODEFunc().to(device)
+    # generate true_y
+    true_ode_model = LambdaFVDP()
+    if isinstance(true_ode_model, (LambdaAmulty3, LambdaFVDP)):
+        Dy = 2
+    elif isinstance(true_ode_model, LambdaLorenz):
+        Dy = 3
+    else:
+        raise ValueError(f'Unknown true-ode-model = {type(true_ode_model)}')
+    print(f'Generating true_y using true_ode_trajectory = {type(true_ode_model).__name__}')
+    true_y, true_t = get_true_y(true_ode_model=true_ode_model, true_y0=constants.true_y0, true_t0=constants.true_t0,
+                                true_t_T=constants.true_t_T, method=constants.true_ode_method, args=args)
+    # set forward method
+    # forward_fn = em_euler_ode_forward
+    forward_fn = odeint
+    print(f'forward_fn = {forward_fn.__name__}')
+    learnable_ode_func = NeuralNetOdeFunc(input_dim=Dy, output_dim=Dy, hidden_dim=args.nn_hidden_dim).to(device)
 
     # optimizer = optim.RMSprop(func.parameters(), lr=1e-6)
     # optimizer = optim.SGD(func.parameters(), lr=1e-3)
-    optimizer = optim.Adam(func.parameters(), lr=1e-4)
-    end = time.time()
+    optimizer = optim.Adam(learnable_ode_func.parameters(), lr=1e-4)
+    start_time = time.time()
 
     time_meter = RunningAverageMeter(0.97)
 
     loss_meter = RunningAverageMeter(0.97)
-    for itr in range(1, args.niters + 1):  # itr = epoch
+    for epoch in range(1, args.epochs + 1):  # itr = epoch
         optimizer.zero_grad()
-        batch_y0, batch_t, batch_y = get_batch()
-        repeats = 1  # for em opt only
-        for i in range(repeats):
-            # pred_y = odeint(func, batch_y0, batch_t).to(device)
-            pred_y = em_euler_ode_forward(func, batch_y0, batch_t)
-            # batch_y = batch_y[-1]  # fixme consider only the last time-point
-            # pred_y = pred_y[-1]
-            loss = torch.mean(torch.abs(pred_y - batch_y))
-            loss.backward()
-            optimizer.step()
+        batch_y0, batch_t, batch_y = get_batch(true_y=true_y, t=true_t, args=args)
+        # pedict via odeint or my em_euler_ode_forward
+        pred_y = forward_fn(learnable_ode_func, batch_y0, batch_t)
+        # batch_y = batch_y[-1]  # fixme consider only the last time-point
+        # pred_y = pred_y[-1]
+        loss = torch.mean(torch.abs(pred_y - batch_y))
+        loss.backward()
+        optimizer.step()
 
-            time_meter.update(time.time() - end)
-            loss_meter.update(loss.item())
+        time_meter.update(time.time() - start_time)
+        loss_meter.update(loss.item())
 
-            if itr % args.test_freq == 0:
-                with torch.no_grad():
-                    # pred_y = odeint(func, true_y0, t)
-                    # loss = torch.mean(torch.abs(pred_y - true_y))
-                    # print('Iter {:04d} | Total Loss {:.6f}'.format(itr, loss.item()))
-                    print(f'epoch = {itr} - loss_meter_avg = {loss_meter.avg}')
-                    visualize(true_y, pred_y, func, ii)
-                    ii += 1
+        if epoch % args.test_freq == 0:
+            with torch.no_grad():
+                print(f'epoch = {epoch} - loss_meter_avg = {loss_meter.avg}')
+                # pred_y = odeint(func, true_y0, t)
+                # loss = torch.mean(torch.abs(pred_y - true_y))
+                # print('Iter {:04d} | Total Loss {:.6f}'.format(itr, loss.item()))
+                # visualize(true_y, pred_y, learnable_ode_func, ii)
+                ii += 1
 """
 Experiment results : 
 

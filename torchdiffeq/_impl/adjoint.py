@@ -13,7 +13,7 @@ class OdeintAdjointMethod(torch.autograd.Function):
                 adjoint_options, t_requires_grad, *adjoint_params):
 
         ctx.shapes = shapes
-        ctx.func = func
+        ctx.learnable_ode_func = func
         ctx.adjoint_rtol = adjoint_rtol
         ctx.adjoint_atol = adjoint_atol
         ctx.adjoint_method = adjoint_method
@@ -36,7 +36,7 @@ class OdeintAdjointMethod(torch.autograd.Function):
     @staticmethod
     def backward(ctx, *grad_y):
         with torch.no_grad():
-            func = ctx.func
+            func = ctx.learnable_ode_func
             adjoint_rtol = ctx.adjoint_rtol
             adjoint_atol = ctx.adjoint_atol
             adjoint_method = ctx.adjoint_method
