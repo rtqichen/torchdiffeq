@@ -1,3 +1,4 @@
+import datetime
 import os
 import argparse
 import time
@@ -14,10 +15,10 @@ import torch.optim as optim
 ###
 parser = argparse.ArgumentParser('ODE demo')
 parser.add_argument('--method', type=str, choices=['dopri5', 'adams'], default='dopri5')
-parser.add_argument('--data_size', type=int, default=10000)
+parser.add_argument('--data_size', type=int, default=1000)
 parser.add_argument('--batch_time', type=int, default=10)
 parser.add_argument('--batch_size', type=int, default=20)
-parser.add_argument('--epochs', type=int, default=100000)
+parser.add_argument('--epochs', type=int, default=1000000)
 parser.add_argument('--test_freq', type=int, default=1000)
 parser.add_argument('--viz', action='store_true')
 parser.add_argument('--gpu', type=int, default=0)
@@ -111,7 +112,7 @@ def get_true_y(true_ode_model: torch.nn.Module, true_t0: float, true_t_T: float,
 
 
 def get_batch(true_y: torch.Tensor, t: torch.Tensor, args):
-    N = 100
+    N = 500
     s = torch.from_numpy(
         np.random.choice(np.arange(args.data_size - N - 1, dtype=np.int64), args.batch_size, replace=False))
     batch_y0 = true_y[s]  # (M, D)
@@ -226,7 +227,7 @@ def em_euler_ode_forward(func, batch_y0, batch_t):
     pred_y_list = [batch_y0]
     b = 0.1
     for i in range(1, batch_t.size()[0]):
-        tN = torch.distributions.Uniform(batch_t[i] - b, batch_t[i]+b).sample()
+        tN = torch.distributions.Uniform(batch_t[i] - b, batch_t[i] + b).sample()
         tN_1 = tN - 0.01  # torch.distributions.Uniform(0.01,0.1).sample() # batch_t[i - 1]
         delta_t_T = tN - tN_1
         with torch.no_grad():
@@ -246,6 +247,8 @@ def em_euler_ode_forward(func, batch_y0, batch_t):
 
 # TODO
 #   0. re-debug the code with the two fw methods and 3 datasets to make sure exec path is as expected
+#   0, rewrite the code properly
+#   0. testing testing testing - test plan
 #   1. quick experiment with TT-RBF
 #   2. add configs to select ode_forward and true_y0
 #   3. epochs plots
@@ -263,7 +266,8 @@ if __name__ == '__main__':
     ##
     ii = 0
     # generate true_y
-    true_ode_model = LambdaFVDP()
+    # true_ode_model = LambdaFVDP()
+    true_ode_model = LambdaAmulty3(constants.true_A)
     if isinstance(true_ode_model, (LambdaAmulty3, LambdaFVDP)):
         Dy = 2
     elif isinstance(true_ode_model, LambdaLorenz):
@@ -274,8 +278,8 @@ if __name__ == '__main__':
     true_y, true_t = get_true_y(true_ode_model=true_ode_model, true_y0=constants.true_y0, true_t0=constants.true_t0,
                                 true_t_T=constants.true_t_T, method=constants.true_ode_method, args=args)
     # set forward method
-    forward_fn = em_euler_ode_forward
-    # forward_fn = odeint
+    # forward_fn = em_euler_ode_forward
+    forward_fn = odeint
     print(f'forward_fn = {forward_fn.__name__}')
     learnable_ode_func = NeuralNetOdeFunc(input_dim=Dy, output_dim=Dy, hidden_dim=args.nn_hidden_dim).to(device)
 
@@ -287,6 +291,7 @@ if __name__ == '__main__':
     time_meter = RunningAverageMeter(0.97)
 
     loss_meter = RunningAverageMeter(0.97)
+    my_start_time = datetime.datetime.now()
     for epoch in range(1, args.epochs + 1):  # itr = epoch
         optimizer.zero_grad()
         batch_y0, batch_t, batch_y = get_batch(true_y=true_y, t=true_t, args=args)
@@ -307,7 +312,9 @@ if __name__ == '__main__':
         time_meter.update(time.time() - start_time)
         if epoch % args.test_freq == 0:
             with torch.no_grad():
-                print(f'epoch = {epoch} - loss_meter_avg = {loss_meter.avg}')
+                print(
+                    f'epoch = {epoch} - loss_meter_avg = {loss_meter.avg} - '
+                    f'elapsed_time = {(datetime.datetime.now() - my_start_time).seconds} seconds')
                 # pred_y = odeint(func, true_y0, t)
                 # loss = torch.mean(torch.abs(pred_y - true_y))
                 # print('Iter {:04d} | Total Loss {:.6f}'.format(itr, loss.item()))
