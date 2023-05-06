@@ -7,18 +7,18 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-SEED = 42
-torch.manual_seed(SEED)
-random.seed(SEED)
-np.random.seed(SEED)
+# SEED = 42
+# torch.manual_seed(SEED)
+# random.seed(SEED)
+# np.random.seed(SEED)
 ###
 parser = argparse.ArgumentParser('ODE demo')
 parser.add_argument('--method', type=str, choices=['dopri5', 'adams'], default='dopri5')
-parser.add_argument('--data_size', type=int, default=1000)
+parser.add_argument('--data_size', type=int, default=10000)
 parser.add_argument('--batch_time', type=int, default=10)
 parser.add_argument('--batch_size', type=int, default=20)
 parser.add_argument('--epochs', type=int, default=100000)
-parser.add_argument('--test_freq', type=int, default=10)
+parser.add_argument('--test_freq', type=int, default=1000)
 parser.add_argument('--viz', action='store_true')
 parser.add_argument('--gpu', type=int, default=0)
 parser.add_argument('--nn-hidden-dim', type=int, default=100)  # for NN-ODE
@@ -113,13 +113,13 @@ def get_true_y(true_ode_model: torch.nn.Module, true_t0: float, true_t_T: float,
 def get_batch(true_y: torch.Tensor, t: torch.Tensor, args):
     N = 100
     s = torch.from_numpy(
-        np.random.choice(np.arange(args.data_size - N-1, dtype=np.int64), args.batch_size, replace=False))
+        np.random.choice(np.arange(args.data_size - N - 1, dtype=np.int64), args.batch_size, replace=False))
     batch_y0 = true_y[s]  # (M, D)
     # batch_t = t[:args.batch_time]  # (T)
 
     batch_t = torch.tensor([t[0], t[N]])
     # batch_y = torch.stack([true_y[s + i] for i in range(args.batch_time)], dim=0)  # (M, N, D)
-    batch_y = true_y[s+N]
+    batch_y = true_y[s + N]
     return batch_y0.to(device), batch_t.to(device), batch_y.to(device)
 
 
@@ -224,19 +224,19 @@ class RunningAverageMeter(object):
 def em_euler_ode_forward(func, batch_y0, batch_t):
     t0 = batch_t[0]
     pred_y_list = [batch_y0]
+    b = 0.1
     for i in range(1, batch_t.size()[0]):
-        t_T = batch_t[i]
-        t_T_1 = batch_t[i - 1]
-        delta_t_T = t_T - t_T_1
+        tN = torch.distributions.Uniform(batch_t[i] - b, batch_t[i]+b).sample()
+        tN_1 = tN - 0.01  # torch.distributions.Uniform(0.01,0.1).sample() # batch_t[i - 1]
+        delta_t_T = tN - tN_1
         with torch.no_grad():
             if i == 1:
                 zT_1 = batch_y0
             else:
-                traj = odeint(func, batch_y0, torch.tensor([t0, t_T_1])).to(device)
+                traj = odeint(func, batch_y0, torch.tensor([t0, tN_1])).to(device)
                 zT_1 = traj[-1]
         assert zT_1.requires_grad == False
-        zT_1_stoch = torch.distributions.Normal(loc=zT_1, scale=0.1).sample()
-        dzdt = func(t_T_1, zT_1)
+        dzdt = func(tN_1, zT_1)
         assert dzdt.requires_grad == True
         zT = zT_1 + dzdt * delta_t_T  # grad only comes from the dzdt part
         pred_y_list.append(zT)
@@ -292,15 +292,19 @@ if __name__ == '__main__':
         batch_y0, batch_t, batch_y = get_batch(true_y=true_y, t=true_t, args=args)
         # pedict via odeint or my em_euler_ode_forward
         pred_y = forward_fn(learnable_ode_func, batch_y0, batch_t)[-1]
-        # batch_y = batch_y[-1]  # fixme consider only the last time-point
-        # pred_y = pred_y[-1]
         loss = torch.mean(torch.abs(pred_y - batch_y))
+        loss_meter.update(loss.item())
         loss.backward()
         optimizer.step()
-
+        #
+        if forward_fn == em_euler_ode_forward:
+            pred_y = em_euler_ode_forward(learnable_ode_func, batch_y, torch.tensor([batch_t[1], batch_t[0]]))[-1]
+            loss = torch.mean(torch.abs(pred_y - batch_y0))
+            # loss_meter.update(loss.item())
+            loss.backward()
+            optimizer.step()
+        #
         time_meter.update(time.time() - start_time)
-        loss_meter.update(loss.item())
-
         if epoch % args.test_freq == 0:
             with torch.no_grad():
                 print(f'epoch = {epoch} - loss_meter_avg = {loss_meter.avg}')
