@@ -17,7 +17,7 @@ parser.add_argument('--method', type=str, choices=['dopri5', 'adams'], default='
 parser.add_argument('--data_size', type=int, default=1000)
 parser.add_argument('--batch_time', type=int, default=10)
 parser.add_argument('--batch_size', type=int, default=20)
-parser.add_argument('--epochs', type=int, default=1000)
+parser.add_argument('--epochs', type=int, default=100000)
 parser.add_argument('--test_freq', type=int, default=10)
 parser.add_argument('--viz', action='store_true')
 parser.add_argument('--gpu', type=int, default=0)
@@ -30,6 +30,14 @@ parser.add_argument('--adjoint', default=False, action='store_true')
 #     from torchdiffeq import odeint_adjoint as odeint
 # else:
 from torchdiffeq import odeint
+
+"""
+Notation : 
+M : is the size of the data from sampling perspective 
+N : is the size of the data from time perspective 
+D : is the dimension of the input/output/latent variable
+T : is batch size from temporal perspective 
+"""
 
 
 class Constants:
@@ -77,7 +85,7 @@ class LambdaLorenz(nn.Module):
         self.sigma = sigma
         #
         # https://en.wikipedia.org/wiki/Lorenz_system
-        self.beta = 8.0/3
+        self.beta = 8.0 / 3
         self.rho = 28
         self.sigma = 10
 
@@ -103,11 +111,15 @@ def get_true_y(true_ode_model: torch.nn.Module, true_t0: float, true_t_T: float,
 
 
 def get_batch(true_y: torch.Tensor, t: torch.Tensor, args):
+    N = 100
     s = torch.from_numpy(
-        np.random.choice(np.arange(args.data_size - args.batch_time, dtype=np.int64), args.batch_size, replace=False))
-    batch_y0 = true_y[s]  # (N, D)
-    batch_t = t[:args.batch_time]  # (T)
-    batch_y = torch.stack([true_y[s + i] for i in range(args.batch_time)], dim=0)  # (T, N, D)
+        np.random.choice(np.arange(args.data_size - N-1, dtype=np.int64), args.batch_size, replace=False))
+    batch_y0 = true_y[s]  # (M, D)
+    # batch_t = t[:args.batch_time]  # (T)
+
+    batch_t = torch.tensor([t[0], t[N]])
+    # batch_y = torch.stack([true_y[s + i] for i in range(args.batch_time)], dim=0)  # (M, N, D)
+    batch_y = true_y[s+N]
     return batch_y0.to(device), batch_t.to(device), batch_y.to(device)
 
 
@@ -223,6 +235,7 @@ def em_euler_ode_forward(func, batch_y0, batch_t):
                 traj = odeint(func, batch_y0, torch.tensor([t0, t_T_1])).to(device)
                 zT_1 = traj[-1]
         assert zT_1.requires_grad == False
+        zT_1_stoch = torch.distributions.Normal(loc=zT_1, scale=0.1).sample()
         dzdt = func(t_T_1, zT_1)
         assert dzdt.requires_grad == True
         zT = zT_1 + dzdt * delta_t_T  # grad only comes from the dzdt part
@@ -243,7 +256,9 @@ def em_euler_ode_forward(func, batch_y0, batch_t):
 #   8. test with other "stiff odes" ???
 if __name__ == '__main__':
     args = parser.parse_args()
-    device = torch.device('cuda:' + str(args.gpu) if torch.cuda.is_available() else 'cpu')
+    # device = torch.device('cuda:' + str(args.gpu) if torch.cuda.is_available() else 'cpu')
+    # fixme
+    device = torch.device('cpu')
     constants = Constants(device=device)
     ##
     ii = 0
@@ -259,8 +274,8 @@ if __name__ == '__main__':
     true_y, true_t = get_true_y(true_ode_model=true_ode_model, true_y0=constants.true_y0, true_t0=constants.true_t0,
                                 true_t_T=constants.true_t_T, method=constants.true_ode_method, args=args)
     # set forward method
-    # forward_fn = em_euler_ode_forward
-    forward_fn = odeint
+    forward_fn = em_euler_ode_forward
+    # forward_fn = odeint
     print(f'forward_fn = {forward_fn.__name__}')
     learnable_ode_func = NeuralNetOdeFunc(input_dim=Dy, output_dim=Dy, hidden_dim=args.nn_hidden_dim).to(device)
 
@@ -276,7 +291,7 @@ if __name__ == '__main__':
         optimizer.zero_grad()
         batch_y0, batch_t, batch_y = get_batch(true_y=true_y, t=true_t, args=args)
         # pedict via odeint or my em_euler_ode_forward
-        pred_y = forward_fn(learnable_ode_func, batch_y0, batch_t)
+        pred_y = forward_fn(learnable_ode_func, batch_y0, batch_t)[-1]
         # batch_y = batch_y[-1]  # fixme consider only the last time-point
         # pred_y = pred_y[-1]
         loss = torch.mean(torch.abs(pred_y - batch_y))
