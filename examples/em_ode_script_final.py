@@ -16,7 +16,7 @@ parser.add_argument('--method', type=str, choices=['dopri5', 'adams'], default='
 parser.add_argument('--data_size', type=int, default=1000)
 parser.add_argument('--batch_time', type=int, default=10)
 parser.add_argument('--batch_size', type=int, default=20)
-parser.add_argument('--epochs', type=int, default=2000)
+parser.add_argument('--epochs', type=int, default=100)
 parser.add_argument('--test_freq', type=int, default=20)
 parser.add_argument('--viz', action='store_true')
 parser.add_argument('--gpu', type=int, default=0)
@@ -162,19 +162,29 @@ class RunningAverageMeter(object):
         self.val = val
 
 
-def odeint_opt_block(learnable_ode_func: torch.nn.Module, batch_y0: torch.Tensor, batch_ytN_true: torch.Tensor,
-                     batch_t: torch.Tensor, optimizer: torch.optim.Optimizer,
-                     loss_meter: RunningAverageMeter, time_meter: RunningAverageMeter,
-                     start_timestamp: datetime) -> None:
+def total_trajectory_odeint_opt_block(learnable_ode_func: torch.nn.Module, batch_y0: torch.Tensor,
+                                      batch_ytN_true: torch.Tensor,
+                                      batch_t: torch.Tensor, optimizer: torch.optim.Optimizer,
+                                      loss_meter: RunningAverageMeter, time_meter: RunningAverageMeter,
+                                      start_timestamp: datetime) -> None:
     # typical training steps
     optimizer.zero_grad()
-    batch_ytN_pred = odeint(func=learnable_ode_func, y0=batch_y0, t=batch_t)
-    loss_pred = torch.mean(torch.abs(batch_ytN_pred - batch_ytN_true))
-    loss_pred.backward()
-    optimizer.step()
-    # update training loss and running time stats
-    time_meter.update((datetime.now() - start_timestamp).seconds)
-    loss_meter.update(loss_pred.item())
+    # fixme, I am doing it pairwaise ( t0->ti where i = 1 ... N-1 ) to be comparable with EM-ODE
+    #   it is not the most efficient way to do it.
+    t0 = batch_t[0]
+    N = len(batch_t)
+    for i in range(1, N):
+        ti = batch_t[i]
+        batch_t_pair = torch.tensor([t0, ti]).to(t0.get_device())
+        # now I am interested only in the final time point prediction, not the trajectory
+        batch_ytN_pred = odeint(func=learnable_ode_func, y0=batch_y0, t=batch_t_pair)[-1]
+        batch_ytN_true_i = batch_ytN_true[i]
+        loss_pred = torch.mean(torch.abs(batch_ytN_pred - batch_ytN_true_i))
+        loss_pred.backward()
+        optimizer.step()
+        # update training loss and running time stats
+        time_meter.update((datetime.now() - start_timestamp).seconds)
+        loss_meter.update(loss_pred.item())
 
 
 # TODO Debug
@@ -198,10 +208,10 @@ if __name__ == '__main__':
             get_batch(true_y_trajectory=true_y_trajectory,
                       batch_time=args.batch_time, device=device)
         # start of opt-block
-        odeint_opt_block(learnable_ode_func=func, batch_y0=batch_y0,
-                         batch_ytN_true=batch_ytN_true, batch_t=batch_t,
-                         optimizer=optimizer, loss_meter=loss_meter,
-                         time_meter=time_meter, start_timestamp=start_time)
+        total_trajectory_odeint_opt_block(learnable_ode_func=func, batch_y0=batch_y0,
+                                          batch_ytN_true=batch_ytN_true, batch_t=batch_t,
+                                          optimizer=optimizer, loss_meter=loss_meter,
+                                          time_meter=time_meter, start_timestamp=start_time)
         # end of opt block
 
         if epoch % args.test_freq == 0:
