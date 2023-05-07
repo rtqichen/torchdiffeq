@@ -13,8 +13,8 @@ parser.add_argument('--method', type=str, choices=['dopri5', 'adams'], default='
 parser.add_argument('--data_size', type=int, default=1000)
 parser.add_argument('--batch_time', type=int, default=10)
 parser.add_argument('--batch_size', type=int, default=20)
-parser.add_argument('--niters', type=int, default=100)
-parser.add_argument('--test_freq', type=int, default=20)
+parser.add_argument('--niters', type=int, default=100000)
+parser.add_argument('--test_freq', type=int, default=10)
 parser.add_argument('--viz', action='store_true')
 parser.add_argument('--gpu', type=int, default=0)
 parser.add_argument('--adjoint', action='store_true', default=False)
@@ -168,7 +168,7 @@ if __name__ == '__main__':
     time_meter = RunningAverageMeter(0.97)
 
     loss_meter = RunningAverageMeter(0.97)
-
+    print(f'running with niters (epochs) = {args.niters}')
     for itr in range(1, args.niters + 1):
         optimizer.zero_grad()
         batch_y0, batch_t, batch_y = get_batch()

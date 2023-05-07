@@ -16,8 +16,8 @@ parser.add_argument('--method', type=str, choices=['dopri5', 'adams'], default='
 parser.add_argument('--data_size', type=int, default=1000)
 parser.add_argument('--batch_time', type=int, default=10)
 parser.add_argument('--batch_size', type=int, default=20)
-parser.add_argument('--epochs', type=int, default=100)
-parser.add_argument('--test_freq', type=int, default=20)
+parser.add_argument('--epochs', type=int, default=10000)
+parser.add_argument('--test_freq', type=int, default=10)
 parser.add_argument('--viz', action='store_true')
 parser.add_argument('--gpu', type=int, default=0)
 # fixme disable adjoint, focus on bp-gd
@@ -259,15 +259,16 @@ if __name__ == '__main__':
     loss_meter = RunningAverageMeter(0.97)
     #
     ode_opt_block_fn = get_ode_opt_block_fn(opt_method=ode_opt_method)
+    logger.info(f'Using ode-opt-block : {ode_opt_block_fn.__name__}')
     for epoch in range(1, args.epochs + 1):
         batch_y0, batch_t, batch_ytN_true = \
             get_batch(true_y_trajectory=true_y_trajectory,
                       batch_time=args.batch_time, device=device)
         # start of opt-block
         ode_opt_block_fn(learnable_ode_func=func, batch_y0=batch_y0,
-                            batch_ytN_true=batch_ytN_true, batch_t=batch_t,
-                            optimizer=optimizer, loss_meter=loss_meter,
-                            time_meter=time_meter, start_timestamp=start_time)
+                         batch_ytN_true=batch_ytN_true, batch_t=batch_t,
+                         optimizer=optimizer, loss_meter=loss_meter,
+                         time_meter=time_meter, start_timestamp=start_time)
         # end of opt block
 
         if epoch % args.test_freq == 0:
