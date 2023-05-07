@@ -187,8 +187,63 @@ def total_trajectory_odeint_opt_block(learnable_ode_func: torch.nn.Module, batch
         loss_meter.update(loss_pred.item())
 
 
+def em_odeint_opt_block(learnable_ode_func: torch.nn.Module, batch_y0: torch.Tensor,
+                        batch_ytN_true: torch.Tensor,
+                        batch_t: torch.Tensor, optimizer: torch.optim.Optimizer,
+                        loss_meter: RunningAverageMeter, time_meter: RunningAverageMeter,
+                        start_timestamp: datetime) -> None:
+    # typical training steps
+    optimizer.zero_grad()
+    # fixme, I am doing it pairwise ( t0->ti where i = 1 ... N-1 ) to be comparable with EM-ODE
+    #   it is not the most efficient way to do it.
+    t0 = batch_t[0]
+    N = len(batch_t)
+    slack = 0.01
+    for i in range(1, N):
+        zt0 = batch_y0
+        ztN = batch_ytN_true[i]
+        ti = batch_t[i]
+        # E1
+        ti_minus = ti - slack
+
+        batch_t_pair = torch.tensor([t0, ti_minus]).to(t0.get_device())
+        with torch.no_grad():
+            ztN_minus = odeint(func=learnable_ode_func, y0=zt0, t=batch_t_pair)[-1]
+        assert ztN_minus.requires_grad == False
+        ztN_hat = ztN_minus + learnable_ode_func(ti_minus, ztN_minus) * slack
+        # M1
+        pred_loss = torch.mean(torch.abs(ztN - ztN_hat))
+        pred_loss.backward()
+        optimizer.step()
+        loss_meter.update(pred_loss.item())
+
+        # E2
+        t0_plus = t0 + slack
+        batch_t_pair = torch.tensor([ti, t0_plus]).to(t0.get_device())
+        with torch.no_grad():
+            zt0_plus = odeint(func=learnable_ode_func, y0=ztN, t=batch_t_pair)
+        assert zt0_plus.requires_grad == False
+        zt0_hat = zt0_plus - learnable_ode_func(t0_plus, zt0_plus) * slack
+        pred_loss = torch.mean(torch.abs(zt0 - zt0_hat))
+        # M2
+        pred_loss.backward()
+        optimizer.step()
+        time_meter.update((datetime.now() - start_timestamp).seconds)
+
+
+def get_ode_opt_block_fn(opt_method: str):
+    if opt_method == 'bp':
+        return total_trajectory_odeint_opt_block
+    elif opt_method == 'em':
+        return em_odeint_opt_block
+    else:
+        raise ValueError(f"Unknown ode-opt-method = {opt_method}")
+
+
 # TODO Debug
 if __name__ == '__main__':
+    # params
+    ode_opt_method = "bp"
     #
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger()
@@ -202,16 +257,17 @@ if __name__ == '__main__':
 
     time_meter = RunningAverageMeter(0.97)
     loss_meter = RunningAverageMeter(0.97)
-
+    #
+    ode_opt_block_fn = get_ode_opt_block_fn(opt_method=ode_opt_method)
     for epoch in range(1, args.epochs + 1):
         batch_y0, batch_t, batch_ytN_true = \
             get_batch(true_y_trajectory=true_y_trajectory,
                       batch_time=args.batch_time, device=device)
         # start of opt-block
-        total_trajectory_odeint_opt_block(learnable_ode_func=func, batch_y0=batch_y0,
-                                          batch_ytN_true=batch_ytN_true, batch_t=batch_t,
-                                          optimizer=optimizer, loss_meter=loss_meter,
-                                          time_meter=time_meter, start_timestamp=start_time)
+        ode_opt_block_fn(learnable_ode_func=func, batch_y0=batch_y0,
+                            batch_ytN_true=batch_ytN_true, batch_t=batch_t,
+                            optimizer=optimizer, loss_meter=loss_meter,
+                            time_meter=time_meter, start_timestamp=start_time)
         # end of opt block
 
         if epoch % args.test_freq == 0:
