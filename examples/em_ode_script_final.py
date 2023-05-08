@@ -187,11 +187,59 @@ def total_trajectory_odeint_opt_block(learnable_ode_func: torch.nn.Module, batch
         loss_meter.update(loss_pred.item())
 
 
-def em_odeint_opt_block(learnable_ode_func: torch.nn.Module, batch_y0: torch.Tensor,
-                        batch_ytN_true: torch.Tensor,
-                        batch_t: torch.Tensor, optimizer: torch.optim.Optimizer,
-                        loss_meter: RunningAverageMeter, time_meter: RunningAverageMeter,
-                        start_timestamp: datetime) -> None:
+def em_odeint_opt_block_v2(learnable_ode_func: torch.nn.Module, batch_y0: torch.Tensor,
+                           batch_ytN_true: torch.Tensor,
+                           batch_t: torch.Tensor, optimizer: torch.optim.Optimizer,
+                           loss_meter: RunningAverageMeter, time_meter: RunningAverageMeter,
+                           start_timestamp: datetime) -> None:
+    # typical training steps
+    optimizer.zero_grad()
+    # fixme, I am doing it pairwise ( t0->ti where i = 1 ... N-1 ) to be comparable with EM-ODE
+    #   it is not the most efficient way to do it.
+    t0 = batch_t[0]
+    zt0 = batch_y0
+    N = len(batch_t)
+    b = 0.001
+    a = 0.002
+    for i in range(4, N):
+        ti = batch_t[i]
+        zti = batch_ytN_true[i]
+        tj = torch.distributions.Uniform(low=t0 + a, high=ti - a).sample()
+        tj_plus = tj + b
+        tj_minus = tj - b
+        # E1
+        with torch.no_grad():
+            ztj_minus = odeint(func=learnable_ode_func, y0=zt0,
+                               t=torch.tensor([t0, tj_minus]).to(t0.get_device()))
+            ztj_plus = odeint(func=learnable_ode_func, y0=zti,
+                              t=torch.tensor([ti, tj_plus]).to(t0.get_device()))
+        assert ztj_minus.requires_grad == False
+        assert ztj_plus.requires_grad == False
+        ztj_plus_hat = ztj_minus + learnable_ode_func(tj_minus, ztj_minus) * 2 * b
+        pred_loss = torch.mean(torch.abs(ztj_plus_hat - ztj_plus))
+        # M1
+        # pred_loss.backward()
+        # optimizer.step()
+
+        # E2
+        ti_minus = ti - b
+        with torch.no_grad():
+            zti_minus = odeint(func=learnable_ode_func, y0=zt0,
+                               t=torch.tensor([t0, ti_minus]).to(t0.get_device()))
+        assert zti_minus.requires_grad == False
+        zti_hat = zti_minus + learnable_ode_func(ti_minus, zti_minus) * b
+        pred_loss = torch.mean(torch.abs(zti_hat - zti))
+        pred_loss.backward()
+        optimizer.step()
+        loss_meter.update(pred_loss.item())
+        time_meter.update((datetime.now() - start_timestamp).seconds)
+
+
+def em_odeint_opt_block_v1(learnable_ode_func: torch.nn.Module, batch_y0: torch.Tensor,
+                           batch_ytN_true: torch.Tensor,
+                           batch_t: torch.Tensor, optimizer: torch.optim.Optimizer,
+                           loss_meter: RunningAverageMeter, time_meter: RunningAverageMeter,
+                           start_timestamp: datetime) -> None:
     # typical training steps
     optimizer.zero_grad()
     # fixme, I am doing it pairwise ( t0->ti where i = 1 ... N-1 ) to be comparable with EM-ODE
@@ -234,8 +282,10 @@ def em_odeint_opt_block(learnable_ode_func: torch.nn.Module, batch_y0: torch.Ten
 def get_ode_opt_block_fn(opt_method: str):
     if opt_method == 'bp':
         return total_trajectory_odeint_opt_block
-    elif opt_method == 'em':
-        return em_odeint_opt_block
+    elif opt_method == 'em1':
+        return em_odeint_opt_block_v1
+    elif opt_method == 'em2':
+        return em_odeint_opt_block_v2
     else:
         raise ValueError(f"Unknown ode-opt-method = {opt_method}")
 
@@ -243,7 +293,7 @@ def get_ode_opt_block_fn(opt_method: str):
 # TODO Debug
 if __name__ == '__main__':
     # params
-    ode_opt_method = "bp"
+    ode_opt_method = "em1"
     #
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger()
