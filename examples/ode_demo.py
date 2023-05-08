@@ -162,13 +162,15 @@ if __name__ == '__main__':
 
     func = ODEFunc().to(device)
 
-    optimizer = optim.RMSprop(func.parameters(), lr=1e-3)
+    # optimizer = optim.RMSprop(func.parameters(), lr=1e-3)
+    optimizer = optim.Adam(func.parameters(), lr=1e-3)
     end = time.time()
 
     time_meter = RunningAverageMeter(0.97)
 
     loss_meter = RunningAverageMeter(0.97)
     print(f'running with niters (epochs) = {args.niters}')
+    print(f'running with optimizer = {optimizer}')
     for itr in range(1, args.niters + 1):
         optimizer.zero_grad()
         batch_y0, batch_t, batch_y = get_batch()
@@ -185,6 +187,8 @@ if __name__ == '__main__':
                 pred_y = odeint(func, true_y0, t)
                 loss = torch.mean(torch.abs(pred_y - true_y))
                 print('Iter {:04d} | Total Loss {:.6f}'.format(itr, loss.item()))
+                print('Iter {:04d} | Running Loss {:.6f}'.format(itr, loss_meter.avg))
+                print('---')
                 visualize(true_y, pred_y, func, ii)
                 ii += 1
 

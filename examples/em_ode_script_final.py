@@ -198,7 +198,7 @@ def em_odeint_opt_block(learnable_ode_func: torch.nn.Module, batch_y0: torch.Ten
     #   it is not the most efficient way to do it.
     t0 = batch_t[0]
     N = len(batch_t)
-    slack = 0.01
+    slack = 0.05
     for i in range(1, N):
         zt0 = batch_y0
         ztN = batch_ytN_true[i]
@@ -252,14 +252,16 @@ if __name__ == '__main__':
 
     func = ODEFunc().to(device)
 
-    optimizer = optim.RMSprop(func.parameters(), lr=1e-3)
-    start_time = datetime.now()
+    # optimizer = optim.RMSprop(func.parameters(), lr=1e-3)
+    optimizer = optim.Adam(func.parameters(), lr=1e-4)
 
+    start_time = datetime.now()
     time_meter = RunningAverageMeter(0.97)
     loss_meter = RunningAverageMeter(0.97)
     #
     ode_opt_block_fn = get_ode_opt_block_fn(opt_method=ode_opt_method)
     logger.info(f'Using ode-opt-block : {ode_opt_block_fn.__name__}')
+    logger.info(f'Using optimizer = {optimizer}')
     for epoch in range(1, args.epochs + 1):
         batch_y0, batch_t, batch_ytN_true = \
             get_batch(true_y_trajectory=true_y_trajectory,
@@ -276,6 +278,8 @@ if __name__ == '__main__':
                 y_trajectory_pred_test = odeint(func, true_y0, t)
                 loss_to_report = torch.mean(torch.abs(y_trajectory_pred_test - true_y_trajectory))
                 logger.info('epoch {:04d} | Total Loss {:.6f}'.format(epoch, loss_to_report.item()))
+                logger.info('epoch {:04d} | Running Loss {:.6f}'.format(epoch, loss_meter.avg))
+                logger.info('---')
                 # visualize(true_y, pred_y, func, ii)
                 ii += 1
 
