@@ -18,7 +18,7 @@ parser.add_argument('--method', type=str, choices=['dopri5', 'adams'], default='
 parser.add_argument('--data_size', type=int, default=2000)
 parser.add_argument('--batch_time', type=int, default=10)
 parser.add_argument('--batch_size', type=int, default=20)
-parser.add_argument('--epochs', type=int, default=2000)
+parser.add_argument('--epochs', type=int, default=1000)
 parser.add_argument('--test_freq', type=int, default=10)
 parser.add_argument('--viz', action='store_true')
 parser.add_argument('--gpu', type=int, default=0)
@@ -33,10 +33,10 @@ args = parser.parse_args()
 from torchdiffeq import odeint
 
 # set random seed
-# SEED = 42
-# torch.manual_seed(SEED)
-# random.seed(SEED)
-# np.random.seed(SEED)
+SEED = 42
+torch.manual_seed(SEED)
+random.seed(SEED)
+np.random.seed(SEED)
 ###
 # fixme focus first on cpu
 device = torch.device('cuda:' + str(args.gpu) if torch.cuda.is_available() else 'cpu')
@@ -59,9 +59,9 @@ class FVDP(nn.Module):
         # https://www.johndcook.com/blog/2019/12/22/van-der-pol/
         super().__init__(*args, **kwargs)
         # fixme a = 0.0, no forced term
-        self.a = 0.0  # 1.2
+        self.a = 0.5  # 1.2
         self.omega = 2.0 * torch.pi / 10
-        self.mio = 0.5  # 8.53
+        self.mio = 0.8  # 8.53
 
     def forward(self, t: float, z: torch.Tensor):
         z1 = z[:, 0]
@@ -155,7 +155,7 @@ class NeuralNetOdeFunc(nn.Module):
         super(NeuralNetOdeFunc, self).__init__()
 
         self.net = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
+            nn.Linear(input_dim + 1, hidden_dim),
             nn.Tanh(),
             nn.Linear(hidden_dim, output_dim),
         )
@@ -165,8 +165,19 @@ class NeuralNetOdeFunc(nn.Module):
                 nn.init.normal_(m.weight, mean=0, std=0.1)
                 nn.init.constant_(m.bias, val=0)
 
-    def forward(self, t, y):
-        return self.net(y ** 3)
+    def forward(self, t: torch.Tensor, y: torch.Tensor):
+        if len(y.size()) == 2:
+            y_aug = torch.cat([y, t.view(1, 1)], dim=1)
+        elif len(y.size()) == 3:
+            b = y.size()[0]
+            if len(t.size()) == 0:
+                t_tensor = torch.tensor(t).repeat(b, 1, 1)
+            else:
+                t_tensor = t
+            y_aug = torch.cat([y, t_tensor], dim=2)
+        else:
+            raise ValueError(f'Unsupported y.size() = {y.size()}')
+        return self.net(y_aug)
 
 
 class RunningAverageMeter(object):
@@ -190,10 +201,8 @@ class RunningAverageMeter(object):
 
 def total_trajectory_odeint_opt_block(learnable_ode_func: torch.nn.Module, batch_y0: torch.Tensor,
                                       batch_ytN_true: torch.Tensor,
-                                      batch_t: torch.Tensor, optimizer: torch.optim.Optimizer,
-                                      loss_meter: RunningAverageMeter, time_meter: RunningAverageMeter,
-                                      start_timestamp: float, loss_time_tracker: List[Tuple],
-                                      scheduler: ReduceLROnPlateau) -> None:
+                                      batch_t: torch.Tensor,
+                                      optimizer: torch.optim.Optimizer) -> torch.Tensor:
     # typical training steps
     optimizer.zero_grad()
     # fixme, I am doing it pairwaise ( t0->ti where i = 1 ... N-1 ) to be comparable with EM-ODE
@@ -209,12 +218,40 @@ def total_trajectory_odeint_opt_block(learnable_ode_func: torch.nn.Module, batch
         loss_pred = torch.mean(torch.abs(batch_ytN_pred - batch_ytN_true_i))
         loss_pred.backward()
         optimizer.step()
-        # update training loss and running time stats
-        elapsed_time_milli_sec = round(time.time() - start_timestamp, 10) * 1000
-        time_meter.update(elapsed_time_milli_sec)
-        loss_meter.update(loss_pred.item())
         scheduler.step(loss_pred.item())
-        loss_time_tracker.append((elapsed_time_milli_sec, loss_meter.avg))
+        return loss_pred.item()
+
+
+def em_odeint_opt_block_v3(learnable_ode_func: torch.nn.Module, batch_y0: torch.Tensor,
+                           batch_ytN_true: torch.Tensor,
+                           batch_t: torch.Tensor, optimizer: torch.optim.Optimizer,
+                           loss_meter: RunningAverageMeter, time_meter: RunningAverageMeter,
+                           loss_time_tracker: List[Tuple], scheduler: ReduceLROnPlateau,
+                           start_timestamp: float) -> None:
+    """
+        fixme, the version that diverges. I dunno why yet
+        """
+    # typical training steps
+    optimizer.zero_grad()
+    # fixme, I am doing it pairwise ( t0->ti where i = 1 ... N-1 ) to be comparable with EM-ODE
+    #   it is not the most efficient way to do it.
+    t0 = batch_t[0]
+    zt0 = batch_y0
+    N = len(batch_t)
+    for i in range(1, N):
+        # ti = batch_t[i]
+        ztN = batch_ytN_true[i]
+        t_vals_forward = batch_t[:(i + 1)]
+        t_vals_backward = torch.flip(t_vals_forward, dims=[0])
+        with torch.no_grad():
+            z_trajectory_0 = odeint(func=learnable_ode_func, y0=zt0, t=t_vals_forward)
+            z_trajectory_N = odeint(func=learnable_ode_func, y0=ztN, t=t_vals_backward)
+        delta_t = t_vals_forward[1:] - t_vals_forward[:-1]
+        xx = z_trajectory_0[:-1]
+        yy = z_trajectory_N[1:]
+        yy = xx + learnable_ode_func()
+
+        x = 10
 
 
 def em_odeint_opt_block_v2(learnable_ode_func: torch.nn.Module, batch_y0: torch.Tensor,
@@ -264,21 +301,17 @@ def em_odeint_opt_block_v2(learnable_ode_func: torch.nn.Module, batch_y0: torch.
         pred_loss = torch.mean(torch.abs(zti_hat - zti))
         pred_loss.backward()
         optimizer.step()
-        loss_meter.update(pred_loss.item())
-        time_meter.update((datetime.now() - start_timestamp).seconds)
 
 
-def em_odeint_opt_block_v1(learnable_ode_func: torch.nn.Module, batch_y0: torch.Tensor,
-                           batch_ytN_true: torch.Tensor,
-                           batch_t: torch.Tensor, optimizer: torch.optim.Optimizer,
-                           loss_meter: RunningAverageMeter, time_meter: RunningAverageMeter,
-                           start_timestamp: float, loss_time_tracker: List[Tuple],
-                           scheduler: ReduceLROnPlateau) -> None:
+def em_euler_odeint_opt_block_v1(learnable_ode_func: torch.nn.Module, batch_y0: torch.Tensor,
+                                 batch_ytN_true: torch.Tensor,
+                                 batch_t: torch.Tensor, optimizer: torch.optim.Optimizer) -> torch.Tensor:
     """
     The version that converges
 
     """
     # typical training steps
+    ode_solver_method = "euler"
     optimizer.zero_grad()
     # fixme, I am doing it pairwise ( t0->ti where i = 1 ... N-1 ) to be comparable with EM-ODE
     #   it is not the most efficient way to do it.
@@ -294,50 +327,49 @@ def em_odeint_opt_block_v1(learnable_ode_func: torch.nn.Module, batch_y0: torch.
 
         batch_t_pair = torch.tensor([t0, ti_minus]).to(t0.get_device())
         with torch.no_grad():
-            ztN_minus = odeint(func=learnable_ode_func, y0=zt0, t=batch_t_pair)[-1]
+            ztN_minus = odeint(func=learnable_ode_func, y0=zt0, t=batch_t_pair, method=ode_solver_method)[-1]
         assert ztN_minus.requires_grad == False
         ztN_hat = ztN_minus + learnable_ode_func(ti_minus, ztN_minus) * slack
         # M1
         pred_loss = torch.mean(torch.abs(ztN - ztN_hat))
+        em1_block_loss = pred_loss.item()
         pred_loss.backward()
         optimizer.step()
-        loss_meter.update(pred_loss.item())
-        scheduler.step(pred_loss.item())
-
         # E2
         t0_plus = t0 + slack
         batch_t_pair = torch.tensor([ti, t0_plus]).to(t0.get_device())
         with torch.no_grad():
-            zt0_plus = odeint(func=learnable_ode_func, y0=ztN, t=batch_t_pair)
+            zt0_plus = odeint(func=learnable_ode_func, y0=ztN, t=batch_t_pair, method=ode_solver_method)[-1]
         assert zt0_plus.requires_grad == False
         zt0_hat = zt0_plus - learnable_ode_func(t0_plus, zt0_plus) * slack
         pred_loss = torch.mean(torch.abs(zt0 - zt0_hat))
         # M2
         pred_loss.backward()
         optimizer.step()
-        elapsed_time_milli_sec = round(time.time() - start_timestamp, 10) * 1000
-        time_meter.update(elapsed_time_milli_sec)
-        loss_time_tracker.append((elapsed_time_milli_sec, loss_meter.avg))
+        return em1_block_loss
 
 
 def get_ode_opt_block_fn(opt_method: str):
     if opt_method == 'bp':
         return total_trajectory_odeint_opt_block
     elif opt_method == 'em1':
-        return em_odeint_opt_block_v1
-    elif opt_method == 'em2':
-        return em_odeint_opt_block_v2
+        return em_euler_odeint_opt_block_v1
+    # em2 not working
+    # fixme , test em2 later or remove at all
+    # elif opt_method == 'em2':
+    #     return em_odeint_opt_block_v2
+    elif opt_method == 'em3':
+        return em_odeint_opt_block_v3
     else:
         raise ValueError(f"Unknown ode-opt-method = {opt_method}")
 
 
-# TODO Debug
 if __name__ == '__main__':
     # params
     ode_opt_method = "em1"
     true_ode_method = 'dopri5'
-    nn_hidden_dim = 50
-    init_lr = 2e-3
+    nn_hidden_dim = 200
+    init_lr = 5e-2
     min_lr = 1e-3
     scheduler_factor = 0.9
     #
@@ -377,11 +409,13 @@ if __name__ == '__main__':
             get_batch(true_y_trajectory=true_y_trajectory, true_t=true_t,
                       batch_time=args.batch_time, device=device)
         # start of opt-block
-        ode_opt_block_fn(learnable_ode_func=LearnableOdeFunc, batch_y0=batch_y0,
-                         batch_ytN_true=batch_ytN_true, batch_t=batch_t,
-                         optimizer=optimizer, loss_meter=loss_meter,
-                         time_meter=time_meter, start_timestamp=start_time,
-                         loss_time_tracker=loss_time_tracker, scheduler=scheduler)
+        block_loss = ode_opt_block_fn(learnable_ode_func=LearnableOdeFunc, batch_y0=batch_y0,
+                                      batch_ytN_true=batch_ytN_true, batch_t=batch_t,
+                                      optimizer=optimizer)
+        loss_meter.update(block_loss)
+        time_meter.update(time.time() - start_time)
+        scheduler.step(block_loss)
+
         # end of opt block
 
         if epoch % args.test_freq == 0:
@@ -391,6 +425,7 @@ if __name__ == '__main__':
                 logger.info('epoch {:04d} | Total Loss {:.6f}'.format(epoch, loss_to_report.item()))
                 logger.info('epoch {:04d} | Running Loss {:.6f}'.format(epoch, loss_meter.avg))
                 logger.info(f'optimizer current lr = {optimizer.param_groups[0]["lr"]}')
+                loss_time_tracker.append((time.time() - start_time, loss_meter.avg))
                 logger.info('---')
                 # visualize(true_y, pred_y, func, ii)
                 # ii += 1
