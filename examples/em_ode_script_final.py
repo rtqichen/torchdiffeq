@@ -435,11 +435,11 @@ if __name__ == '__main__':
     # Generate true y trajectory
     true_t = torch.linspace(0., 25., args.data_size).to(device)
     # i) dzdt = Ay**3bat
-    # true_y0 = torch.tensor([[2., 0.]]).to(device)
-    # true_ode_func = PolyOde3()
+    true_y0 = torch.tensor([[2., 0.]]).to(device)
+    true_ode_func = PolyOde3()
     # ii) dzdt = fvdp
-    true_y0 = torch.tensor([[1., 0.]]).to(device)
-    true_ode_func = FVDP()
+    # true_y0 = torch.tensor([[1., 0.]]).to(device)
+    # true_ode_func = FVDP()
     # ii) dzdt = lorenz
     # true_y0 = torch.tensor([[1., 0., 0.0]]).to(device)
     # true_ode_func = Lorenz3D()
