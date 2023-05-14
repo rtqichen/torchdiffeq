@@ -3,8 +3,9 @@ import os
 import argparse
 import pickle
 import random
+import sys
 import time
-from typing import Tuple, List
+from typing import Tuple
 
 import numpy as np
 from datetime import datetime
@@ -15,10 +16,11 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 parser = argparse.ArgumentParser('ODE demo')
 parser.add_argument('--method', type=str, choices=['dopri5', 'adams'], default='dopri5')
-parser.add_argument('--data_size', type=int, default=2000)
-parser.add_argument('--batch_time', type=int, default=10)
+parser.add_argument('--data_size', type=int, default=5000)
+parser.add_argument('--batch_time', type=int, default=20)
 parser.add_argument('--batch_size', type=int, default=20)
-parser.add_argument('--epochs', type=int, default=2000)
+parser.add_argument('--epochs', type=int, default=1e7)  # inf, make it time based
+parser.add_argument('--max_time_sec', type=int, default=60)
 parser.add_argument('--test_freq', type=int, default=10)
 parser.add_argument('--viz', action='store_true')
 parser.add_argument('--gpu', type=int, default=0)
@@ -45,13 +47,36 @@ device = torch.device('cuda:' + str(args.gpu) if torch.cuda.is_available() else 
 # device = torch.device('cpu')
 
 
-class PolyOde(nn.Module):
+class PolyOde3(nn.Module):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.true_A = torch.tensor([[-0.1, 2.0], [-2.0, -0.1]]).to(device)
 
     def forward(self, t, z):
         return torch.mm(z ** 3, self.true_A)
+
+
+class Lorenz5D(nn.Module):
+    # https://iopscience.iop.org/article/10.1088/2399-6528/aaa955/pdf
+    pass
+
+
+class Lorenz3D(nn.Module):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.sigma = 10
+        self.rho = 28
+        self.beta = 8.0 / 3
+
+    def forward(self, t, y):
+        y1 = y[:, 0]
+        y2 = y[:, 1]
+        y3 = y[:, 2]
+        y1_dot = (self.sigma * (y2 - y1)).view(-1, 1)
+        y2_dot = (y1 * (self.rho - y3) - y2).view(-1, 1)
+        y3_dot = (y1 * y2 - self.beta * y3).view(-1, 1)
+        y_dot = torch.cat(tensors=[y1_dot, y2_dot, y3_dot], dim=1)
+        return y_dot
 
 
 class FVDP(nn.Module):
@@ -151,9 +176,9 @@ if args.viz:
 
 class NeuralNetOdeFunc(nn.Module):
 
-    def __init__(self, input_dim: int, output_dim: int, hidden_dim: int):
+    def __init__(self, input_dim: int, output_dim: int, hidden_dim: int, input_power: int):
         super(NeuralNetOdeFunc, self).__init__()
-
+        self.input_power = input_power
         self.net = nn.Sequential(
             nn.Linear(input_dim + 1, hidden_dim),
             nn.Tanh(),
@@ -166,6 +191,8 @@ class NeuralNetOdeFunc(nn.Module):
                 nn.init.constant_(m.bias, val=0)
 
     def forward(self, t: torch.Tensor, y: torch.Tensor):
+        # https://github.com/rtqichen/torchdiffeq/blob/master/examples/ode_demo.py#L128
+        y = torch.pow(y, self.input_power)
         if len(y.size()) == 2:
             y_aug = torch.cat([y, t.view(1, 1)], dim=1)
         elif len(y.size()) == 3:
@@ -330,58 +357,51 @@ def em_euler_odeint_opt_block_v1(learnable_ode_func: torch.nn.Module, batch_y0: 
     The version that converges
 
     """
-    # typical training steps
-    ode_solver_method = "euler"
+    # ode_solver_method = "euler"
     optimizer.zero_grad()
     # fixme, I am doing it pairwise ( t0->ti where i = 1 ... N-1 ) to be comparable with EM-ODE
     #   it is not the most efficient way to do it.
     t0 = batch_t[0]
     N = len(batch_t)
-    slack_mean = 0.05
-    slack_half_window = 0.02
-    slack = torch.distributions.Uniform(slack_mean - slack_half_window, slack_mean + slack_half_window).sample()
+    # slack_mean = 0.1
+    # slack_half_window = 0.001
+    # slack = torch.distributions.Uniform(slack_mean - slack_half_window, slack_mean + slack_half_window).sample()
+    slack = 0.01
     block_losses = []
-    block_loss_for_opt = None
-    for i in range(1, N):
+    opt_block_losses = torch.tensor(0.0).to(device)
+    for i in range(4, N):
         zt0 = batch_y0
         ztN = batch_ytN_true[i]
-        ti = batch_t[i]
+        ti = torch.distributions.Uniform(batch_t[i] - 0.01, batch_t[i] + 0.01).sample()
         # E1
         ti_minus = ti - slack
-
         batch_t_pair = torch.tensor([t0, ti_minus]).to(t0.get_device())
         with torch.no_grad():
-            ztN_minus = odeint(func=learnable_ode_func, y0=zt0, t=batch_t_pair, method=ode_solver_method)[-1]
+            ztN_minus = odeint(func=learnable_ode_func, y0=zt0, t=batch_t_pair)[-1]
         assert ztN_minus.requires_grad == False
+        # E1
         ztN_hat = ztN_minus + learnable_ode_func(ti_minus, ztN_minus) * slack
-
+        # loss to report per block
         block_losses.append(torch.mean(torch.abs(ztN - ztN_hat)))
-
-        if block_loss_for_opt:
-            block_loss_for_opt += torch.sum((ztN - ztN_hat) ** 2)  # L2
-        else:
-            block_loss_for_opt = torch.sum((ztN - ztN_hat) ** 2)
         # M1
+        # opt_loss = torch.sum((ztN - ztN_hat) ** 2)
         # opt_loss.backward()
         # optimizer.step()
+        opt_block_losses += torch.sum((ztN - ztN_hat) ** 2)
+
         # E2
         t0_plus = t0 + slack
         batch_t_pair = torch.tensor([ti, t0_plus]).to(t0.get_device())
         with torch.no_grad():
-            zt0_plus = odeint(func=learnable_ode_func, y0=ztN, t=batch_t_pair, method=ode_solver_method)[-1]
+            zt0_plus = odeint(func=learnable_ode_func, y0=ztN, t=batch_t_pair)[-1]
         assert zt0_plus.requires_grad == False
         zt0_hat = zt0_plus - learnable_ode_func(t0_plus, zt0_plus) * slack
-
-        # opt_loss = torch.sum((zt0 - zt0_hat) ** 2)
-        if block_loss_for_opt:
-            block_loss_for_opt += torch.sum((zt0 - zt0_hat) ** 2)
-        else:
-            block_loss_for_opt += torch.sum((zt0 - zt0_hat) ** 2)
         # M2
-        #
+        # opt_loss = torch.sum((zt0 - zt0_hat) ** 2)
         # opt_loss.backward()
         # optimizer.step()
-    block_loss_for_opt.backward()
+        opt_block_losses += torch.sum((zt0 - zt0_hat) ** 2)
+    opt_block_losses.backward()
     optimizer.step()
     return torch.mean(torch.tensor(block_losses)).item()
 
@@ -405,8 +425,8 @@ if __name__ == '__main__':
     # params
     ode_opt_method = "em1"
     true_ode_method = 'dopri5'
-    nn_hidden_dim = 200
-    init_lr = 1e-2
+    nn_hidden_dim = 50
+    init_lr = 5e-3
     min_lr = 1e-3
     scheduler_factor = 0.8
     #
@@ -414,20 +434,32 @@ if __name__ == '__main__':
     logger = logging.getLogger()
     # Generate true y trajectory
     true_t = torch.linspace(0., 25., args.data_size).to(device)
-    # i) dzdt = Ay**3
-    # true_y0 = torch.tensor([[2., 0.]]).to(device) # for A.y**3
-    # true_ode_func = PolyOde()
+    # i) dzdt = Ay**3bat
+    # true_y0 = torch.tensor([[2., 0.]]).to(device)
+    # true_ode_func = PolyOde3()
     # ii) dzdt = fvdp
     true_y0 = torch.tensor([[1., 0.]]).to(device)
     true_ode_func = FVDP()
+    # ii) dzdt = lorenz
+    # true_y0 = torch.tensor([[1., 0., 0.0]]).to(device)
+    # true_ode_func = Lorenz3D()
+
     true_y_trajectory = get_true_y_trajectory(true_ode_func=true_ode_func,
                                               true_y0=true_y0, true_t=true_t,
                                               method=true_ode_method)
-    if isinstance(true_ode_func, (PolyOde, FVDP)):
+    if isinstance(true_ode_func, (PolyOde3, FVDP)):
         D = 2
+    elif isinstance(true_ode_func, Lorenz3D):
+        D = 3
     else:
         raise ValueError(f'Unknown true-ode model {true_ode_func}')
-    LearnableOdeFunc = NeuralNetOdeFunc(input_dim=D, output_dim=D, hidden_dim=nn_hidden_dim).to(device)
+    if isinstance(true_ode_func, (FVDP, Lorenz3D)):
+        input_power = 1
+    elif isinstance(true_ode_func, PolyOde3):
+        input_power = 3
+    logger.info(f'Data set = {type(true_ode_func).__name__}')
+    LearnableOdeFunc = NeuralNetOdeFunc(input_dim=D, output_dim=D, hidden_dim=nn_hidden_dim,
+                                        input_power=input_power).to(device)
 
     # optimizer = optim.RMSprop(func.parameters(), lr=1e-3)
     optimizer = optim.Adam(LearnableOdeFunc.parameters(), lr=init_lr)
@@ -441,7 +473,7 @@ if __name__ == '__main__':
     logger.info(f'Using ode-opt-block : {ode_opt_block_fn.__name__}')
     logger.info(f'Using optimizer = {optimizer}')
     logger.info(f'arg.data_size = {args}')
-    for epoch in range(1, args.epochs + 1):
+    for epoch in range(1, int(args.epochs) + 1):
         batch_y0, batch_t, batch_ytN_true = \
             get_batch(true_y_trajectory=true_y_trajectory, true_t=true_t,
                       batch_time=args.batch_time, device=device)
@@ -461,6 +493,10 @@ if __name__ == '__main__':
                 loss_to_report = torch.mean(torch.abs(y_trajectory_pred_test - true_y_trajectory))
                 logger.info('epoch {:04d} | Total Loss {:.6f}'.format(epoch, loss_to_report.item()))
                 logger.info('epoch {:04d} | Running Loss {:.6f}'.format(epoch, loss_meter.avg))
+                logger.info('epoch {:04d} | Running time {:.6f}'.format(epoch, time_meter.avg))
+                # fixme
+                if time_meter.avg > args.max_time_sec:
+                    break
                 logger.info(f'optimizer current lr = {optimizer.param_groups[0]["lr"]}')
                 loss_time_tracker.append((time.time() - start_time, loss_meter.avg))
                 logger.info('---')

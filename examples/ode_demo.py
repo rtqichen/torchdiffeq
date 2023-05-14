@@ -1,6 +1,5 @@
 import os
 import argparse
-import random
 import time
 import numpy as np
 
@@ -13,18 +12,13 @@ parser.add_argument('--method', type=str, choices=['dopri5', 'adams'], default='
 parser.add_argument('--data_size', type=int, default=1000)
 parser.add_argument('--batch_time', type=int, default=10)
 parser.add_argument('--batch_size', type=int, default=20)
-parser.add_argument('--niters', type=int, default=100000)
-parser.add_argument('--test_freq', type=int, default=10)
+parser.add_argument('--niters', type=int, default=2000)
+parser.add_argument('--test_freq', type=int, default=20)
 parser.add_argument('--viz', action='store_true')
 parser.add_argument('--gpu', type=int, default=0)
-parser.add_argument('--adjoint', action='store_true', default=False)
+parser.add_argument('--adjoint', action='store_true')
 args = parser.parse_args()
-# for reproducibility
-SEED = 42
-torch.manual_seed(SEED)
-random.seed(SEED)
-np.random.seed(SEED)
-###
+
 if args.adjoint:
     from torchdiffeq import odeint_adjoint as odeint
 else:
@@ -40,7 +34,7 @@ true_A = torch.tensor([[-0.1, 2.0], [-2.0, -0.1]]).to(device)
 class Lambda(nn.Module):
 
     def forward(self, t, y):
-        return torch.mm(y ** 3, true_A)
+        return torch.mm(y**3, true_A)
 
 
 with torch.no_grad():
@@ -48,8 +42,7 @@ with torch.no_grad():
 
 
 def get_batch():
-    s = torch.from_numpy(
-        np.random.choice(np.arange(args.data_size - args.batch_time, dtype=np.int64), args.batch_size, replace=False))
+    s = torch.from_numpy(np.random.choice(np.arange(args.data_size - args.batch_time, dtype=np.int64), args.batch_size, replace=False))
     batch_y0 = true_y[s]  # (M, D)
     batch_t = t[:args.batch_time]  # (T)
     batch_y = torch.stack([true_y[s + i] for i in range(args.batch_time)], dim=0)  # (T, M, D)
@@ -64,7 +57,6 @@ def makedirs(dirname):
 if args.viz:
     makedirs('png')
     import matplotlib.pyplot as plt
-
     fig = plt.figure(figsize=(12, 4), facecolor='white')
     ax_traj = fig.add_subplot(131, frameon=False)
     ax_phase = fig.add_subplot(132, frameon=False)
@@ -73,15 +65,15 @@ if args.viz:
 
 
 def visualize(true_y, pred_y, odefunc, itr):
+
     if args.viz:
+
         ax_traj.cla()
         ax_traj.set_title('Trajectories')
         ax_traj.set_xlabel('t')
         ax_traj.set_ylabel('x,y')
-        ax_traj.plot(t.cpu().numpy(), true_y.cpu().numpy()[:, 0, 0], t.cpu().numpy(), true_y.cpu().numpy()[:, 0, 1],
-                     'g-')
-        ax_traj.plot(t.cpu().numpy(), pred_y.cpu().numpy()[:, 0, 0], '--', t.cpu().numpy(),
-                     pred_y.cpu().numpy()[:, 0, 1], 'b--')
+        ax_traj.plot(t.cpu().numpy(), true_y.cpu().numpy()[:, 0, 0], t.cpu().numpy(), true_y.cpu().numpy()[:, 0, 1], 'g-')
+        ax_traj.plot(t.cpu().numpy(), pred_y.cpu().numpy()[:, 0, 0], '--', t.cpu().numpy(), pred_y.cpu().numpy()[:, 0, 1], 'b--')
         ax_traj.set_xlim(t.cpu().min(), t.cpu().max())
         ax_traj.set_ylim(-2, 2)
         ax_traj.legend()
@@ -102,7 +94,7 @@ def visualize(true_y, pred_y, odefunc, itr):
 
         y, x = np.mgrid[-2:2:21j, -2:2:21j]
         dydt = odefunc(0, torch.Tensor(np.stack([x, y], -1).reshape(21 * 21, 2)).to(device)).cpu().detach().numpy()
-        mag = np.sqrt(dydt[:, 0] ** 2 + dydt[:, 1] ** 2).reshape(-1, 1)
+        mag = np.sqrt(dydt[:, 0]**2 + dydt[:, 1]**2).reshape(-1, 1)
         dydt = (dydt / mag)
         dydt = dydt.reshape(21, 21, 2)
 
@@ -133,7 +125,8 @@ class ODEFunc(nn.Module):
                 nn.init.constant_(m.bias, val=0)
 
     def forward(self, t, y):
-        return self.net(y ** 3)
+        # return self.net(y**3)
+        return self.net(y)
 
 
 class RunningAverageMeter(object):
@@ -155,22 +148,19 @@ class RunningAverageMeter(object):
         self.val = val
 
 
-# TODO Debug
 if __name__ == '__main__':
 
     ii = 0
 
     func = ODEFunc().to(device)
 
-    # optimizer = optim.RMSprop(func.parameters(), lr=1e-3)
-    optimizer = optim.Adam(func.parameters(), lr=1e-3)
+    optimizer = optim.RMSprop(func.parameters(), lr=1e-3)
     end = time.time()
 
     time_meter = RunningAverageMeter(0.97)
 
     loss_meter = RunningAverageMeter(0.97)
-    print(f'running with niters (epochs) = {args.niters}')
-    print(f'running with optimizer = {optimizer}')
+
     for itr in range(1, args.niters + 1):
         optimizer.zero_grad()
         batch_y0, batch_t, batch_y = get_batch()
@@ -188,7 +178,6 @@ if __name__ == '__main__':
                 loss = torch.mean(torch.abs(pred_y - true_y))
                 print('Iter {:04d} | Total Loss {:.6f}'.format(itr, loss.item()))
                 print('Iter {:04d} | Running Loss {:.6f}'.format(itr, loss_meter.avg))
-                print('---')
                 visualize(true_y, pred_y, func, ii)
                 ii += 1
 
