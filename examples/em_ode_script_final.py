@@ -2,8 +2,7 @@ import logging
 import os
 import argparse
 import pickle
-import random
-import sys
+
 import time
 from typing import Tuple
 
@@ -27,7 +26,12 @@ parser.add_argument('--gpu', type=int, default=0)
 # fixme disable adjoint, focus on bp-gd
 # parser.add_argument('--adjoint', default=False,action='store_true')
 args = parser.parse_args()
+"""
+Related Refrences
+http://www1.ece.neu.edu/~erdogmus/publications/C041_ICANN2003_LinearLSlearning_Oscar.pdf 
+https://medium.com/@ngamzedeniz/how-to-avoid-local-minima-in-gradient-descent-neural-network-d0798f55e9ed 
 
+"""
 # fixme
 # if args.adjoint:
 #     from torchdiffeq import odeint_adjoint as odeint
