@@ -15,8 +15,8 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 parser = argparse.ArgumentParser('ODE demo')
 parser.add_argument('--method', type=str, choices=['dopri5', 'adams'], default='dopri5')
-parser.add_argument('--data_size', type=int, default=5000)
-parser.add_argument('--batch_time', type=int, default=20)
+parser.add_argument('--data_size', type=int, default=1000)
+parser.add_argument('--batch_time', type=int, default=60)
 parser.add_argument('--batch_size', type=int, default=20)
 parser.add_argument('--epochs', type=int, default=1e7)  # inf, make it time based
 parser.add_argument('--max_time_sec', type=int, default=60)
@@ -229,155 +229,158 @@ class RunningAverageMeter(object):
             self.avg = self.avg * self.momentum + val * (1 - self.momentum)
         self.val = val
 
+# TODO line by line debug
+def vanilla_odeint_opt_block(learnable_ode_func: torch.nn.Module, batch_y0: torch.Tensor,
+                             batch_ytN_true: torch.Tensor,
+                             batch_t: torch.Tensor,
+                             optimizer: torch.optim.Optimizer) -> torch.Tensor:
 
-def total_trajectory_odeint_opt_block(learnable_ode_func: torch.nn.Module, batch_y0: torch.Tensor,
-                                      batch_ytN_true: torch.Tensor,
-                                      batch_t: torch.Tensor,
-                                      optimizer: torch.optim.Optimizer) -> torch.Tensor:
-    # typical training steps
-    optimizer.zero_grad()
     # fixme, I am doing it pairwaise ( t0->ti where i = 1 ... N-1 ) to be comparable with EM-ODE
     #   it is not the most efficient way to do it.
     t0 = batch_t[0]
     N = len(batch_t)
     block_losses = []
-    block_loss_for_opt = None
-    for i in range(1, N):
+    N_start = 40
+    assert (N-N_start) > 10
+    # TODO , insert block timing
+    for i in range(N_start, N):
+        optimizer.zero_grad()
         ti = batch_t[i]
         batch_t_pair = torch.tensor([t0, ti]).to(t0.get_device())
         # now I am interested only in the final time point prediction, not the trajectory
         batch_ytN_pred = odeint(func=learnable_ode_func, y0=batch_y0, t=batch_t_pair)[-1]
         batch_ytN_true_i = batch_ytN_true[i]
-        if block_loss_for_opt:
-            block_loss_for_opt += torch.mean(torch.abs(batch_ytN_pred - batch_ytN_true_i))
-        else:
-            block_loss_for_opt = torch.mean(torch.abs(batch_ytN_pred - batch_ytN_true_i))
-        block_losses.append(torch.mean(torch.abs(batch_ytN_pred - batch_ytN_true_i)).item())
-    block_loss_for_opt.backward()
-    optimizer.step()
+        loss = torch.mean(torch.abs(batch_ytN_pred - batch_ytN_true_i))
+        block_losses.append(loss.item())
+        loss.backward()
+        optimizer.step()
     return torch.mean(torch.tensor(block_losses)).item()
 
 
-def em_odeint_opt_block_v3(learnable_ode_func: torch.nn.Module, batch_y0: torch.Tensor,
-                           batch_ytN_true: torch.Tensor,
-                           batch_t: torch.Tensor, optimizer: torch.optim.Optimizer) -> torch.Tensor:
-    """
-        fixme, the version that diverges. I dunno why yet
-        """
-    # typical training steps
-    ode_solver_method = 'euler'
-    optimizer.zero_grad()
-    # fixme, I am doing it pairwise ( t0->ti where i = 1 ... N-1 ) to be comparable with EM-ODE
-    #   it is not the most efficient way to do it.
-    # t0 = batch_t[0]
-    zt0 = batch_y0
-    N = len(batch_t)
-    em3_block_losses = []
-    for i in range(1, N):
-        # ti = batch_t[i]
-        ztN = batch_ytN_true[i]
-        t_vals_forward = batch_t[:(i + 1)]
-        t_vals_backward = torch.flip(t_vals_forward, dims=[0])
-        with torch.no_grad():
-            z_trajectory_forward = odeint(func=learnable_ode_func, y0=zt0, t=t_vals_forward, method=ode_solver_method)
-            z_trajectory_backward = odeint(func=learnable_ode_func, y0=ztN, t=t_vals_backward, method=ode_solver_method)
-            ztN_hat = t_vals_forward[-1]
-            em3_block_loss = torch.mean(torch.abs(ztN_hat - ztN)).item()
-            em3_block_losses.append(em3_block_loss)
-        xx = z_trajectory_forward[:-1]
-        yy = z_trajectory_backward[1:]
-        traj_len = xx.size()[0]
-        opt_loss = None  # torch.tensor([0])
-        for j in range(traj_len):
-            tj = t_vals_forward[j]
-            tj_plus_1 = t_vals_forward[j + 1]
-            delta_t_j = tj_plus_1 - tj
-            xx_j = xx[j]
-            yy_j = yy[j]
-            yy_j_hat = xx_j + learnable_ode_func(tj, xx_j) * delta_t_j
-            if opt_loss:
-                opt_loss += torch.sum((yy_j - yy_j_hat) ** 2)
-            else:
-                opt_loss = torch.sum((yy_j - yy_j_hat) ** 2)
-        opt_loss.backward()
-        optimizer.step()
+# FIXME
+# def em_odeint_opt_block_v3(learnable_ode_func: torch.nn.Module, batch_y0: torch.Tensor,
+#                            batch_ytN_true: torch.Tensor,
+#                            batch_t: torch.Tensor, optimizer: torch.optim.Optimizer) -> torch.Tensor:
+#     """
+#         fixme, the version that diverges. I dunno why yet
+#         """
+#     # typical training steps
+#     ode_solver_method = 'euler'
+#     optimizer.zero_grad()
+#     # fixme, I am doing it pairwise ( t0->ti where i = 1 ... N-1 ) to be comparable with EM-ODE
+#     #   it is not the most efficient way to do it.
+#     # t0 = batch_t[0]
+#     zt0 = batch_y0
+#     N = len(batch_t)
+#     em3_block_losses = []
+#     for i in range(1, N):
+#         # ti = batch_t[i]
+#         ztN = batch_ytN_true[i]
+#         t_vals_forward = batch_t[:(i + 1)]
+#         t_vals_backward = torch.flip(t_vals_forward, dims=[0])
+#         with torch.no_grad():
+#             z_trajectory_forward = odeint(func=learnable_ode_func, y0=zt0, t=t_vals_forward, method=ode_solver_method)
+#             z_trajectory_backward = odeint(func=learnable_ode_func, y0=ztN, t=t_vals_backward, method=ode_solver_method)
+#             ztN_hat = t_vals_forward[-1]
+#             em3_block_loss = torch.mean(torch.abs(ztN_hat - ztN)).item()
+#             em3_block_losses.append(em3_block_loss)
+#         xx = z_trajectory_forward[:-1]
+#         yy = z_trajectory_backward[1:]
+#         traj_len = xx.size()[0]
+#         opt_loss = None  # torch.tensor([0])
+#         for j in range(traj_len):
+#             tj = t_vals_forward[j]
+#             tj_plus_1 = t_vals_forward[j + 1]
+#             delta_t_j = tj_plus_1 - tj
+#             xx_j = xx[j]
+#             yy_j = yy[j]
+#             yy_j_hat = xx_j + learnable_ode_func(tj, xx_j) * delta_t_j
+#             if opt_loss:
+#                 opt_loss += torch.sum((yy_j - yy_j_hat) ** 2)
+#             else:
+#                 opt_loss = torch.sum((yy_j - yy_j_hat) ** 2)
+#         opt_loss.backward()
+#         optimizer.step()
+#
+#     return torch.mean(torch.tensor(em3_block_losses)).item()
 
-    return torch.mean(torch.tensor(em3_block_losses)).item()
+# FIXME, to remove this code, now we focus on the last-layer idea
+#   this code is kept for learning only, no use
+# def em_odeint_opt_block_v2(learnable_ode_func: torch.nn.Module, batch_y0: torch.Tensor,
+#                            batch_ytN_true: torch.Tensor,
+#                            batch_t: torch.Tensor, optimizer: torch.optim.Optimizer,
+#                            loss_meter: RunningAverageMeter, time_meter: RunningAverageMeter,
+#                            start_timestamp: datetime) -> None:
+#     """
+#     fixme, the version that diverges. I dunno why yet
+#     """
+#     # typical training steps
+#     optimizer.zero_grad()
+#     # fixme, I am doing it pairwise ( t0->ti where i = 1 ... N-1 ) to be comparable with EM-ODE
+#     #   it is not the most efficient way to do it.
+#     t0 = batch_t[0]
+#     zt0 = batch_y0
+#     N = len(batch_t)
+#     b = 0.001
+#     a = 0.002
+#     for i in range(4, N):
+#         ti = batch_t[i]
+#         zti = batch_ytN_true[i]
+#         tj = torch.distributions.Uniform(low=t0 + a, high=ti - a).sample()
+#         tj_plus = tj + b
+#         tj_minus = tj - b
+#         # E1
+#         with torch.no_grad():
+#             ztj_minus = odeint(func=learnable_ode_func, y0=zt0,
+#                                t=torch.tensor([t0, tj_minus]).to(t0.get_device()))
+#             ztj_plus = odeint(func=learnable_ode_func, y0=zti,
+#                               t=torch.tensor([ti, tj_plus]).to(t0.get_device()))
+#         assert ztj_minus.requires_grad == False
+#         assert ztj_plus.requires_grad == False
+#         ztj_plus_hat = ztj_minus + learnable_ode_func(tj_minus, ztj_minus) * 2 * b
+#         pred_loss = torch.mean(torch.abs(ztj_plus_hat - ztj_plus))
+#         # M1
+#         # pred_loss.backward()
+#         # optimizer.step()
+#
+#         # E2
+#         ti_minus = ti - b
+#         with torch.no_grad():
+#             zti_minus = odeint(func=learnable_ode_func, y0=zt0,
+#                                t=torch.tensor([t0, ti_minus]).to(t0.get_device()))
+#         assert zti_minus.requires_grad == False
+#         zti_hat = zti_minus + learnable_ode_func(ti_minus, zti_minus) * b
+#         pred_loss = torch.mean(torch.abs(zti_hat - zti))
+#         pred_loss.backward()
+#         optimizer.step()
 
-
-def em_odeint_opt_block_v2(learnable_ode_func: torch.nn.Module, batch_y0: torch.Tensor,
-                           batch_ytN_true: torch.Tensor,
-                           batch_t: torch.Tensor, optimizer: torch.optim.Optimizer,
-                           loss_meter: RunningAverageMeter, time_meter: RunningAverageMeter,
-                           start_timestamp: datetime) -> None:
-    """
-    fixme, the version that diverges. I dunno why yet
-    """
-    # typical training steps
-    optimizer.zero_grad()
-    # fixme, I am doing it pairwise ( t0->ti where i = 1 ... N-1 ) to be comparable with EM-ODE
-    #   it is not the most efficient way to do it.
-    t0 = batch_t[0]
-    zt0 = batch_y0
-    N = len(batch_t)
-    b = 0.001
-    a = 0.002
-    for i in range(4, N):
-        ti = batch_t[i]
-        zti = batch_ytN_true[i]
-        tj = torch.distributions.Uniform(low=t0 + a, high=ti - a).sample()
-        tj_plus = tj + b
-        tj_minus = tj - b
-        # E1
-        with torch.no_grad():
-            ztj_minus = odeint(func=learnable_ode_func, y0=zt0,
-                               t=torch.tensor([t0, tj_minus]).to(t0.get_device()))
-            ztj_plus = odeint(func=learnable_ode_func, y0=zti,
-                              t=torch.tensor([ti, tj_plus]).to(t0.get_device()))
-        assert ztj_minus.requires_grad == False
-        assert ztj_plus.requires_grad == False
-        ztj_plus_hat = ztj_minus + learnable_ode_func(tj_minus, ztj_minus) * 2 * b
-        pred_loss = torch.mean(torch.abs(ztj_plus_hat - ztj_plus))
-        # M1
-        # pred_loss.backward()
-        # optimizer.step()
-
-        # E2
-        ti_minus = ti - b
-        with torch.no_grad():
-            zti_minus = odeint(func=learnable_ode_func, y0=zt0,
-                               t=torch.tensor([t0, ti_minus]).to(t0.get_device()))
-        assert zti_minus.requires_grad == False
-        zti_hat = zti_minus + learnable_ode_func(ti_minus, zti_minus) * b
-        pred_loss = torch.mean(torch.abs(zti_hat - zti))
-        pred_loss.backward()
-        optimizer.step()
-
-
-def em_euler_odeint_opt_block_v1(learnable_ode_func: torch.nn.Module, batch_y0: torch.Tensor,
-                                 batch_ytN_true: torch.Tensor,
-                                 batch_t: torch.Tensor, optimizer: torch.optim.Optimizer) -> torch.Tensor:
+# TODO , line by line debug and insepction
+def ls_odeint_opt_block(learnable_ode_func: torch.nn.Module, batch_y0: torch.Tensor,
+                        batch_ytN_true: torch.Tensor,
+                        batch_t: torch.Tensor, optimizer: torch.optim.Optimizer) -> torch.Tensor:
+    # TODO , insert block timing
     """
     The version that converges
-
     """
-    # ode_solver_method = "euler"
-    optimizer.zero_grad()
-    # fixme, I am doing it pairwise ( t0->ti where i = 1 ... N-1 ) to be comparable with EM-ODE
+    # fixme, I am doing it pairwise ( t0->ti where i = 1 ... N-1 ) to be comparable with LS-GD-ODE
     #   it is not the most efficient way to do it.
     t0 = batch_t[0]
     N = len(batch_t)
     # slack_mean = 0.1
     # slack_half_window = 0.001
     # slack = torch.distributions.Uniform(slack_mean - slack_half_window, slack_mean + slack_half_window).sample()
-    slack = 0.01
+    slack = 0.05
     block_losses = []
-    opt_block_losses = torch.tensor(0.0).to(device)
-    for i in range(4, N):
+    #opt_block_losses = torch.tensor(0.0).to(device)
+    N_start = 40
+    assert (N - N_start) >10
+    iter_times = []
+    for i in range(N_start, N):
+        itr_start_time = time.time()
+        optimizer.zero_grad()
         zt0 = batch_y0
         ztN = batch_ytN_true[i]
         ti = torch.distributions.Uniform(batch_t[i] - 0.01, batch_t[i] + 0.01).sample()
-        # E1
         ti_minus = ti - slack
         batch_t_pair = torch.tensor([t0, ti_minus]).to(t0.get_device())
         with torch.no_grad():
@@ -388,10 +391,10 @@ def em_euler_odeint_opt_block_v1(learnable_ode_func: torch.nn.Module, batch_y0: 
         # loss to report per block
         block_losses.append(torch.mean(torch.abs(ztN - ztN_hat)))
         # M1
-        # opt_loss = torch.sum((ztN - ztN_hat) ** 2)
-        # opt_loss.backward()
-        # optimizer.step()
-        opt_block_losses += torch.sum((ztN - ztN_hat) ** 2)
+        opt_loss = torch.sum((ztN - ztN_hat) ** 2)
+        opt_loss.backward()
+        optimizer.step()
+        # opt_block_losses += torch.sum((ztN - ztN_hat) ** 2)
 
         # E2
         t0_plus = t0 + slack
@@ -401,37 +404,37 @@ def em_euler_odeint_opt_block_v1(learnable_ode_func: torch.nn.Module, batch_y0: 
         assert zt0_plus.requires_grad == False
         zt0_hat = zt0_plus - learnable_ode_func(t0_plus, zt0_plus) * slack
         # M2
-        # opt_loss = torch.sum((zt0 - zt0_hat) ** 2)
-        # opt_loss.backward()
-        # optimizer.step()
-        opt_block_losses += torch.sum((zt0 - zt0_hat) ** 2)
-    opt_block_losses.backward()
-    optimizer.step()
+        opt_loss = torch.sum((zt0 - zt0_hat) ** 2)
+        opt_loss.backward()
+        optimizer.step()
+        iter_time = time.time()-itr_start_time
+        iter_times.append(iter_time)
+    
     return torch.mean(torch.tensor(block_losses)).item()
 
 
 def get_ode_opt_block_fn(opt_method: str):
-    if opt_method == 'bp':
-        return total_trajectory_odeint_opt_block
-    elif opt_method == 'em1':
-        return em_euler_odeint_opt_block_v1
+    if opt_method == 'vanilla':
+        return vanilla_odeint_opt_block
+    elif opt_method == 'ls':
+        return ls_odeint_opt_block
     # em2 not working
     # fixme , test em2 later or remove at all
     # elif opt_method == 'em2':
     #     return em_odeint_opt_block_v2
-    elif opt_method == 'em3':
-        return em_odeint_opt_block_v3
+    # elif opt_method == 'em3':
+    #     return em_odeint_opt_block_v3
     else:
         raise ValueError(f"Unknown ode-opt-method = {opt_method}")
 
 
 if __name__ == '__main__':
     # params
-    ode_opt_method = "em1"
+    ode_opt_block_fn_name = "ls"
     true_ode_method = 'dopri5'
     nn_hidden_dim = 50
-    init_lr = 5e-3
-    min_lr = 1e-3
+    init_lr = 1e-3
+    min_lr = 1e-6
     scheduler_factor = 0.8
     #
     logging.basicConfig(level=logging.INFO)
@@ -467,13 +470,15 @@ if __name__ == '__main__':
 
     # optimizer = optim.RMSprop(func.parameters(), lr=1e-3)
     optimizer = optim.Adam(LearnableOdeFunc.parameters(), lr=init_lr)
+    # FIXME , SGD doesn't work
+    # optimizer = optim.SGD(LearnableOdeFunc.parameters(),lr=init_lr)
     scheduler = ReduceLROnPlateau(optimizer=optimizer, factor=scheduler_factor, min_lr=min_lr)
     start_time = time.time()
     time_meter = RunningAverageMeter(0.97)
     loss_meter = RunningAverageMeter(0.97)
     loss_time_tracker = []
     #
-    ode_opt_block_fn = get_ode_opt_block_fn(opt_method=ode_opt_method)
+    ode_opt_block_fn = get_ode_opt_block_fn(opt_method=ode_opt_block_fn_name)
     logger.info(f'Using ode-opt-block : {ode_opt_block_fn.__name__}')
     logger.info(f'Using optimizer = {optimizer}')
     logger.info(f'arg.data_size = {args}')
@@ -509,5 +514,5 @@ if __name__ == '__main__':
     logger.info('Training Finished')
     logger.info(f'{loss_time_tracker}')
     pickle.dump(obj=loss_time_tracker,
-                file=open(f"{ode_opt_method}_loss_time_tracker_{true_ode_func.__class__.__name__}.pkl", "wb"))
+                file=open(f"{ode_opt_block_fn_name}_loss_time_tracker_{true_ode_func.__class__.__name__}.pkl", "wb"))
     # end = time.time()
