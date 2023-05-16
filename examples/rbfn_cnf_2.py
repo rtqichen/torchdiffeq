@@ -16,11 +16,16 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
+SEED = 42
+torch.manual_seed(SEED)
+random.seed(SEED)
+np.random.seed(SEED)
+##
 parser = argparse.ArgumentParser()
 parser.add_argument('--adjoint', action='store_true')
 parser.add_argument('--viz', action='store_true')
 parser.add_argument('--niters', type=int, default=1000)
-parser.add_argument('--lr', type=float, default=1e-1)
+parser.add_argument('--lr', type=float, default=1e-2)
 parser.add_argument('--num_samples', type=int, default=512)
 parser.add_argument('--width', type=int, default=64)
 parser.add_argument('--hidden_dim', type=int, default=32)
@@ -29,15 +34,13 @@ parser.add_argument('--train_dir', type=str, default=None)
 parser.add_argument('--results_dir', type=str, default="./results")
 args = parser.parse_args()
 
-SEED = 42
-torch.manual_seed(SEED)
-random.seed(SEED)
-np.random.seed(SEED)
 if args.adjoint:
     from torchdiffeq import odeint_adjoint as odeint
 else:
     from torchdiffeq import odeint
 
+
+#############
 
 # RBF Layer
 # https://github.com/mlguy101/PyTorch-Radial-Basis-Function-Layer/blob/master/Torch%20RBF/torch_rbf.py
@@ -114,7 +117,7 @@ class RBFN_CNF(torch.nn.Module):
         #   Note : batch-norm layer is before the non-linearity
         # self.net = torch.nn.Sequential(self.rbf_module, self.linear_module)
         # init
-        torch.nn.init.normal_(self.W, mean=0, std=0.01)
+        torch.nn.init.normal_(self.W, mean=0, std=0.001)
         # torch.nn.init.constant_(self.linear_module.bias, val=0)
         # get numel learnable
         self.numel_learnable = 0
@@ -142,6 +145,8 @@ class RBFN_CNF(torch.nn.Module):
 
         return (dz_dt, dlogp_z_dt)
 
+
+#############
 
 class CNF(nn.Module):
     """Adapted from the NumPy implementation at:
@@ -248,7 +253,7 @@ class RunningAverageMeter(object):
 
 
 def get_batch(num_samples):
-    points, _ = make_circles(n_samples=num_samples, noise=0.06, factor=0.001)
+    points, _ = make_circles(n_samples=num_samples, noise=0.06, factor=0.5)
     x = torch.tensor(points).type(torch.float32).to(device)
     logp_diff_t1 = torch.zeros(num_samples, 1).type(torch.float32).to(device)
 
@@ -258,14 +263,13 @@ def get_batch(num_samples):
 if __name__ == '__main__':
     t0 = 0
     t1 = 10
-    device = torch.device('cuda:' + str(args.gpu)
-                          if torch.cuda.is_available() else 'cpu')
-    # device = torch.device('cpu')
+    # device = torch.device('cuda:' + str(args.gpu)
+    #                       if torch.cuda.is_available() else 'cpu')
+    device = torch.device("cpu")
 
     # model
-    func = CNF(in_out_dim=2, hidden_dim=args.hidden_dim, width=args.width).to(device)
-    #func = RBFN_CNF(in_dim=2, out_dim=2, n_centres_z=80, n_centres_t=80,
-    #                basis_fn_str="gaussian", device=device)
+    # func = CNF(in_out_dim=2, hidden_dim=args.hidden_dim, width=args.width).to(device)
+    func = RBFN_CNF(in_dim=2, out_dim=2, n_centres_t=80, n_centres_z=20, basis_fn_str="gaussian", device=device)
     n_scalars = 0
     for param in list(func.parameters()):
         n_scalars += param.numel()
@@ -304,11 +308,10 @@ if __name__ == '__main__':
             )
 
             z_t0, logp_diff_t0 = z_t[-1], logp_diff_t[-1]
-            # TODO, replace first term with least squares
-            #   or calculate .log_prob via least squares
+
             logp_x = p_z0.log_prob(z_t0).to(device) - logp_diff_t0.view(-1)
             loss = -logp_x.mean(0)
-            # TODO separate opt loss from loss to add to meter
+
             loss.backward()
             optimizer.step()
 
