@@ -1,6 +1,8 @@
 import os
 import argparse
 import glob
+import random
+
 from PIL import Image
 import numpy as np
 import matplotlib
@@ -15,7 +17,7 @@ import torch.optim as optim
 parser = argparse.ArgumentParser()
 parser.add_argument('--adjoint', action='store_true')
 parser.add_argument('--viz', action='store_true')
-parser.add_argument('--niters', type=int, default=1000)
+parser.add_argument('--niters', type=int, default=5000)
 parser.add_argument('--lr', type=float, default=1e-3)
 parser.add_argument('--num_samples', type=int, default=512)
 parser.add_argument('--width', type=int, default=64)
@@ -30,7 +32,11 @@ if args.adjoint:
 else:
     from torchdiffeq import odeint
 
-
+SEED = 42
+torch.manual_seed(SEED)
+random.seed(SEED)
+np.random.seed(SEED)
+#
 class CNF(nn.Module):
     """Adapted from the NumPy implementation at:
     https://gist.github.com/rtqichen/91924063aa4cc95e7ef30b3a5491cc52
@@ -54,7 +60,7 @@ class CNF(nn.Module):
             W, B, U = self.hyper_net(t)
 
             Z = torch.unsqueeze(z, 0).repeat(self.width, 1, 1)
-
+            K = torch.matmul(Z, W) + B
             h = torch.tanh(torch.matmul(Z, W) + B)
             dz_dt = torch.matmul(h, U).mean(0)
 

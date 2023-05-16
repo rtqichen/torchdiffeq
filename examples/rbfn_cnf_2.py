@@ -24,7 +24,7 @@ np.random.seed(SEED)
 parser = argparse.ArgumentParser()
 parser.add_argument('--adjoint', action='store_true')
 parser.add_argument('--viz', action='store_true')
-parser.add_argument('--niters', type=int, default=1000)
+parser.add_argument('--niters', type=int, default=5000)
 parser.add_argument('--lr', type=float, default=1e-2)
 parser.add_argument('--num_samples', type=int, default=512)
 parser.add_argument('--width', type=int, default=64)
@@ -89,65 +89,65 @@ class RBF_CNF(nn.Module):
         distances = (x - c).pow(2).sum(-1).pow(0.5) / torch.exp(self.log_sigmas).unsqueeze(0)
         return self.basis_func(distances)
 
-
-class RBFN_CNF(torch.nn.Module):
-    # https://en.wikipedia.org/wiki/Radial_basis_function_network
-    def __init__(self, in_dim, out_dim, n_centres_t, n_centres_z, basis_fn_str, device):
-        super().__init__()
-        self.basis_fn_str = basis_fn_str
-        self.out_dim = out_dim
-        self.in_dim = in_dim
-        basis_fn = basis_func_dict()[basis_fn_str]
-        self.n_centres_t = n_centres_t
-        self.n_centres_z = n_centres_z
-        self.rbf_module_z = RBF_CNF(in_features=in_dim, n_centres=self.n_centres_z,
-                                    basis_func=basis_fn, device=device)
-        self.rbf_module_t = RBF_CNF(in_features=1, n_centres=self.n_centres_t,
-                                    basis_func=basis_fn, device=device)
-        # rbf inited by its own reset fn
-        # self.input_norm_module = \
-        #     torch.nn.BatchNorm1d(num_features=in_dim, affine=True) if input_batch_norm \
-        #         else torch.nn.Identity()
-        # self.linear_module = torch.nn.Linear(in_features=n_centres, out_features=n_centres).to(device)
-        W = torch.nn.Parameter(torch.FloatTensor(out_dim, self.n_centres_t, self.n_centres_z + 1)).to(device)
-        self.register_parameter("W",W)
-        # TODO revisit theory for batch-norm
-        #   ref : https://machinelearningmastery.com/how-to-improve-neural-network-stability-and-modeling-performance-with-data-scaling/
-        #   ref : https://pytorch.org/docs/stable/generated/torch.nn.BatchNorm1d.html
-        #   ref-paper : https://arxiv.org/abs/1502.03167
-        #   Note : batch-norm layer is before the non-linearity
-        # self.net = torch.nn.Sequential(self.rbf_module, self.linear_module)
-        # init
-        torch.nn.init.normal_(self.W, mean=0, std=0.01)
-        # torch.nn.init.constant_(self.linear_module.bias, val=0)
-        # get numel learnable
-        self.numel_learnable = 0
-        param_list = list(self.named_parameters())
-        for name, param in param_list:
-            self.numel_learnable += torch.numel(param)
-
-    def forward(self, t: float, states: torch.Tensor):
-        z = states[0]
-        logp_z = states[1]
-        with torch.set_grad_enabled(True):
-            z.requires_grad_(True)
-            batchsize = z.shape[0]
-            t_tensor = torch.tensor(t).view(1, 1).to(device)
-            Phi_t = self.rbf_module_t(t_tensor).flatten()
-            W_t = torch.einsum('dij,i->dj', self.W, Phi_t)
-            Phi_z = self.rbf_module_z(z)
-            Phi_z = torch.cat([Phi_z, torch.ones(batchsize, 1).to(device)], dim=1)
-            dz_dt = torch.einsum('dj,bj->bd', W_t, Phi_z)
-            # dz_dt = torch.einsum('bi')
-            # t_tensor = torch.tensor(t).repeat(batchsize, 1).to(device)
-            # z_aug = torch.cat([z, t_tensor], dim=1)
-
-            dlogp_z_dt = -trace_df_dz(dz_dt, z).view(batchsize, 1)
-
-        return (dz_dt, dlogp_z_dt)
-
-
-#############
+#
+# class RBFN_CNF(torch.nn.Module):
+#     # https://en.wikipedia.org/wiki/Radial_basis_function_network
+#     def __init__(self, in_dim, out_dim, n_centres_z, basis_fn_str, device):
+#         super().__init__()
+#         self.basis_fn_str = basis_fn_str
+#         self.out_dim = out_dim
+#         self.in_dim = in_dim
+#         basis_fn = basis_func_dict()[basis_fn_str]
+#         # self.n_centres_t = n_centres_t
+#         self.n_centres_z = n_centres_z
+#         self.rbf_module_z = RBF_CNF(in_features=in_dim, n_centres=self.n_centres_z,
+#                                     basis_func=basis_fn, device=device)
+#         self.rbf_module_t = RBF_CNF(in_features=1, n_centres=(self.n_centres_z + 1) ** 2,
+#                                     basis_func=basis_fn, device=device)
+#         # rbf inited by its own reset fn
+#         # self.input_norm_module = \
+#         #     torch.nn.BatchNorm1d(num_features=in_dim, affine=True) if input_batch_norm \
+#         #         else torch.nn.Identity()
+#         # self.linear_module = torch.nn.Linear(in_features=n_centres, out_features=n_centres).to(device)
+#         W = torch.nn.Parameter(torch.FloatTensor(out_dim, self.n_centres_z + 1)).to(device)
+#         self.register_parameter("W", W)
+#         # TODO revisit theory for batch-norm
+#         #   ref : https://machinelearningmastery.com/how-to-improve-neural-network-stability-and-modeling-performance-with-data-scaling/
+#         #   ref : https://pytorch.org/docs/stable/generated/torch.nn.BatchNorm1d.html
+#         #   ref-paper : https://arxiv.org/abs/1502.03167
+#         #   Note : batch-norm layer is before the non-linearity
+#         # self.net = torch.nn.Sequential(self.rbf_module, self.linear_module)
+#         # init
+#         torch.nn.init.normal_(self.W, mean=0, std=0.01)
+#         # torch.nn.init.constant_(self.linear_module.bias, val=0)
+#         # get numel learnable
+#         self.numel_learnable = 0
+#         param_list = list(self.named_parameters())
+#         for name, param in param_list:
+#             self.numel_learnable += torch.numel(param)
+#
+#     def forward(self, t: float, states: torch.Tensor):
+#         z = states[0]
+#         logp_z = states[1]
+#         with torch.set_grad_enabled(True):
+#             z.requires_grad_(True)
+#             batchsize = z.shape[0]
+#             t_tensor = torch.tensor(t).view(1, 1).to(device)
+#             Phi_t = self.rbf_module_t(t_tensor).view(self.n_centres_z + 1, self.n_centres_z + 1)
+#             W_t = torch.einsum('ji,ii->ji', self.W, Phi_t)
+#             Phi_z = self.rbf_module_z(z)
+#             Phi_z = torch.cat([Phi_z, torch.ones(batchsize, 1).to(device)], dim=1)
+#             dz_dt = torch.einsum('dj,bj->bd', W_t, Phi_z)
+#             # dz_dt = torch.einsum('bi')
+#             # t_tensor = torch.tensor(t).repeat(batchsize, 1).to(device)
+#             # z_aug = torch.cat([z, t_tensor], dim=1)
+#
+#             dlogp_z_dt = -trace_df_dz(dz_dt, z).view(batchsize, 1)
+#
+#         return (dz_dt, dlogp_z_dt)
+#
+#
+# #############
 
 class CNF(nn.Module):
     """Adapted from the NumPy implementation at:
@@ -160,7 +160,9 @@ class CNF(nn.Module):
         self.hidden_dim = hidden_dim
         self.width = width
         self.hyper_net = HyperNetwork(in_out_dim, hidden_dim, width)
-
+        self.rbf_z = RBF_CNF(in_features=in_out_dim,n_centres=10,basis_func=basis_func_dict()["gaussian"],device=device)
+        self.linear_ = torch.nn.Linear(in_features=10,out_features=in_out_dim)
+        # self.net_ = torch.nn.Sequential(self.rbf_z,self.linear_)
     def forward(self, t, states):
         z = states[0]
         logp_z = states[1]
@@ -173,7 +175,7 @@ class CNF(nn.Module):
             W, B, U = self.hyper_net(t)
 
             Z = torch.unsqueeze(z, 0).repeat(self.width, 1, 1)
-
+            #Phi_Z = self.rbf_z(z)
             h = torch.tanh(torch.matmul(Z, W) + B)
             dz_dt = torch.matmul(h, U).mean(0)
 
@@ -205,33 +207,57 @@ class HyperNetwork(nn.Module):
 
         blocksize = width * in_out_dim
 
-        self.fc1 = nn.Linear(1, hidden_dim)
-        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
-        self.fc3 = nn.Linear(hidden_dim, 3 * blocksize + width)
+        # self.fc1 = nn.Linear(1, hidden_dim)
+        # self.fc2 = nn.Linear(hidden_dim, hidden_dim)
+        # self.fc3 = nn.Linear(hidden_dim, 3 * blocksize + width)
 
         self.in_out_dim = in_out_dim
         self.hidden_dim = hidden_dim
         self.width = width
         self.blocksize = blocksize
 
+        #
+        n_c = 30
+        self.W_ = torch.nn.Linear(in_features=n_c, out_features=self.blocksize)
+        self.W_rbf = RBF_CNF(in_features=1, n_centres=n_c,
+                             basis_func=basis_func_dict()["gaussian"], device=device)
+        self.W_rbfn = torch.nn.Sequential(self.W_rbf, self.W_)
+        #
+
+        self.U_ = torch.nn.Linear(in_features=n_c, out_features=blocksize)
+        self.U_rbf = RBF_CNF(in_features=1, n_centres=n_c,
+                             basis_func=basis_func_dict()["gaussian"], device=device)
+        self.U_rbfn = torch.nn.Sequential(self.U_rbf, self.U_)
+        #
+        self.B_ = torch.nn.Linear(in_features=n_c, out_features=width)
+        self.B_rbf = RBF_CNF(in_features=1, n_centres=n_c,
+                             basis_func=basis_func_dict()["gaussian"], device=device)
+        self.B_rbfn = torch.nn.Sequential(self.B_rbf, self.B_)
+        #
+
     def forward(self, t):
         # predict params
-        params = t.reshape(1, 1)
-        params = torch.tanh(self.fc1(params))
-        params = torch.tanh(self.fc2(params))
-        params = self.fc3(params)
+        # params = t.reshape(1, 1)
+        # params = torch.tanh(self.fc1(params))
+        # params = torch.tanh(self.fc2(params))
+        # params = self.fc3(params)
 
         # restructure
-        params = params.reshape(-1)
-        W = params[:self.blocksize].reshape(self.width, self.in_out_dim, 1)
+        # params = params.reshape(-1)
+        # W = params[:self.blocksize].reshape(self.width, self.in_out_dim, 1)
+        Wt = self.W_rbfn(t.reshape(1, 1)).reshape(self.width, self.in_out_dim, 1)
 
-        U = params[self.blocksize:2 * self.blocksize].reshape(self.width, 1, self.in_out_dim)
+        # U = params[self.blocksize:2 * self.blocksize].reshape(self.width, 1, self.in_out_dim)
 
-        G = params[2 * self.blocksize:3 * self.blocksize].reshape(self.width, 1, self.in_out_dim)
-        U = U * torch.sigmoid(G)
+        # G = params[2 * self.blocksize:3 * self.blocksize].reshape(self.width, 1, self.in_out_dim)
+        # U = U * torch.sigmoid(G)
 
-        B = params[3 * self.blocksize:].reshape(self.width, 1, 1)
-        return [W, B, U]
+        Ut = self.U_rbfn(t.reshape(1, 1))
+        Ut = Ut.reshape(self.width, 1,self.in_out_dim)
+
+        # B = params[3 * self.blocksize:].reshape(self.width, 1, 1)
+        Bt = self.B_rbfn(t.reshape(1, 1)).reshape(self.width, 1, 1)
+        return [Wt, Bt, Ut]
 
 
 class RunningAverageMeter(object):
@@ -269,10 +295,10 @@ if __name__ == '__main__':
     device = torch.device("cpu")
 
     # model
-    # func = CNF(in_out_dim=2, hidden_dim=args.hidden_dim, width=args.width).to(device)
-    func = RBFN_CNF(in_dim=2, out_dim=2, n_centres_t=200, n_centres_z=10, basis_fn_str="gaussian", device=device)
+    func = CNF(in_out_dim=2, hidden_dim=args.hidden_dim, width=args.width).to(device)
+    # func = RBFN_CNF(in_dim=2, out_dim=2, n_centres_z=50, basis_fn_str="gaussian", device=device)
     n_scalars = 0
-    for name,param in list(func.named_parameters()):
+    for name, param in list(func.named_parameters()):
         print(f"{name} = {param}")
         n_scalars += param.numel()
     print(f'func = {type(func).__name__}\n'
