@@ -31,7 +31,7 @@ parser.add_argument('--width', type=int, default=64)
 parser.add_argument('--hidden_dim', type=int, default=32)
 parser.add_argument('--gpu', type=int, default=0)
 parser.add_argument('--train_dir', type=str, default=None)
-parser.add_argument('--results_dir', type=str, default="./results")
+parser.add_argument('--results_dir', type=str, default="./resuflts")
 args = parser.parse_args()
 
 if args.adjoint:
@@ -109,7 +109,8 @@ class RBFN_CNF(torch.nn.Module):
         #     torch.nn.BatchNorm1d(num_features=in_dim, affine=True) if input_batch_norm \
         #         else torch.nn.Identity()
         # self.linear_module = torch.nn.Linear(in_features=n_centres, out_features=n_centres).to(device)
-        self.W = torch.nn.Parameter(torch.empty(out_dim, self.n_centres_t, self.n_centres_z + 1)).to(device)
+        W = torch.nn.Parameter(torch.FloatTensor(out_dim, self.n_centres_t, self.n_centres_z + 1)).to(device)
+        self.register_parameter("W",W)
         # TODO revisit theory for batch-norm
         #   ref : https://machinelearningmastery.com/how-to-improve-neural-network-stability-and-modeling-performance-with-data-scaling/
         #   ref : https://pytorch.org/docs/stable/generated/torch.nn.BatchNorm1d.html
@@ -117,7 +118,7 @@ class RBFN_CNF(torch.nn.Module):
         #   Note : batch-norm layer is before the non-linearity
         # self.net = torch.nn.Sequential(self.rbf_module, self.linear_module)
         # init
-        torch.nn.init.normal_(self.W, mean=0, std=0.001)
+        torch.nn.init.normal_(self.W, mean=0, std=0.01)
         # torch.nn.init.constant_(self.linear_module.bias, val=0)
         # get numel learnable
         self.numel_learnable = 0
@@ -269,9 +270,10 @@ if __name__ == '__main__':
 
     # model
     # func = CNF(in_out_dim=2, hidden_dim=args.hidden_dim, width=args.width).to(device)
-    func = RBFN_CNF(in_dim=2, out_dim=2, n_centres_t=80, n_centres_z=20, basis_fn_str="gaussian", device=device)
+    func = RBFN_CNF(in_dim=2, out_dim=2, n_centres_t=200, n_centres_z=10, basis_fn_str="gaussian", device=device)
     n_scalars = 0
-    for param in list(func.parameters()):
+    for name,param in list(func.named_parameters()):
+        print(f"{name} = {param}")
         n_scalars += param.numel()
     print(f'func = {type(func).__name__}\n'
           f'n_scalars = {n_scalars}')
