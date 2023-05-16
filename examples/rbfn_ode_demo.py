@@ -5,6 +5,7 @@ https://papers.nips.cc/paper_files/paper/2017/file/393c55aea738548df743a186d15f3
 http://www1.ece.neu.edu/~erdogmus/publications/C034_ESANN2003_Accelerating_Oscar.pdf
 https://www.jmlr.org/papers/volume7/castillo06a/castillo06a.pdf
 """
+import random
 
 # TODO
 #   1. read the two papers
@@ -40,6 +41,11 @@ import torch.optim as optim
 
 from examples.torch_rbf import basis_func_dict, RBF
 
+SEED = 42
+torch.manual_seed(SEED)
+random.seed(SEED)
+np.random.seed(SEED)
+##
 parser = argparse.ArgumentParser('ODE demo')
 parser.add_argument('--method', type=str, choices=['dopri5', 'adams'], default='dopri5')
 parser.add_argument('--data_size', type=int, default=1000)
