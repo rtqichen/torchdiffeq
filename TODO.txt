@@ -1,0 +1,15 @@
+## In-Progress
+* [Writing] Document the current RBFN HN implementation
+
+---
+## Backlog
+* [Experiment] Apply the idea of GD-LS to RBFN-ODE for simple Ay3 problem
+
+---
+## Done
+
+
+---
+
+## Notes
+

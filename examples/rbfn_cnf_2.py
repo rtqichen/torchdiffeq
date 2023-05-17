@@ -24,11 +24,11 @@ np.random.seed(SEED)
 parser = argparse.ArgumentParser()
 parser.add_argument('--adjoint', action='store_true')
 parser.add_argument('--viz', action='store_true')
-parser.add_argument('--niters', type=int, default=5000)
+parser.add_argument('--niters', type=int, default=10000)
 parser.add_argument('--lr', type=float, default=1e-2)
 parser.add_argument('--num_samples', type=int, default=512)
 parser.add_argument('--width', type=int, default=64)
-parser.add_argument('--hidden_dim', type=int, default=32)
+parser.add_argument('--hidden_dim', type=int, default=64)
 parser.add_argument('--gpu', type=int, default=0)
 parser.add_argument('--train_dir', type=str, default=None)
 parser.add_argument('--results_dir', type=str, default="./resuflts")
@@ -88,6 +88,7 @@ class RBF_CNF(nn.Module):
         c = self.centres.unsqueeze(0).expand(size)
         distances = (x - c).pow(2).sum(-1).pow(0.5) / torch.exp(self.log_sigmas).unsqueeze(0)
         return self.basis_func(distances)
+
 
 #
 # class RBFN_CNF(torch.nn.Module):
@@ -160,9 +161,12 @@ class CNF(nn.Module):
         self.hidden_dim = hidden_dim
         self.width = width
         self.hyper_net = HyperNetwork(in_out_dim, hidden_dim, width)
-        self.rbf_z = RBF_CNF(in_features=in_out_dim,n_centres=10,basis_func=basis_func_dict()["gaussian"],device=device)
-        self.linear_ = torch.nn.Linear(in_features=10,out_features=in_out_dim)
+        # FIXME, this one didn't work
+        # self.rbf_z = RBF_CNF(in_features=self.width * self.in_out_dim, n_centres=self.width * self.in_out_dim * 2,
+        #                      basis_func=basis_func_dict()["gaussian"], device=device)
+        # self.linear_ = torch.nn.Linear(in_features=10,out_features=in_out_dim)
         # self.net_ = torch.nn.Sequential(self.rbf_z,self.linear_)
+
     def forward(self, t, states):
         z = states[0]
         logp_z = states[1]
@@ -171,11 +175,9 @@ class CNF(nn.Module):
 
         with torch.set_grad_enabled(True):
             z.requires_grad_(True)
-
             W, B, U = self.hyper_net(t)
-
             Z = torch.unsqueeze(z, 0).repeat(self.width, 1, 1)
-            #Phi_Z = self.rbf_z(z)
+            # fixme, need to get rid of this tanh, but later
             h = torch.tanh(torch.matmul(Z, W) + B)
             dz_dt = torch.matmul(h, U).mean(0)
 
@@ -217,7 +219,7 @@ class HyperNetwork(nn.Module):
         self.blocksize = blocksize
 
         #
-        n_c = 30
+        n_c = 20
         self.W_ = torch.nn.Linear(in_features=n_c, out_features=self.blocksize)
         self.W_rbf = RBF_CNF(in_features=1, n_centres=n_c,
                              basis_func=basis_func_dict()["gaussian"], device=device)
@@ -253,7 +255,7 @@ class HyperNetwork(nn.Module):
         # U = U * torch.sigmoid(G)
 
         Ut = self.U_rbfn(t.reshape(1, 1))
-        Ut = Ut.reshape(self.width, 1,self.in_out_dim)
+        Ut = Ut.reshape(self.width, 1, self.in_out_dim)
 
         # B = params[3 * self.blocksize:].reshape(self.width, 1, 1)
         Bt = self.B_rbfn(t.reshape(1, 1)).reshape(self.width, 1, 1)
