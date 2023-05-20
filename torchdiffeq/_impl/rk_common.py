@@ -224,6 +224,9 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeEventODESolver):
     def _adaptive_step(self, rk_state):
         """Take an adaptive Runge-Kutta step to integrate the ODE."""
         y0, f0, _, t0, dt, interp_coeff = rk_state
+        if not torch.isfinite(dt):
+            dt = self.min_step
+        dt = dt.clamp(self.min_step, self.max_step)
         self.func.callback_step(t0, y0, dt)
         t1 = t0 + dt
         # dtypes: self.y0.dtype (probably float32); self.dtype (probably float64)
