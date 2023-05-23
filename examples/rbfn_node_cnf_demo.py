@@ -16,19 +16,19 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-SEED = 42
-torch.manual_seed(SEED)
-random.seed(SEED)
-np.random.seed(SEED)
+# SEED = 42
+# torch.manual_seed(SEED)
+# random.seed(SEED)
+# np.random.seed(SEED)
 ##
 parser = argparse.ArgumentParser()
 parser.add_argument('--adjoint', action='store_true')
 parser.add_argument('--viz', action='store_true')
-parser.add_argument('--niters', type=int, default=10000)
-parser.add_argument('--lr', type=float, default=1e-2)
+parser.add_argument('--niters', type=int, default=1000)
+parser.add_argument('--lr', type=float, default=1e-3)
 parser.add_argument('--num_samples', type=int, default=512)
 parser.add_argument('--width', type=int, default=64)
-parser.add_argument('--hidden_dim', type=int, default=64)
+parser.add_argument('--hidden_dim', type=int, default=32)
 parser.add_argument('--gpu', type=int, default=0)
 parser.add_argument('--train_dir', type=str, default=None)
 parser.add_argument('--results_dir', type=str, default="./resuflts")
@@ -44,6 +44,62 @@ else:
 
 # RBF Layer
 # https://github.com/mlguy101/PyTorch-Radial-Basis-Function-Layer/blob/master/Torch%20RBF/torch_rbf.py
+class RBFN_CNF(torch.nn.Module):
+    # https://en.wikipedia.org/wiki/Radial_basis_function_network
+    def __init__(self, in_dim, out_dim, n_centres_t, n_centres_z, basis_fn_str, device):
+        super().__init__()
+        self.basis_fn_str = basis_fn_str
+        self.out_dim = out_dim
+        self.in_dim = in_dim
+        basis_fn = basis_func_dict()[basis_fn_str]
+        self.n_centres_t = n_centres_t
+        self.n_centres_z = n_centres_z
+        self.rbf_module_z = RBF_CNF(in_features=in_dim, n_centres=self.n_centres_z,
+                                    basis_func=basis_fn, device=device)
+        self.rbf_module_t = RBF_CNF(in_features=1, n_centres=self.n_centres_t,
+                                    basis_func=basis_fn, device=device)
+        # rbf inited by its own reset fn
+        # self.input_norm_module = \
+        #     torch.nn.BatchNorm1d(num_features=in_dim, affine=True) if input_batch_norm \
+        #         else torch.nn.Identity()
+        # self.linear_module = torch.nn.Linear(in_features=n_centres, out_features=n_centres).to(device)
+        self.W = torch.nn.Parameter(torch.empty(out_dim, self.n_centres_t, self.n_centres_z + 1)).to(device)
+        # TODO revisit theory for batch-norm
+        #   ref : https://machinelearningmastery.com/how-to-improve-neural-network-stability-and-modeling-performance-with-data-scaling/
+        #   ref : https://pytorch.org/docs/stable/generated/torch.nn.BatchNorm1d.html
+        #   ref-paper : https://arxiv.org/abs/1502.03167
+        #   Note : batch-norm layer is before the non-linearity
+        # self.net = torch.nn.Sequential(self.rbf_module, self.linear_module)
+        # init
+        torch.nn.init.normal_(self.W, mean=0, std=0.01)
+        # torch.nn.init.constant_(self.linear_module.bias, val=0)
+        # get numel learnable
+        self.numel_learnable = 0
+        param_list = list(self.named_parameters())
+        for name, param in param_list:
+            self.numel_learnable += torch.numel(param)
+
+    def forward(self, t: float, states: torch.Tensor):
+        z = states[0]
+        logp_z = states[1]
+        with torch.set_grad_enabled(True):
+            z.requires_grad_(True)
+            batchsize = z.shape[0]
+            t_tensor = torch.tensor(t).view(1, 1).to(device)
+            Phi_t = self.rbf_module_t(t_tensor).flatten()
+            W_t = torch.einsum('dij,i->dj', self.W, Phi_t)
+            Phi_z = self.rbf_module_z(z)
+            Phi_z = torch.cat([Phi_z, torch.ones(batchsize, 1).to(device)], dim=1)
+            dz_dt = torch.einsum('dj,bj->bd', W_t, Phi_z)
+            # dz_dt = torch.einsum('bi')
+            # t_tensor = torch.tensor(t).repeat(batchsize, 1).to(device)
+            # z_aug = torch.cat([z, t_tensor], dim=1)
+
+            dlogp_z_dt = -trace_df_dz(dz_dt, z).view(batchsize, 1)
+
+        return (dz_dt, dlogp_z_dt)
+
+
 class RBF_CNF(nn.Module):
     """
     Transforms incoming data using a given radial basis function:
@@ -294,14 +350,16 @@ if __name__ == '__main__':
     t1 = 10
     # device = torch.device('cuda:' + str(args.gpu)
     #                       if torch.cuda.is_available() else 'cpu')
+    # fixme , gpu as a device messes up with scalar count for model ???
     device = torch.device("cpu")
 
     # model
+    # TODO CNF uses RBFN of hyper-network, don't use RBFN
     func = CNF(in_out_dim=2, hidden_dim=args.hidden_dim, width=args.width).to(device)
-    # func = RBFN_CNF(in_dim=2, out_dim=2, n_centres_z=50, basis_fn_str="gaussian", device=device)
+    # func = RBFN_CNF(in_dim=2, out_dim=2, n_centres_t=120, n_centres_z=20, basis_fn_str="gaussian", device=device)
     n_scalars = 0
     for name, param in list(func.named_parameters()):
-        print(f"{name} = {param}")
+        # print(f"{name} = {param}")
         n_scalars += param.numel()
     print(f'func = {type(func).__name__}\n'
           f'n_scalars = {n_scalars}')

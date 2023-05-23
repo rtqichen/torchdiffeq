@@ -17,11 +17,11 @@ import torch.optim as optim
 parser = argparse.ArgumentParser()
 parser.add_argument('--adjoint', action='store_true')
 parser.add_argument('--viz', action='store_true')
-parser.add_argument('--niters', type=int, default=10000)
+parser.add_argument('--niters', type=int, default=1000)
 parser.add_argument('--lr', type=float, default=1e-3)
 parser.add_argument('--num_samples', type=int, default=512)
 parser.add_argument('--width', type=int, default=64)
-parser.add_argument('--hidden_dim', type=int, default=64)
+parser.add_argument('--hidden_dim', type=int, default=32)
 parser.add_argument('--gpu', type=int, default=0)
 parser.add_argument('--train_dir', type=str, default=None)
 parser.add_argument('--results_dir', type=str, default="./results")
@@ -32,10 +32,10 @@ if args.adjoint:
 else:
     from torchdiffeq import odeint
 
-SEED = 42
-torch.manual_seed(SEED)
-random.seed(SEED)
-np.random.seed(SEED)
+# SEED = 42
+# torch.manual_seed(SEED)
+# random.seed(SEED)
+# np.random.seed(SEED)
 #
 class CNF(nn.Module):
     """Adapted from the NumPy implementation at:
@@ -155,6 +155,12 @@ if __name__ == '__main__':
 
     # model
     func = CNF(in_out_dim=2, hidden_dim=args.hidden_dim, width=args.width).to(device)
+    n_scalars = 0
+    for name, param in list(func.named_parameters()):
+        # print(f"{name} = {param}")
+        n_scalars += param.numel()
+    print(f'func = {type(func).__name__}\n'
+          f'n_scalars = {n_scalars}')
     optimizer = optim.Adam(func.parameters(), lr=args.lr)
     p_z0 = torch.distributions.MultivariateNormal(
         loc=torch.tensor([0.0, 0.0]).to(device),

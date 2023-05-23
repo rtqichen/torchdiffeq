@@ -149,7 +149,7 @@ def visualize(true_y, pred_y, odefunc, itr):
         plt.pause(0.001)
 
 
-class RBFN(torch.nn.Module):
+class RBFN_ode(torch.nn.Module):
     # https://en.wikipedia.org/wiki/Radial_basis_function_network
     def __init__(self, in_dim_1, in_dim_2, out_dim, n_centres, basis_fn_str, device):
         super().__init__()
@@ -241,7 +241,7 @@ if __name__ == '__main__':
     ii = 0
 
     # learnable_ode_func = NeuralNetOdeFunc(input_dim=2,out_dim=2,hidden_dim=100).to(device)
-    learnable_ode_func = RBFN(in_dim_1=1, in_dim_2=2, out_dim=2, n_centres=50, basis_fn_str="gaussian", device=device)
+    learnable_ode_func = RBFN_ode(in_dim_1=1, in_dim_2=2, out_dim=2, n_centres=50, basis_fn_str="gaussian", device=device)
     n_scalar_params = 0
     param_list = list(learnable_ode_func.parameters())
     for param in param_list:
