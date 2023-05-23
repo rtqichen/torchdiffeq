@@ -17,7 +17,7 @@ import torch.optim as optim
 parser = argparse.ArgumentParser()
 parser.add_argument('--adjoint', action='store_true')
 parser.add_argument('--viz', action='store_true')
-parser.add_argument('--niters', type=int, default=1000)
+parser.add_argument('--niters', type=int, default=2000)
 parser.add_argument('--lr', type=float, default=1e-3)
 parser.add_argument('--num_samples', type=int, default=512)
 parser.add_argument('--width', type=int, default=64)
