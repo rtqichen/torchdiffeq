@@ -1,13 +1,23 @@
 ## In-Progress
-* [Writing] Document the current RBFN HN implementation
+* [Writing] Document Theory of TTRBF and the current RBFN HN implementation
 
 ---
 ## Backlog
 * [Experiment] Apply the idea of GD-LS to RBFN-ODE for simple Ay3 problem
+* [Reading ] OT FLOW https://arxiv.org/abs/2006.00104
+* [Reading] Diffusion Normalizing Flow
+https://proceedings.neurips.cc/paper/2021/file/876f1f9954de0aa402d91bb988d12cd4-Paper.pdf
+* [Reading] Neural Flows: Efficient Alternative to Neural ODEs
+https://proceedings.neurips.cc/paper_files/paper/2021/hash/b21f9f98829dea9a48fd8aaddc1f159d-Abstract.html
+* [Reading] TO-FLOW: Efficient Continuous Normalizing Flows with Temporal Optimization adjoint with Moving Speed
+https://arxiv.org/abs/2203.10335
+* [Reading] Riemannian Continuous Normalizing Flows
+https://proceedings.neurips.cc/paper/2020/file/1aa3d9c6ce672447e1e5d0f1b5207e85-Paper.pdf
+* [Reading ] Low-rank tensor methods for partial differential equations
+https://www.cambridge.org/core/journals/acta-numerica/article/lowrank-tensor-methods-for-partial-differential-equations/06D2B93A3E4FB412CB13F8B107F399AB
 
 ---
 ## Done
-
 
 ---
 
