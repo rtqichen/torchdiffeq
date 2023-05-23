@@ -7,7 +7,8 @@ import torch.distributions
 from torch.nn import MSELoss
 from torch.utils.data import Dataset, DataLoader
 
-
+class RBFN(torch.nn.Module):
+    pass
 class NN2LayerModel(torch.nn.Module):
     def __init__(self, in_dim, out_dim, hidden_dim=50, *args, **kwargs):
         super().__init__(*args, **kwargs)
