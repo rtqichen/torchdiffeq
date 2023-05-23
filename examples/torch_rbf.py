@@ -33,13 +33,12 @@ class RBF(nn.Module):
             distances.
     """
 
-    def __init__(self, in_features_1, in_features_2, n_centres, basis_func, device):
+    def __init__(self, in_features, n_centres, basis_func):
         super(RBF, self).__init__()
-        self.in_features_1 = in_features_1
-        self.in_features_2 = in_features_2
+        self.in_features = in_features
         self.n_centers = n_centres
-        self.centres = nn.Parameter(torch.Tensor(n_centres, in_features_1*  in_features_2).to(device))
-        self.log_sigmas = nn.Parameter(torch.Tensor(n_centres).to(device))
+        self.centres = nn.Parameter(torch.Tensor(n_centres, in_features))
+        self.log_sigmas = nn.Parameter(torch.Tensor(n_centres))
         self.basis_func = basis_func
         self.reset_parameters()
 
@@ -48,11 +47,12 @@ class RBF(nn.Module):
         nn.init.constant_(self.log_sigmas, val=0)
 
     def forward(self, input):
-        size = (input.size(0), self.n_centers, self.in_features_1*self.in_features_2)
-        x = input.expand(size)
-        c = self.centres.expand(size)
+        size = (input.size(0), self.n_centers, self.in_features)
+        x = input.unsqueeze(1).expand(size)
+        c = self.centres.unsqueeze(0).expand(size)
         distances = (x - c).pow(2).sum(-1).pow(0.5) / torch.exp(self.log_sigmas).unsqueeze(0)
         return self.basis_func(distances)
+
 
 
 # RBFs
