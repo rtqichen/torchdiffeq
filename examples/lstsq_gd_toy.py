@@ -1,4 +1,5 @@
 import logging
+from argparse import ArgumentParser
 from typing import Callable
 
 import numpy as np
@@ -7,25 +8,45 @@ from torch.nn import MSELoss
 from torch.utils.data import Dataset, DataLoader
 
 
-class Model(torch.nn.Module):
-    def __init__(self, in_dim, out_dim, *args, **kwargs):
+class NN2LayerModel(torch.nn.Module):
+    def __init__(self, in_dim, out_dim, hidden_dim=50, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.W = torch.nn.Linear(in_dim, out_dim, bias=False)
+        self.hidden_dim = hidden_dim
+        self.linear1 = torch.nn.Linear(in_dim, hidden_dim)
+        self.linear2 = torch.nn.Linear(hidden_dim, out_dim)
+        self.activation = torch.nn.Tanh()
+        self.net = torch.nn.Sequential(self.linear1, self.activation, self.linear2)
 
     def forward(self, x):
-        return self.W(x)
+        return self.net(x)
+
+    def forward2(self, x):
+        y1 = self.linear1(x)
+        y2 = self.activation(y1)
+        return y2
+
+
+class LinearModel(torch.nn.Module):
+    def __init__(self, in_dim, out_dim, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.linear = torch.nn.Linear(in_dim, out_dim, bias=False)
+
+    def forward(self, x):
+        return self.linear(x)
 
 
 class LinearDataSet(Dataset):
     def __init__(self, N: int):
         self.N = N
         in_out_dim = 2
+        eps = 1e-4
+        pow = 2
         self.X = torch.distributions.Uniform(0, 1).sample(torch.Size([N, in_out_dim]))
         A = torch.tensor([[-1.0, 2.0], [1.0, -2.0]])
-        self.Y = torch.einsum('bj,ji->bi', self.X, A.T)
+        self.Y = torch.einsum('bj,ji->bi', torch.pow(self.X,pow), A.T)
         # sanity check
-        A_lstsq = torch.linalg.lstsq(self.X, self.Y).solution.T
-        x = 10
+        A_lstsq = torch.linalg.lstsq(torch.pow(self.X,pow), self.Y).solution.T
+        assert torch.norm(A-A_lstsq).item() <=eps
 
     def __len__(self):
         return self.N
@@ -83,7 +104,7 @@ def opt_gd_lstsq(model: torch.nn.Module, optimizer: torch.optim.Optimizer,
 
     # second phase, LSTSQ-Augmented GD
     epoch = 0
-    model_lstsq = Model(in_dim=2, out_dim=2)  # clone model
+    model_lstsq = NN2LayerModel(in_dim=2, out_dim=2)  # clone model
     while epoch < epochs2:
         batches_losses = []
         for i, (X, Y) in enumerate(data_loader2):
@@ -96,18 +117,29 @@ def opt_gd_lstsq(model: torch.nn.Module, optimizer: torch.optim.Optimizer,
             # Augmented update
             # TODO make it a method
             with torch.no_grad():  # lets play it safe !
-                weight_name = "W.weight"
+                weight_name = "linear2.weight"
+                bias_name = "linear2.bias"
                 loss_gd = loss_fn(model(X), Y)
                 # LSTSQ step
-                W_lstsq = torch.linalg.lstsq(X, Y).solution.T
+                Y2 = model.forward2(X)
+                b_size = Y2.size()[0]
+                Y2 = torch.cat([Y2, torch.ones(b_size).view(-1, 1)], dim=1)
+                Wnb_lstsq = torch.linalg.lstsq(Y2, Y).solution.T
+                W_lstsq = Wnb_lstsq[:, :model_lstsq.hidden_dim]
+                b_lstsq = Wnb_lstsq[:, model_lstsq.hidden_dim:]
+                #
                 model_lstsq.state_dict()[weight_name].data.copy_(W_lstsq)
+                model_lstsq.state_dict()[bias_name].data.copy_(b_lstsq.flatten())
                 loss_lstsq = loss_fn(model_lstsq(X), Y)
                 tot_u = loss_gd.item() + loss_lstsq.item()
                 u_lstsq = loss_gd.item() / tot_u
                 u_gd = loss_lstsq.item() / tot_u
                 W_gd = model.state_dict()[weight_name].data
+                b_gd = model.state_dict()[bias_name].data
                 W_new = u_gd * W_gd + u_lstsq * W_lstsq
+                b_new = u_gd * b_gd + u_lstsq * b_lstsq.view(-1)
                 model.state_dict()[weight_name].data.copy_(W_new)
+                model.state_dict()[bias_name].data.copy_(b_new)
                 loss_final = loss_fn(model(X), Y)
                 # assert loss_final.item() < loss_gd.item()
                 batches_losses.append(loss_final.item())
@@ -125,6 +157,14 @@ def opt_gd_lstsq(model: torch.nn.Module, optimizer: torch.optim.Optimizer,
 
 
 FORMAT = "[%(filename)s:%(lineno)s - %(funcName)5s() ] %(message)s"
+
+
+def get_parser():
+    parser = ArgumentParser()
+    parser.add_argument("--opt-method", type=str, required=True, choices=["gd", "lstsq-gd"], help='opt method')
+    return parser
+
+
 if __name__ == '__main__':
     epochs = int(1e8)  # approx. inf
     epochs1 = 10
@@ -139,14 +179,20 @@ if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO, format=FORMAT)
     logger = logging.getLogger()
     #
-    model = Model(in_dim=in_out_dim, out_dim=in_out_dim)
+    parser = get_parser()
+    args = parser.parse_args()
+    # model = LinearModel(in_dim=in_out_dim, out_dim=in_out_dim)
+    model = NN2LayerModel(in_dim=in_out_dim, out_dim=in_out_dim)
     optimizer = torch.optim.SGD(model.parameters(), lr=lr)
     ds = LinearDataSet(N=N)
+    data_loader = DataLoader(dataset=ds, batch_size=batch_size_1, shuffle=True)
     data_loader_1 = DataLoader(dataset=ds, batch_size=batch_size_1, shuffle=True)
     data_loader_2 = DataLoader(dataset=ds, batch_size=batch_size_2, shuffle=True)
     loss_fn = MSELoss()
-    # opt_gd(model=model, optimizer=optimizer, data_loader=data_loader,
-    #        loss_fn=loss_fn, epochs=epochs, loss_thr=loss_thr)
-    opt_gd_lstsq(model=model, optimizer=optimizer, data_loader1=data_loader_1, data_loader2=data_loader_2,
-                 epochs1=epochs1,
-                 epochs2=epochs2, loss_fn=loss_fn, loss_thr=loss_thr)
+    if args.opt_method == "gd":
+        opt_gd(model=model, optimizer=optimizer, data_loader=data_loader,
+               loss_fn=loss_fn, epochs=epochs, loss_thr=loss_thr)
+    elif args.opt_method == "lstsq-gd":
+        opt_gd_lstsq(model=model, optimizer=optimizer, data_loader1=data_loader_1,
+                     data_loader2=data_loader_2, epochs1=epochs1,
+                     epochs2=epochs2, loss_fn=loss_fn, loss_thr=loss_thr)
