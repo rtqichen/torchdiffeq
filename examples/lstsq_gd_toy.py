@@ -7,8 +7,9 @@ import torch.distributions
 from torch.nn import MSELoss
 from torch.utils.data import Dataset, DataLoader
 
-class RBFN(torch.nn.Module):
-    pass
+from examples.torch_rbf import RBFN
+
+
 class NN2LayerModel(torch.nn.Module):
     def __init__(self, in_dim, out_dim, hidden_dim=50, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -44,10 +45,10 @@ class LinearDataSet(Dataset):
         pow = 2
         self.X = torch.distributions.Uniform(0, 1).sample(torch.Size([N, in_out_dim]))
         A = torch.tensor([[-1.0, 2.0], [1.0, -2.0]])
-        self.Y = torch.einsum('bj,ji->bi', torch.pow(self.X,pow), A.T)
+        self.Y = torch.einsum('bj,ji->bi', torch.pow(self.X, pow), A.T)
         # sanity check
-        A_lstsq = torch.linalg.lstsq(torch.pow(self.X,pow), self.Y).solution.T
-        assert torch.norm(A-A_lstsq).item() <=eps
+        A_lstsq = torch.linalg.lstsq(torch.pow(self.X, pow), self.Y).solution.T
+        assert torch.norm(A - A_lstsq).item() <= eps
 
     def __len__(self):
         return self.N
@@ -176,6 +177,7 @@ if __name__ == '__main__':
     batch_size_2 = 128
     in_out_dim = 2
     loss_thr = 0.01
+    hidden_dim = 50
     #
     logging.basicConfig(level=logging.INFO, format=FORMAT)
     logger = logging.getLogger()
@@ -183,7 +185,8 @@ if __name__ == '__main__':
     parser = get_parser()
     args = parser.parse_args()
     # model = LinearModel(in_dim=in_out_dim, out_dim=in_out_dim)
-    model = NN2LayerModel(in_dim=in_out_dim, out_dim=in_out_dim)
+    # model = NN2LayerModel(in_dim=in_out_dim, out_dim=in_out_dim)
+    model = RBFN(in_dim=in_out_dim, n_centers=hidden_dim, out_dim=in_out_dim, basis_fn_str="gaussian")
     optimizer = torch.optim.SGD(model.parameters(), lr=lr)
     ds = LinearDataSet(N=N)
     data_loader = DataLoader(dataset=ds, batch_size=batch_size_1, shuffle=True)
