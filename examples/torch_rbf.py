@@ -6,6 +6,20 @@ import torch
 import torch.nn as nn
 
 
+class RBFN(nn.Module):
+    def __init__(self, in_dim, n_centers, out_dim, basis_fn_str, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.hidden_dim = n_centers
+        self.rbf = RBF(in_features=in_dim, n_centres=n_centers, basis_func=basis_func_dict()[basis_fn_str])
+        self.linear2 = torch.nn.Linear(in_features=n_centers, out_features=out_dim)
+        self.net = nn.Sequential(self.rbf, self.linear2)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.net(x)
+    def forward2(self, x:torch.Tensor)->torch.Tensor:
+        return self.rbf(x)
+
+
 # RBF Layer
 # https://github.com/mlguy101/PyTorch-Radial-Basis-Function-Layer/blob/master/Torch%20RBF/torch_rbf.py
 class RBF(nn.Module):
@@ -52,7 +66,6 @@ class RBF(nn.Module):
         c = self.centres.unsqueeze(0).expand(size)
         distances = (x - c).pow(2).sum(-1).pow(0.5) / torch.exp(self.log_sigmas).unsqueeze(0)
         return self.basis_func(distances)
-
 
 
 # RBFs
