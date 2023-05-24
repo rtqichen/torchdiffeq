@@ -16,8 +16,10 @@ class RBFN(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.net(x)
-    def forward2(self, x:torch.Tensor)->torch.Tensor:
-        return self.rbf(x)
+
+    def forward2(self, x: torch.Tensor) -> torch.Tensor:
+        y2 = self.rbf(x)
+        return y2
 
 
 # RBF Layer
@@ -65,7 +67,8 @@ class RBF(nn.Module):
         x = input.unsqueeze(1).expand(size)
         c = self.centres.unsqueeze(0).expand(size)
         distances = (x - c).pow(2).sum(-1).pow(0.5) / torch.exp(self.log_sigmas).unsqueeze(0)
-        return self.basis_func(distances)
+        y2 = self.basis_func(distances)
+        return y2
 
 
 # RBFs
