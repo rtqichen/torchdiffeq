@@ -21,6 +21,12 @@ class RBFN(nn.Module):
         y2 = self.rbf(x)
         return y2
 
+    def get_params_numel(self):
+        numel_val = 0
+        for name, param in self.named_parameters():
+            numel_val += param.numel()
+        return numel_val
+
 
 # RBF Layer
 # https://github.com/mlguy101/PyTorch-Radial-Basis-Function-Layer/blob/master/Torch%20RBF/torch_rbf.py

@@ -1,4 +1,5 @@
 import logging
+import random
 from argparse import ArgumentParser
 from typing import Callable
 
@@ -8,8 +9,12 @@ from sklearn.preprocessing import StandardScaler
 from torch.nn import MSELoss
 from torch.utils.data import Dataset, DataLoader
 from sklearn.datasets import fetch_california_housing, load_diabetes
-
 from examples.torch_rbf import RBFN
+
+SEED = 42
+torch.manual_seed(SEED)
+random.seed(SEED)
+np.random.seed(SEED)
 
 
 class NN2LayerModel(torch.nn.Module):
@@ -28,6 +33,12 @@ class NN2LayerModel(torch.nn.Module):
         y1 = self.linear1(x)
         y2 = self.activation(y1)
         return y2
+
+    def get_params_numel(self):
+        numel_val = 0
+        for name, param in self.named_parameters():
+            numel_val += param.numel()
+        return numel_val
 
 
 class PolyTrigActiv(Dataset):
@@ -124,6 +135,9 @@ class PolyDataSet(Dataset):
 def opt_gd(model: torch.nn.Module, optimizer: torch.optim.Optimizer,
            data_loader: DataLoader, epochs: int, loss_fn: Callable, loss_thr: float):
     train_method_str = "GD"
+    print(f'Opt-Method = {train_method_str}')
+    print(f'Model = {model}')
+    print(f'Model numel = {model.get_params_numel()}')
     logger = logging.getLogger()
     batches_losses = []
     epoch = 0
@@ -151,7 +165,8 @@ def opt_gd_lstsq(model: torch.nn.Module, optimizer: torch.optim.Optimizer,
                  data_loader1: DataLoader, data_loader2,
                  epochs1: int, epochs2, loss_fn: Callable, loss_thr: float):
     train_method_str = "GD-LSTSQ"
-
+    print(f'Opt-Method = {train_method_str}')
+    print(f'Model numel = {model.get_params_numel()}')
     logger = logging.getLogger()
     batches_losses = []
     epoch = 0
@@ -247,18 +262,19 @@ def get_parser():
 
 
 if __name__ == '__main__':
-    epochs = 1000
-    epochs1 = 300
-    epochs2 = 300
+    epochs = 2000
+    epochs1 = 500
+    epochs2 = 500
 
     assert (epochs1 + epochs2) <= epochs  # to bring value
     lr = 1e-3
     N = 1000
     batch_size_1 = 64
-    batch_size_2 = 128
+    batch_size_2 = 256
     loss_thr = 0.01
-    hidden_dim = 20
-    pow =3
+    rbfn_n_centers = 20
+    nn_hidden_dim = 50
+    pow = 5
     #
     logging.basicConfig(level=logging.INFO, format=FORMAT)
     logger = logging.getLogger()
@@ -269,7 +285,7 @@ if __name__ == '__main__':
     # data_set = PolyDataSet(N=N)
     # data_set = CaliforniaDataset()
     # data_set = DiabetesDataset()
-    data_set = PolyTrigActiv(N=N,pow=6)
+    data_set = PolyTrigActiv(N=N, pow=pow)
     assert hasattr(data_set, "in_dim")
     assert hasattr(data_set, "out_dim")
     data_loader = DataLoader(dataset=data_set, batch_size=batch_size_1, shuffle=True)
@@ -278,19 +294,19 @@ if __name__ == '__main__':
 
     ## Model
     # model = LinearModel(in_dim=in_out_dim, out_dim=in_out_dim)
-    # model = NN2LayerModel(in_dim=data_set.in_dim, out_dim=data_set.out_dim, hidden_dim=hidden_dim)
-    model = RBFN(in_dim=data_set.in_dim, n_centers=hidden_dim, out_dim=data_set.out_dim,
-                 basis_fn_str="gaussian")
+    nn2layer_model = NN2LayerModel(in_dim=data_set.in_dim, out_dim=data_set.out_dim, hidden_dim=nn_hidden_dim)
+    rbfn_model = RBFN(in_dim=data_set.in_dim, n_centers=rbfn_n_centers, out_dim=data_set.out_dim,
+                      basis_fn_str="gaussian")
     # optimizer
-    optimizer = torch.optim.SGD(model.parameters(), lr=lr)
+    nn_optimizer = torch.optim.SGD(nn2layer_model.parameters(), lr=lr)
+    rbfn_optimizer = torch.optim.SGD(rbfn_model.parameters(), lr=lr)
     loss_fn = MSELoss()
-    #
-    print(f'Model = {model}')
+    print(f'Opt-Method = {args.opt_method}')
     print(f'Dataset = {data_set}')
     if args.opt_method == "gd":
-        opt_gd(model=model, optimizer=optimizer, data_loader=data_loader,
+        opt_gd(model=nn2layer_model, optimizer=nn_optimizer, data_loader=data_loader,
                loss_fn=loss_fn, epochs=epochs, loss_thr=loss_thr)
     elif args.opt_method == "lstsq-gd":
-        opt_gd_lstsq(model=model, optimizer=optimizer, data_loader1=data_loader_1,
+        opt_gd_lstsq(model=rbfn_model, optimizer=rbfn_optimizer, data_loader1=data_loader_1,
                      data_loader2=data_loader_2, epochs1=epochs1,
                      epochs2=epochs2, loss_fn=loss_fn, loss_thr=loss_thr)
