@@ -49,14 +49,16 @@ np.random.seed(SEED)
 parser = argparse.ArgumentParser('ODE demo')
 parser.add_argument('--method', type=str, choices=['dopri5', 'adams'], default='dopri5')
 parser.add_argument('--data_size', type=int, default=1000)
-parser.add_argument('--batch_time', type=int, default=10)
-parser.add_argument('--batch_size', type=int, default=20)
+parser.add_argument('--batch_time', type=int, default=50)
+parser.add_argument('--batch_size', type=int, default=300)
 parser.add_argument('--niters', type=int, default=2000)
-parser.add_argument('--test_freq', type=int, default=1)
+parser.add_argument('--test_freq', type=int, default=10)
 parser.add_argument('--viz', action='store_true')
 parser.add_argument('--gpu', type=int, default=0)
 parser.add_argument('--adjoint', action='store_true', default=True)
-parser.add_argument('--model', type=str, choices=['nn', 'rbfn'], required=True)
+parser.add_argument('--opt-method', type=str, choices=['gd', 'lstsq-gd'], required=True)
+parser.add_argument('--lstsq-itr', type=int, default=100)
+# parser.add_argument('--model', type=str, choices=['nn', 'rbfn'], required=True)
 args = parser.parse_args()
 
 if args.adjoint:
@@ -233,6 +235,10 @@ class RBFN_ode(torch.nn.Module):
         y_hat = self.net(y).unsqueeze(1)
         return y_hat
 
+    def forward2(self, t, y):
+        y_hat = self.rbf_module(y).unsqueeze(1)
+        return y_hat
+
     def __str__(self):
         return f"\n***\n" \
                f"RBFN\n" \
@@ -249,7 +255,7 @@ class NeuralNetOdeFunc(nn.Module):
 
         self.net = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
-            nn.Tanh(),
+            nn.Sigmoid(),
             nn.Linear(hidden_dim, out_dim),
         )
 
@@ -259,7 +265,7 @@ class NeuralNetOdeFunc(nn.Module):
                 nn.init.constant_(m.bias, val=0)
 
     def forward(self, t, y):
-        y_hat = self.net(y)
+        y_hat = self.net(y**3)
         return y_hat
 
 
@@ -283,22 +289,34 @@ class RunningAverageMeter(object):
 
 
 if __name__ == '__main__':
+    print(f'args = \n{args}')
     # Params
     lr = 1e-3
     ##
     ii = 0
-    if args.model == 'rbfn':
-        learnable_ode_func = RBFN_ode(in_dim_1=1, in_dim_2=2, out_dim=2, n_centres=50, basis_fn_str="gaussian",
-                                      device=device)
-    elif args.model == 'nn':
-        learnable_ode_func = NeuralNetOdeFunc(input_dim=2, out_dim=2, hidden_dim=100).to(device)
-    print(f'args = \n{args}')
+    # if args.model == 'rbfn':
+    #     learnable_ode_func = RBFN_ode(in_dim_1=1, in_dim_2=2, out_dim=2, n_centres=50, basis_fn_str="gaussian",
+    #                                   device=device)
+    # elif args.model == 'nn':
+    #     learnable_ode_func = NeuralNetOdeFunc(input_dim=2, out_dim=2, hidden_dim=100).to(device)
+    nn_model = NeuralNetOdeFunc(input_dim=2, out_dim=2, hidden_dim=5).to(device)
+    rbfn_model = RBFN_ode(in_dim_1=1, in_dim_2=2, out_dim=2, n_centres=200, basis_fn_str="gaussian",
+                          device=device)
+
     n_scalar_params = 0
-    for name, param in learnable_ode_func.named_parameters():
+    for name, param in nn_model.named_parameters():
         n_scalar_params += param.numel()
-    print(f'learnable_ode_func = {type(learnable_ode_func).__name__} \n'
-          f'# of scalar params = {n_scalar_params}')
-    optimizer = optim.RMSprop(learnable_ode_func.parameters(), lr=1e-3)
+    for name, param in rbfn_model.named_parameters():
+        n_scalar_params += param.numel()
+    print(f'nn-rbfn numscaler = {n_scalar_params}')
+    # for name, param in learnable_ode_func.named_parameters():
+    #     n_scalar_params += param.numel()
+    # print(f'learnable_ode_func = {type(learnable_ode_func).__name__} \n'
+    #       f'# of scalar params = {n_scalar_params}')
+    # params = list(nn_model.parameters())
+    # params.extend(list(rbfn_model.parameters()))
+    optimizer_rbfn = optim.RMSprop(rbfn_model.parameters(), lr=1e-3)
+    optimizer_nn = optim.RMSprop(nn_model.parameters(), lr=1e-3)
     # optimizer = optim.Adam(learnable_ode_func.parameters(), lr=lr)
     end = time.time()
 
@@ -306,27 +324,83 @@ if __name__ == '__main__':
 
     loss_meter = RunningAverageMeter(0.97)
 
+    W_lstsq_prev = None
+    b_lstsq_prev = None
     for itr in range(1, args.niters + 1):
         # forward
+        delta_t_mean = 0.1
+        delta_t_half_window = 0.01
+        delta_t = torch.distributions. \
+            Uniform(delta_t_mean - delta_t_half_window, delta_t_mean + delta_t_half_window).sample()
         batch_y0, batch_t, batch_y = get_batch()
-        batch_t = torch.tensor([batch_t[0], batch_t[-1]])
-        pred_y = odeint(learnable_ode_func, batch_y0, batch_t).to(device)
-        # fixme, focus on last time-point
         batch_y = batch_y[-1]
-        pred_y = pred_y[-1]
+        # first segment of het. model
+        tN_minus = batch_t[-1] - delta_t
+        batch_t_minus = torch.tensor([batch_t[0], tN_minus])
+        pred_y_minus = odeint(nn_model, batch_y0, batch_t_minus).to(device)
+        pred_y_minus = pred_y_minus[-1]
+        # second segment of het. model
+        dydt = rbfn_model(tN_minus, pred_y_minus)
+        pred_y = pred_y_minus + dydt * delta_t
         loss = torch.mean(torch.abs(pred_y - batch_y))
-        optimizer.zero_grad()
+
+        # lstsq
+        if args.opt_method == 'lstsq-gd' and itr > args.lstsq_itr:
+            with torch.no_grad():
+                # save current model state ( got by GD)
+                W_gd = rbfn_model.state_dict()['linear_module.weight']
+                b_gd = rbfn_model.state_dict()['linear_module.bias']
+                # start lstsq calc.
+                pred_y_minus_2 = odeint(nn_model, batch_y0, batch_t_minus).to(device)[-1]
+                xx = rbfn_model.forward2(tN_minus, pred_y_minus_2).squeeze()
+                bsize = xx.size()[0]
+                xx = torch.cat([xx, torch.ones(bsize, device=device).view(-1, 1)], dim=1)
+                yy = ((batch_y - pred_y_minus_2) / delta_t).squeeze()
+                Wnb = torch.linalg.lstsq(xx, yy).solution.T
+                W_dim = Wnb.size()[1] - 1
+                b_lstsq = Wnb[:, -1]
+                W_lstsq = Wnb[:, :(W_dim)]
+                alpha = 0.9
+                if W_lstsq_prev is not None:
+                    W_lstsq_new = alpha * W_lstsq + (1 - alpha) * W_lstsq_prev
+                    b_lstsq_new = alpha * b_lstsq + (1 - alpha) * b_lstsq_prev
+                else:
+                    W_lstsq_new = W_lstsq
+                    b_lstsq_new = b_lstsq
+
+                W_lstsq_prev = W_lstsq
+                b_lstsq_prev = b_lstsq
+
+                rbfn_model.state_dict()['linear_module.weight'].data.copy_(W_lstsq_new.data)
+                rbfn_model.state_dict()['linear_module.bias'].data.copy_(b_lstsq_new.data)
+                dydt_lstsq = rbfn_model(tN_minus, pred_y_minus)
+                pred_y_lstsq = pred_y_minus + dydt_lstsq * delta_t
+                loss_lstsq = torch.mean(torch.abs(pred_y_lstsq - batch_y))
+                loss_lstsq.requires_grad = True
+                if loss_lstsq.item() < loss.item():
+                    pass  # loss = loss_lstsq
+        optimizer_nn.zero_grad()
         loss.backward()
-        optimizer.step()
+        optimizer_nn.step()
+        if itr <= args.lstsq_itr:
+            optimizer_rbfn.zero_grad()
+            optimizer_rbfn.step()
         time_meter.update(time.time() - end)
         loss_meter.update(loss.item())
         if itr % args.test_freq == 0:
             with torch.no_grad():
-                pred_y = odeint(learnable_ode_func, true_y0, t)
-                loss = torch.mean(torch.abs(pred_y - true_y))
-                print('Iter {:04d} | Total Loss {:.6f}'.format(itr, loss.item()))
-                print('Iter {:04d} | Running Loss {:.6f}'.format(itr, loss_meter.avg))
-                visualize(true_y, pred_y, learnable_ode_func, ii)
+                # fixme, fix the odeint call for heterogeneous model
+                # pred_y = odeint(nn_model, true_y0, t)
+                # loss = torch.mean(torch.abs(pred_y - true_y))
+                # print('Iter {:04d} | Total Loss {:.6f}'.format(itr, loss.item()))
+                if args.opt_method == 'lstsq-gd' and itr > args.lstsq_itr:
+                    opt_method_flag = "lstsq-gd"
+                else:
+                    opt_method_flag = "gd"
+                print(
+                    'Opt-Method : {} - Iter {:04d} | Running Loss {:.6f}'
+                    .format(opt_method_flag, itr, loss_meter.avg))
+                visualize(true_y, pred_y, nn_model, ii)
                 ii += 1
 
         end = time.time()
