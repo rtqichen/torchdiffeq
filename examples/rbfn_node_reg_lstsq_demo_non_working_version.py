@@ -50,9 +50,9 @@ parser = argparse.ArgumentParser('ODE demo')
 parser.add_argument('--method', type=str, choices=['dopri5', 'adams'], default='dopri5')
 parser.add_argument('--data_size', type=int, default=1000)
 parser.add_argument('--batch_time', type=int, default=10)
-parser.add_argument('--batch_size', type=int, default=20)
+parser.add_argument('--batch_size', type=int, default=10)
 parser.add_argument('--niters', type=int, default=2000)
-parser.add_argument('--test_freq', type=int, default=1)
+parser.add_argument('--test_freq', type=int, default=20)
 parser.add_argument('--viz', action='store_true')
 parser.add_argument('--gpu', type=int, default=0)
 parser.add_argument('--adjoint', action='store_true', default=True)
@@ -64,8 +64,8 @@ if args.adjoint:
 else:
     from torchdiffeq import odeint
 
-# device = torch.device('cuda:' + str(args.gpu) if torch.cuda.is_available() else 'cpu')
-device = torch.device('cpu')
+device = torch.device('cuda:' + str(args.gpu) if torch.cuda.is_available() else 'cpu')
+
 true_y0 = torch.tensor([[2., 0.]]).to(device)
 t = torch.linspace(0., 25., args.data_size).to(device)
 true_A = torch.tensor([[-0.1, 2.0], [-2.0, -0.1]]).to(device)
@@ -294,7 +294,8 @@ if __name__ == '__main__':
         learnable_ode_func = NeuralNetOdeFunc(input_dim=2, out_dim=2, hidden_dim=100).to(device)
     print(f'args = \n{args}')
     n_scalar_params = 0
-    for name, param in learnable_ode_func.named_parameters():
+    param_list = list(learnable_ode_func.parameters())
+    for param in param_list:
         n_scalar_params += param.numel()
     print(f'learnable_ode_func = {type(learnable_ode_func).__name__} \n'
           f'# of scalar params = {n_scalar_params}')
@@ -309,18 +310,28 @@ if __name__ == '__main__':
     for itr in range(1, args.niters + 1):
         # forward
         batch_y0, batch_t, batch_y = get_batch()
-        tN_minus = batch_t[-1]
-        batch_t = torch.tensor([batch_t[0], batch_t[-1]])
         pred_y = odeint(learnable_ode_func, batch_y0, batch_t).to(device)
         # fixme, focus on last time-point
         batch_y = batch_y[-1]
         pred_y = pred_y[-1]
         loss = torch.mean(torch.abs(pred_y - batch_y))
+        # fixme , just a dummy to test manual ode func update
+        #   https://discuss.pytorch.org/t/updatation-of-parameters-without-using-optimizer-step/34244/3
+        #   https://discuss.pytorch.org/t/what-is-the-recommended-way-to-re-assign-update-values-in-a-variable-or-tensor/6125/12
+        with torch.no_grad():
+            # TODO place holder for LS
+            for p in learnable_ode_func.parameters():
+                # TODO
+                #   https://discuss.pytorch.org/t/what-is-the-recommended-way-to-re-assign-update-values-in-a-variable-or-tensor/6125/13
+                #   look deeper
+                p.data.copy_(p.data)
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
+
         time_meter.update(time.time() - end)
         loss_meter.update(loss.item())
+
         if itr % args.test_freq == 0:
             with torch.no_grad():
                 pred_y = odeint(learnable_ode_func, true_y0, t)
