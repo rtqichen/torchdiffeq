@@ -8,21 +8,13 @@ https://www.jmlr.org/papers/volume7/castillo06a/castillo06a.pdf
 import random
 
 # TODO
-#   1. read the two papers
-#   - http://www1.ece.neu.edu/~erdogmus/publications/C041_ICANN2003_LinearLSlearning_Oscar.pdf
-#   - https://www.jmlr.org/papers/volume7/castillo06a/castillo06a.pdf
-#   2- quick idea of paper https://papers.nips.cc/paper_files/paper/2017/file/393c55aea738548df743a186d15f3bef-Paper.pdf
-#   3 -Finalize the EM-code for ode and documentation
-#       3.1 - finalize the update method
-#       3.2 - Apply Dopri step (Explicit RK Step)
-#       https://en.wikipedia.org/wiki/Runge%E2%80%93Kutta_methods#Explicit_Runge.E2.80.93Kutta_methods
-#       https://numerary.readthedocs.io/en/latest/dormand-prince-method.html
-#       https://core.ac.uk/download/pdf/237206461.pdf
-#   4 - visualize the loss landscape
-#   https://medium.com/mlearning-ai/visualising-the-loss-landscape-3a7bfa1c6fdf
-#   5 - ALS-only neural ODE coding starting
-#   6- Hybridize ALS-Adjoint based on Last-Layer- LS idea
-#   7- make last step as RK45 or dopri5
+#   1. IRLS https://en.wikipedia.org/wiki/Iteratively_reweighted_least_squares
+#   https://anilkeshwani.github.io/files/iterative-reweighted-least-squares-12.pdf
+#   https://arxiv.org/pdf/1411.5057.pdf
+#   http://users.stat.umn.edu/~sandy/courses/8053/handouts/robust.pdf (section 2.1)
+#   https://stats.stackexchange.com/questions/36250/definition-and-convergence-of-iteratively-reweighted-least-squares
+#   https://mediatum.ub.tum.de/doc/1401694/document.pdf
+#
 
 """
 Refs
