@@ -8,7 +8,11 @@ https://www.jmlr.org/papers/volume7/castillo06a/castillo06a.pdf
 import random
 
 # TODO
-#   1. IRLS https://en.wikipedia.org/wiki/Iteratively_reweighted_least_squares
+#   1. Recursive-Least-Squares
+#   (the good tutorial)
+#   http://pfister.ee.duke.edu/courses/ece586/ex_proj_2008.pdf
+#   https://faculty.sites.iastate.edu/jia/files/inline-files/recursive-least-squares.pdf
+#   2. IRLS https://en.wikipedia.org/wiki/Iteratively_reweighted_least_squares
 #   https://anilkeshwani.github.io/files/iterative-reweighted-least-squares-12.pdf
 #   https://arxiv.org/pdf/1411.5057.pdf
 #   http://users.stat.umn.edu/~sandy/courses/8053/handouts/robust.pdf (section 2.1)
