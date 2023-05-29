@@ -12,6 +12,8 @@ import random
 #   (the good tutorial)
 #   http://pfister.ee.duke.edu/courses/ece586/ex_proj_2008.pdf
 #   https://faculty.sites.iastate.edu/jia/files/inline-files/recursive-least-squares.pdf
+#   1.1 Dynamic Linear Regression
+#   https://openreview.net/pdf?id=zBhwgP7kt4
 #   2. IRLS https://en.wikipedia.org/wiki/Iteratively_reweighted_least_squares
 #   https://anilkeshwani.github.io/files/iterative-reweighted-least-squares-12.pdf
 #   https://arxiv.org/pdf/1411.5057.pdf
