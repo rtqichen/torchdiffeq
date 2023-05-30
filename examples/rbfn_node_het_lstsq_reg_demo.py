@@ -364,14 +364,15 @@ if __name__ == '__main__':
                 W_dim = Wnb.size()[1] - 1
                 b_lstsq = Wnb[:, -1]
                 W_lstsq = Wnb[:, :(W_dim)]
-                alpha = 0.9
+                alpha = 1.0 #
                 if W_lstsq_prev is not None:
                     W_lstsq_new = alpha * W_lstsq + (1 - alpha) * W_lstsq_prev
                     b_lstsq_new = alpha * b_lstsq + (1 - alpha) * b_lstsq_prev
                 else:
                     W_lstsq_new = W_lstsq
                     b_lstsq_new = b_lstsq
-
+                if W_lstsq_prev is not None:
+                    diff_ = torch.norm(W_lstsq_prev-W_lstsq) # fixme just of debugging
                 W_lstsq_prev = W_lstsq
                 b_lstsq_prev = b_lstsq
 
