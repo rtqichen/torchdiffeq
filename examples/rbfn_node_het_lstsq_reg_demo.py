@@ -10,23 +10,26 @@ import random
 # TODO
 #   0. Review the linear last step in
 #   http://www1.ece.neu.edu/~erdogmus/publications/C041_ICANN2003_LinearLSlearning_Oscar.pdf
-#   1. Recursive-Least-Squares
+#   1. The idea of Least-squares via Iterative methods (Test first on a simple problem)
+#   https://docs.scipy.org/doc/scipy/reference/generated/scipy.sparse.linalg.lsmr.html
+#   https://pytorch-minimize.readthedocs.io/en/latest/api/generated/torchmin.least_squares.html
+#   2. (RLS) Recursive-Least-Squares
 #   (the good tutorial)
 #   http://pfister.ee.duke.edu/courses/ece586/ex_proj_2008.pdf
 #   https://faculty.sites.iastate.edu/jia/files/inline-files/recursive-least-squares.pdf
-#   1.1 =================> Dynamic Linear Regression <=============
+#   3.1 =================> Dynamic Linear Regression <=============
 #   https://arxiv.org/pdf/2201.00228.pdf
 #   https://openreview.net/pdf?id=zBhwgP7kt4 ( this paper is good)
 #   ( in the paper relevant work it says Kalman Filter used to update linear regression coeff.)
 #
-#   2. IRLS https://en.wikipedia.org/wiki/Iteratively_reweighted_least_squares
+#   4. IRLS (Iterative Re-weighted Least Square Errors)
+#   https://en.wikipedia.org/wiki/Iteratively_reweighted_least_squares
 #   https://anilkeshwani.github.io/files/iterative-reweighted-least-squares-12.pdf
 #   https://arxiv.org/pdf/1411.5057.pdf
 #   http://users.stat.umn.edu/~sandy/courses/8053/handouts/robust.pdf (section 2.1)
 #   https://stats.stackexchange.com/questions/36250/definition-and-convergence-of-iteratively-reweighted-least-squares
 #   https://mediatum.ub.tum.de/doc/1401694/document.pdf
-#   3. Online Alternating Minimization
-#   http://proceedings.mlr.press/v97/choromanska19a/choromanska19a.pdf
+#
 
 """
 Refs
