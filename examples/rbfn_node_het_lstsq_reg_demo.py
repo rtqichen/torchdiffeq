@@ -8,8 +8,16 @@ https://www.jmlr.org/papers/volume7/castillo06a/castillo06a.pdf
 import random
 
 # TODO
-#   0. Review the linear last step in
+#   0. Review three papers applying linear system solving or NN training
+#   0.1 Linear Least-Squares Based Methods for Neural Networks Learning
+#       http://www1.ece.neu.edu/~erdogmus/publications/C041_ICANN2003_LinearLSlearning_Oscar.pdf
+#   0.2 A Very Fast Learning Method for Neural Networks Based on Sensitivity Analysis
+#       https://www.jmlr.org/papers/volume7/castillo06a/castillo06a.pdf
+#   0.3 A Global Optimum Approach for One-Layer Neural Networks ( can't find PDF)
+#       https://ieeexplore.ieee.org/document/6790325
 #   http://www1.ece.neu.edu/~erdogmus/publications/C041_ICANN2003_LinearLSlearning_Oscar.pdf
+#   A Very Fast Learning Method for Neural Networks Based on Sensitivity Analysis
+#   https://www.jmlr.org/papers/volume7/castillo06a/castillo06a.pdf
 #   1. The idea of Least-squares via Iterative methods (Test first on a simple problem)
 #   https://docs.scipy.org/doc/scipy/reference/generated/scipy.sparse.linalg.lsmr.html
 #   https://pytorch-minimize.readthedocs.io/en/latest/api/generated/torchmin.least_squares.html
@@ -17,18 +25,24 @@ import random
 #   (the good tutorial)
 #   http://pfister.ee.duke.edu/courses/ece586/ex_proj_2008.pdf
 #   https://faculty.sites.iastate.edu/jia/files/inline-files/recursive-least-squares.pdf
-#   3.1 =================> Dynamic Linear Regression <=============
+#   2.1 =================> Dynamic Linear Regression <=============
 #   https://arxiv.org/pdf/2201.00228.pdf
 #   https://openreview.net/pdf?id=zBhwgP7kt4 ( this paper is good)
 #   ( in the paper relevant work it says Kalman Filter used to update linear regression coeff.)
-#
-#   4. IRLS (Iterative Re-weighted Least Square Errors)
+#   3. IRLS (Iterative Re-weighted Least Square Errors)
 #   https://en.wikipedia.org/wiki/Iteratively_reweighted_least_squares
 #   https://anilkeshwani.github.io/files/iterative-reweighted-least-squares-12.pdf
 #   https://arxiv.org/pdf/1411.5057.pdf
 #   http://users.stat.umn.edu/~sandy/courses/8053/handouts/robust.pdf (section 2.1)
 #   https://stats.stackexchange.com/questions/36250/definition-and-convergence-of-iteratively-reweighted-least-squares
 #   https://mediatum.ub.tum.de/doc/1401694/document.pdf
+#   4. Linearized NN ( Neural Tangent Kernels)
+#   Lecture 5: NTK Origin and Derivation
+#   https://web.mit.edu/modernml/course/lectures/MLClassLecture5.pdf
+#   Fast Adaptation with Linearized Neural Networks
+#   https://arxiv.org/pdf/2103.01439.pdf
+#   Accelerated Linearized Laplace Approximation for Bayesian Deep Learning
+#   https://openreview.net/pdf?id=jftNpltMgz
 #
 
 """
