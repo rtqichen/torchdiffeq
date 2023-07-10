@@ -4,13 +4,14 @@ import glob
 from PIL import Image
 import numpy as np
 import matplotlib
+from torch.distributions import MultivariateNormal
+
 matplotlib.use('agg')
 import matplotlib.pyplot as plt
 from sklearn.datasets import make_circles
 import torch
 import torch.nn as nn
 import torch.optim as optim
-
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--adjoint', action='store_true')
@@ -35,6 +36,7 @@ class CNF(nn.Module):
     """Adapted from the NumPy implementation at:
     https://gist.github.com/rtqichen/91924063aa4cc95e7ef30b3a5491cc52
     """
+
     def __init__(self, in_out_dim, hidden_dim, width):
         super().__init__()
         self.in_out_dim = in_out_dim
@@ -80,6 +82,7 @@ class HyperNetwork(nn.Module):
     Adapted from the NumPy implementation at:
     https://gist.github.com/rtqichen/91924063aa4cc95e7ef30b3a5491cc52
     """
+
     def __init__(self, in_out_dim, hidden_dim, width):
         super().__init__()
 
@@ -134,11 +137,15 @@ class RunningAverageMeter(object):
 
 
 def get_batch(num_samples):
-    points, _ = make_circles(n_samples=num_samples, noise=0.06, factor=0.5)
-    x = torch.tensor(points).type(torch.float32).to(device)
+    # points, _ = make_circles(n_samples=num_samples, noise=0.06, factor=0.5)
+    # x = torch.tensor(points).type(torch.float32).to(device)
+    loc = torch.tensor([1., 2.])
+    scale_tril = torch.tril(input=torch.tensor([[0.1, 0.0], [0.3, 0.4]]))
+    mvn = MultivariateNormal(loc=loc, scale_tril=scale_tril)
+    x = mvn.sample(sample_shape=torch.Size([num_samples])).type(torch.float32).to(device)
     logp_diff_t1 = torch.zeros(num_samples, 1).type(torch.float32).to(device)
 
-    return(x, logp_diff_t1)
+    return (x, logp_diff_t1)
 
 
 if __name__ == '__main__':
@@ -167,6 +174,7 @@ if __name__ == '__main__':
             print('Loaded ckpt from {}'.format(ckpt_path))
 
     try:
+        running_losses = []
         for itr in range(1, args.niters + 1):
             optimizer.zero_grad()
 
@@ -188,11 +196,16 @@ if __name__ == '__main__':
 
             loss.backward()
             optimizer.step()
-
             loss_meter.update(loss.item())
+            running_losses.append(loss_meter.avg)
 
             print('Iter: {}, running avg loss: {:.4f}'.format(itr, loss_meter.avg))
-
+        plt.clf()
+        plt.xlabel('Iterations')
+        plt.ylabel('Running loss')
+        plt.title('Convergence for vanilla-CNF')
+        plt.plot(np.arange(1, len(running_losses) + 1), running_losses)
+        plt.savefig('vanilla-cnf-convergence.png')
     except KeyboardInterrupt:
         if args.train_dir is not None:
             ckpt_path = os.path.join(args.train_dir, 'ckpt.pth')
@@ -275,8 +288,8 @@ if __name__ == '__main__':
                 ax3.tricontourf(*z_t1.detach().cpu().numpy().T,
                                 np.exp(logp.detach().cpu().numpy()), 200)
 
-                plt.savefig(os.path.join(args.results_dir, f"cnf-viz-{int(t*1000):05d}.jpg"),
-                           pad_inches=0.2, bbox_inches='tight')
+                plt.savefig(os.path.join(args.results_dir, f"cnf-viz-{int(t * 1000):05d}.jpg"),
+                            pad_inches=0.2, bbox_inches='tight')
                 plt.close()
 
             img, *imgs = [Image.open(f) for f in sorted(glob.glob(os.path.join(args.results_dir, f"cnf-viz-*.jpg")))]
