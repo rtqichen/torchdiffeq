@@ -7,6 +7,7 @@ import matplotlib
 matplotlib.use('agg')
 import matplotlib.pyplot as plt
 from sklearn.datasets import make_circles
+from torch.distributions import MultivariateNormal
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -134,8 +135,12 @@ class RunningAverageMeter(object):
 
 
 def get_batch(num_samples):
-    points, _ = make_circles(n_samples=num_samples, noise=0.06, factor=0.5)
-    x = torch.tensor(points).type(torch.float32).to(device)
+    #points, _ = make_circles(n_samples=num_samples, noise=0.06, factor=0.5)
+    loc = torch.tensor([1.,2.])
+    scale_tril = torch.tril(input=torch.tensor([[0.1,0.0],[0.3,0.4]]))
+    mvn = MultivariateNormal(loc=loc,scale_tril=scale_tril)
+    x = mvn.sample(sample_shape=torch.Size([num_samples])).type(torch.float32).to(device)
+    # x = torch.tensor(points).type(torch.float32).to(device)
     logp_diff_t1 = torch.zeros(num_samples, 1).type(torch.float32).to(device)
 
     return(x, logp_diff_t1)
