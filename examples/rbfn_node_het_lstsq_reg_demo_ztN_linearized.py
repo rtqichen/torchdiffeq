@@ -15,7 +15,6 @@ import random
 #       https://www.jmlr.org/papers/volume7/castillo06a/castillo06a.pdf
 #   0.3 A Global Optimum Approach for One-Layer Neural Networks ( can't find PDF)
 #       https://ieeexplore.ieee.org/document/6790325
-#   http://www1.ece.neu.edu/~erdogmus/publications/C041_ICANN2003_LinearLSlearning_Oscar.pdf
 #   A Very Fast Learning Method for Neural Networks Based on Sensitivity Analysis
 #   https://www.jmlr.org/papers/volume7/castillo06a/castillo06a.pdf
 #   1. The idea of Least-squares via Iterative methods (Test first on a simple problem)
@@ -72,7 +71,7 @@ parser.add_argument('--method', type=str, choices=['dopri5', 'adams'], default='
 parser.add_argument('--data_size', type=int, default=1000)
 parser.add_argument('--batch_time', type=int, default=50)
 parser.add_argument('--batch_size', type=int, default=300)
-parser.add_argument('--niters', type=int, default=2000)
+parser.add_argument('--niters', type=int, default=1000)
 parser.add_argument('--test_freq', type=int, default=10)
 parser.add_argument('--viz', action='store_true')
 parser.add_argument('--gpu', type=int, default=0)
