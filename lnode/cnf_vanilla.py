@@ -1,10 +1,13 @@
+import logging
 import os
 import argparse
 import glob
+import random
+
 from PIL import Image
 import numpy as np
 import matplotlib
-from torch.distributions import MultivariateNormal
+from torch.distributions import MultivariateNormal, Normal
 
 matplotlib.use('agg')
 import matplotlib.pyplot as plt
@@ -13,6 +16,20 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
+# Set seed
+SEED = 42
+torch.manual_seed(SEED)
+random.seed(SEED)
+np.random.seed(SEED)
+# Set logger
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger()
+# Global Vars
+UNIFORM_LOW_MEAN = -0.1
+UNIFORM_HIGH_MEAN = 0.1
+UNIFORM_LOW_SCALE = 0.1
+UNIFORM_HIGH_SCALE = 0.5
+# set args parser
 parser = argparse.ArgumentParser()
 parser.add_argument('--adjoint', action='store_true')
 parser.add_argument('--viz', action='store_true')
@@ -136,15 +153,18 @@ class RunningAverageMeter(object):
         self.val = val
 
 
-def get_batch(num_samples):
+def get_batch(num_samples, **kwargs):
+    # original make-circle distribution
     # points, _ = make_circles(n_samples=num_samples, noise=0.06, factor=0.5)
     # x = torch.tensor(points).type(torch.float32).to(device)
-    loc = torch.tensor([1., 2.])
-    scale_tril = torch.tril(input=torch.tensor([[0.1, 0.0], [0.3, 0.4]]))
-    mvn = MultivariateNormal(loc=loc, scale_tril=scale_tril)
-    x = mvn.sample(sample_shape=torch.Size([num_samples])).type(torch.float32).to(device)
+    loc = kwargs['loc']
+    scale = kwargs['scale']
+    dim = loc.size()[0]
+    normal_dist = Normal(loc=loc, scale=scale)
+    x = normal_dist.sample(sample_shape=torch.Size([num_samples])).type(torch.float32).to(device)
+    logger.debug(
+        f'Sample distribution = {normal_dist}: mean = {loc}, cov_mtx = {scale}, sample_shape = {(num_samples, dim)}')
     logp_diff_t1 = torch.zeros(num_samples, 1).type(torch.float32).to(device)
-
     return (x, logp_diff_t1)
 
 
@@ -153,14 +173,19 @@ if __name__ == '__main__':
     t1 = 10
     device = torch.device('cuda:' + str(args.gpu)
                           if torch.cuda.is_available() else 'cpu')
-
+    in_out_dim = 4
+    # data
+    loc = torch.distributions.Uniform(low=UNIFORM_LOW_MEAN, high=UNIFORM_HIGH_MEAN) \
+        .sample(sample_shape=torch.Size([in_out_dim]))
+    scale = torch.distributions.Uniform(low=UNIFORM_LOW_SCALE, high=UNIFORM_HIGH_SCALE). \
+        sample(sample_shape=torch.Size([in_out_dim]))
+    logger.info(f'Target distribution : Gaussian with loc = {loc}, scale = {scale}')
     # model
-    func = CNF(in_out_dim=2, hidden_dim=args.hidden_dim, width=args.width).to(device)
+    func = CNF(in_out_dim=in_out_dim, hidden_dim=args.hidden_dim, width=args.width).to(device)
     optimizer = optim.Adam(func.parameters(), lr=args.lr)
     p_z0 = torch.distributions.MultivariateNormal(
-        loc=torch.tensor([0.0, 0.0]).to(device),
-        covariance_matrix=torch.tensor([[0.1, 0.0], [0.0, 0.1]]).to(device)
-    )
+        loc=torch.zeros(size=torch.Size([in_out_dim])).to(device),
+        covariance_matrix=torch.eye(n=in_out_dim).to(device))
     loss_meter = RunningAverageMeter()
 
     if args.train_dir is not None:
@@ -178,7 +203,7 @@ if __name__ == '__main__':
         for itr in range(1, args.niters + 1):
             optimizer.zero_grad()
 
-            x, logp_diff_t1 = get_batch(args.num_samples)
+            x, logp_diff_t1 = get_batch(num_samples=args.num_samples, loc=loc, scale=scale)
 
             z_t, logp_diff_t = odeint(
                 func,
@@ -198,8 +223,8 @@ if __name__ == '__main__':
             optimizer.step()
             loss_meter.update(loss.item())
             running_losses.append(loss_meter.avg)
-
-            print('Iter: {}, running avg loss: {:.4f}'.format(itr, loss_meter.avg))
+            if itr % 10 == 0:
+                logger.info('Iter: {}, running avg loss: {:.4f}'.format(itr, loss_meter.avg))
         plt.clf()
         plt.xlabel('Iterations')
         plt.ylabel('Running loss')
@@ -219,7 +244,7 @@ if __name__ == '__main__':
     if args.viz:
         viz_samples = 30000
         viz_timesteps = 41
-        target_sample, _ = get_batch(viz_samples)
+        target_sample, _ = get_batch(num_samples=viz_samples, loc=loc, scale=scale)
 
         if not os.path.exists(args.results_dir):
             os.makedirs(args.results_dir)
