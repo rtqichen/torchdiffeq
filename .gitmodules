@@ -1,0 +1,3 @@
+[submodule "scikit_tt"]
+	path = scikit_tt
+	url = git@github.com:mbaddar1/scikit_tt.git
