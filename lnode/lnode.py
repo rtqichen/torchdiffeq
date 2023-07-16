@@ -1,9 +1,12 @@
 import os
 import argparse
 import glob
+from typing import Union
+
 from PIL import Image
 import numpy as np
 import matplotlib
+
 matplotlib.use('agg')
 import matplotlib.pyplot as plt
 from sklearn.datasets import make_circles
@@ -11,7 +14,6 @@ from torch.distributions import MultivariateNormal
 import torch
 import torch.nn as nn
 import torch.optim as optim
-
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--adjoint', action='store_true')
@@ -36,6 +38,7 @@ class CNF(nn.Module):
     """Adapted from the NumPy implementation at:
     https://gist.github.com/rtqichen/91924063aa4cc95e7ef30b3a5491cc52
     """
+
     def __init__(self, in_out_dim, hidden_dim, width):
         super().__init__()
         self.in_out_dim = in_out_dim
@@ -81,6 +84,7 @@ class HyperNetwork(nn.Module):
     Adapted from the NumPy implementation at:
     https://gist.github.com/rtqichen/91924063aa4cc95e7ef30b3a5491cc52
     """
+
     def __init__(self, in_out_dim, hidden_dim, width):
         super().__init__()
 
@@ -134,31 +138,43 @@ class RunningAverageMeter(object):
         self.val = val
 
 
-def get_batch(num_samples):
-    #points, _ = make_circles(n_samples=num_samples, noise=0.06, factor=0.5)
-    loc = torch.tensor([1.,2.])
-    scale_tril = torch.tril(input=torch.tensor([[0.1,0.0],[0.3,0.4]]))
-    mvn = MultivariateNormal(loc=loc,scale_tril=scale_tril)
-    x = mvn.sample(sample_shape=torch.Size([num_samples])).type(torch.float32).to(device)
-    # x = torch.tensor(points).type(torch.float32).to(device)
-    logp_diff_t1 = torch.zeros(num_samples, 1).type(torch.float32).to(device)
-
-    return(x, logp_diff_t1)
+def get_batch(num_samples, distribution: Union[str, torch.distributions.Distribution]):
+    if isinstance(distribution, str) and distribution == 'circles':
+        points, _ = make_circles(n_samples=num_samples, noise=0.06, factor=0.5)
+        x = torch.tensor(points).type(torch.float32).to(device)
+        logp_diff_t1 = torch.zeros(num_samples, 1).type(torch.float32).to(device)
+        return (x, logp_diff_t1)
+    else:
+        raise ValueError(f'Unsupported data distribution')
+    # loc = torch.tensor([1., 2.])
+    # scale_tril = torch.tril(input=torch.tensor([[0.1, 0.0], [0.3, 0.4]]))
+    # mvn = MultivariateNormal(loc=loc, scale_tril=scale_tril)
+    # x = mvn.sample(sample_shape=torch.Size([num_samples])).type(torch.float32).to(device)
 
 
 if __name__ == '__main__':
+    # Config params
     t0 = 0
     t1 = 10
     device = torch.device('cuda:' + str(args.gpu)
                           if torch.cuda.is_available() else 'cpu')
-
-    # model
-    func = CNF(in_out_dim=2, hidden_dim=args.hidden_dim, width=args.width).to(device)
+    ## Target and base distributions
+    # -> Gaussian settings
+    # loc = torch.tensor([1.0, -2.0, -1.5, 1.8])
+    # scale = torch.diag(torch.tensor([0.5, 0.2, 0.1, 0.4]))
+    # in_out_dim = int(loc.size()[0])
+    # target_distribution = MultivariateNormal(loc=loc.to(device), covariance_matrix=scale.to(device))
+    # base_distribution = MultivariateNormal(loc=torch.zeros(in_out_dim), covariance_matrix=torch.eye(in_out_dim))
+    # -> circle settings
+    target_distribution = "circles"
+    in_out_dim = 2
+    base_distribution = MultivariateNormal(loc=torch.zeros(in_out_dim).to(device),
+                                           covariance_matrix=0.1 * torch.eye(in_out_dim).to(device))
+    # -------
+    # Model
+    func = CNF(in_out_dim=in_out_dim, hidden_dim=args.hidden_dim, width=args.width).to(device)
     optimizer = optim.Adam(func.parameters(), lr=args.lr)
-    p_z0 = torch.distributions.MultivariateNormal(
-        loc=torch.tensor([0.0, 0.0]).to(device),
-        covariance_matrix=torch.tensor([[0.1, 0.0], [0.0, 0.1]]).to(device)
-    )
+    p_z0 = base_distribution
     loss_meter = RunningAverageMeter()
 
     if args.train_dir is not None:
@@ -175,7 +191,7 @@ if __name__ == '__main__':
         for itr in range(1, args.niters + 1):
             optimizer.zero_grad()
 
-            x, logp_diff_t1 = get_batch(args.num_samples)
+            x, logp_diff_t1 = get_batch(num_samples=args.num_samples, distribution=target_distribution)
 
             z_t, logp_diff_t = odeint(
                 func,
@@ -277,8 +293,8 @@ if __name__ == '__main__':
                 ax3.tricontourf(*z_t1.detach().cpu().numpy().T,
                                 np.exp(logp.detach().cpu().numpy()), 200)
 
-                plt.savefig(os.path.join(args.results_dir, f"cnf-viz-{int(t*1000):05d}.jpg"),
-                           pad_inches=0.2, bbox_inches='tight')
+                plt.savefig(os.path.join(args.results_dir, f"cnf-viz-{int(t * 1000):05d}.jpg"),
+                            pad_inches=0.2, bbox_inches='tight')
                 plt.close()
 
             img, *imgs = [Image.open(f) for f in sorted(glob.glob(os.path.join(args.results_dir, f"cnf-viz-*.jpg")))]
