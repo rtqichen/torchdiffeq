@@ -1,11 +1,15 @@
+import logging
 import os
 import argparse
 import glob
-from typing import Union
+import pickle
+from datetime import datetime
+from typing import Union, Tuple, Any
 
 from PIL import Image
 import numpy as np
 import matplotlib
+from torch import Tensor
 
 matplotlib.use('agg')
 import matplotlib.pyplot as plt
@@ -15,7 +19,15 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
+# Global Variables
+DIM_DIST_MAP = {'circles': 2, 'gauss3d': 3, 'gauss4d': 4}
+# get logger
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger()
+# args
 parser = argparse.ArgumentParser()
+parser.add_argument('--t0', type=float, required=True)
+parser.add_argument('--t1', type=float, required=True)
 parser.add_argument('--adjoint', action='store_true')
 parser.add_argument('--viz', action='store_true')
 parser.add_argument('--niters', type=int, default=1000)
@@ -26,6 +38,9 @@ parser.add_argument('--hidden_dim', type=int, default=32)
 parser.add_argument('--gpu', type=int, default=0)
 parser.add_argument('--train_dir', type=str, default=None)
 parser.add_argument('--results_dir', type=str, default="./results")
+# LNODE
+parser.add_argument('--distribution', type=str, choices=['circles', 'gauss3d', 'gauss4d'])
+parser.add_argument('--trajectory-opt', type=str, choices=['vanilla', 'hybrid'])
 args = parser.parse_args()
 
 if args.adjoint:
@@ -138,38 +153,43 @@ class RunningAverageMeter(object):
         self.val = val
 
 
-def get_batch(num_samples, distribution: Union[str, torch.distributions.Distribution]):
-    if isinstance(distribution, str) and distribution == 'circles':
+def get_distribution(distribution_name: str) -> Union[torch.distributions.Distribution, None]:
+    dist = None
+    if distribution_name == 'circles':
+        return None
+    if distribution_name == 'gauss3d':
+        loc = torch.tensor([-2.0, 1.0, -5.0])
+        scale = torch.diag(torch.tensor([0.5, 0.2, 0.6]))
+        dist = MultivariateNormal(loc, scale)
+    elif distribution_name == 'gauss4d':
+        loc = torch.tensor([-2.0, 1.0, -5.0, 3.0])
+        scale = torch.diag(torch.tensor([0.5, 0.2, 0.6, 0.1]))
+        dist = MultivariateNormal(loc, scale)
+    return dist
+
+
+def get_batch(num_samples, distribution_name: str) -> tuple[Tensor | Any, Any]:
+    if distribution_name == 'circles':
         points, _ = make_circles(n_samples=num_samples, noise=0.06, factor=0.5)
         x = torch.tensor(points).type(torch.float32).to(device)
-        logp_diff_t1 = torch.zeros(num_samples, 1).type(torch.float32).to(device)
-        return (x, logp_diff_t1)
     else:
-        raise ValueError(f'Unsupported data distribution')
-    # loc = torch.tensor([1., 2.])
-    # scale_tril = torch.tril(input=torch.tensor([[0.1, 0.0], [0.3, 0.4]]))
-    # mvn = MultivariateNormal(loc=loc, scale_tril=scale_tril)
-    # x = mvn.sample(sample_shape=torch.Size([num_samples])).type(torch.float32).to(device)
+        distribution = get_distribution(distribution_name)
+        x = distribution.sample(num_samples)
+    logp_diff_t1 = torch.zeros(num_samples, 1).type(torch.float32).to(device)
+
+    return x, logp_diff_t1
 
 
 if __name__ == '__main__':
-    # Config params
-    t0 = 0
-    t1 = 10
+    # dump args
+    logger.info(f'Args:\n{args}')
+    # Configs
     device = torch.device('cuda:' + str(args.gpu)
                           if torch.cuda.is_available() else 'cpu')
-    ## Target and base distributions
-    # -> Gaussian settings
-    # loc = torch.tensor([1.0, -2.0, -1.5, 1.8])
-    # scale = torch.diag(torch.tensor([0.5, 0.2, 0.1, 0.4]))
-    # in_out_dim = int(loc.size()[0])
-    # target_distribution = MultivariateNormal(loc=loc.to(device), covariance_matrix=scale.to(device))
-    # base_distribution = MultivariateNormal(loc=torch.zeros(in_out_dim), covariance_matrix=torch.eye(in_out_dim))
-    # -> circle settings
-    target_distribution = "circles"
-    in_out_dim = 2
+    in_out_dim = DIM_DIST_MAP[args.distribution]
     base_distribution = MultivariateNormal(loc=torch.zeros(in_out_dim).to(device),
                                            covariance_matrix=0.1 * torch.eye(in_out_dim).to(device))
+    time_stamp = datetime.now().isoformat()
     # -------
     # Model
     func = CNF(in_out_dim=in_out_dim, hidden_dim=args.hidden_dim, width=args.width).to(device)
@@ -191,25 +211,37 @@ if __name__ == '__main__':
         for itr in range(1, args.niters + 1):
             optimizer.zero_grad()
 
-            x, logp_diff_t1 = get_batch(num_samples=args.num_samples, distribution=target_distribution)
-
-            z_t, logp_diff_t = odeint(
-                func,
-                (x, logp_diff_t1),
-                torch.tensor([t1, t0]).type(torch.float32).to(device),
-                atol=1e-5,
-                rtol=1e-5,
-                method='dopri5',
-            )
-
+            x, logp_diff_t1 = get_batch(num_samples=args.num_samples, distribution_name=args.distribution)
+            if args.trajectory_opt == 'vanilla':
+                z_t, logp_diff_t = odeint(
+                    func,
+                    (x, logp_diff_t1),
+                    torch.tensor([args.t1, args.t0]).type(torch.float32).to(device),
+                    atol=1e-5,
+                    rtol=1e-5,
+                    method='dopri5',
+                )
+            else:
+                raise ValueError(f"Unknown trajectory optimization : {args.trajectory_opt_method}")
             z_t0, logp_diff_t0 = z_t[-1], logp_diff_t[-1]
 
             logp_x = p_z0.log_prob(z_t0).to(device) - logp_diff_t0.view(-1)
             loss = -logp_x.mean(0)
-            loss.backward()
-            optimizer.step()
+
+            if args.trajectory_opt == 'vanilla':
+                loss.backward()
+                optimizer.step()
+            else:
+                raise ValueError(f"Unknown trajectory optimization : {args.trajectory_opt_method}")
             loss_meter.update(loss.item())
             print('Iter: {}, running avg loss: {:.4f}'.format(itr, loss_meter.avg))
+        logger.info('Finished training, dumping experiment results')
+        results = dict()
+        results['trajectory-opt'] = args.trajectory_opt
+        results['base_distribution'] = base_distribution
+        results['target_distribution'] = get_distribution(args.distribution)
+        pickle.dump(obj=results, file=open(f'artifacts/lnode_{time_stamp}.pkl', "wb"))
+        torch.save(obj=func.state_dict(), f=f"artifacts/trajectory_model_{time_stamp}.model")
 
     except KeyboardInterrupt:
         if args.train_dir is not None:
@@ -236,7 +268,7 @@ if __name__ == '__main__':
             z_t_samples, _ = odeint(
                 func,
                 (z_t0, logp_diff_t0),
-                torch.tensor(np.linspace(t0, t1, viz_timesteps)).to(device),
+                torch.tensor(np.linspace(args.t0, args.t1, viz_timesteps)).to(device),
                 atol=1e-5,
                 rtol=1e-5,
                 method='dopri5',
@@ -253,7 +285,7 @@ if __name__ == '__main__':
             z_t_density, logp_diff_t = odeint(
                 func,
                 (z_t1, logp_diff_t1),
-                torch.tensor(np.linspace(t1, t0, viz_timesteps)).to(device),
+                torch.tensor(np.linspace(args.t1, args.t0, viz_timesteps)).to(device),
                 atol=1e-5,
                 rtol=1e-5,
                 method='dopri5',
@@ -261,7 +293,7 @@ if __name__ == '__main__':
 
             # Create plots for each timestep
             for (t, z_sample, z_density, logp_diff) in zip(
-                    np.linspace(t0, t1, viz_timesteps),
+                    np.linspace(args.t0, args.t1, viz_timesteps),
                     z_t_samples, z_t_density, logp_diff_t
             ):
                 fig = plt.figure(figsize=(12, 4), dpi=200)
