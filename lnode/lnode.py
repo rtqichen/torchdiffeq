@@ -11,6 +11,8 @@ import numpy as np
 import matplotlib
 from torch import Tensor
 
+from examples.models import HyperNetwork, CNF
+
 matplotlib.use('agg')
 import matplotlib.pyplot as plt
 from sklearn.datasets import make_circles
@@ -30,7 +32,7 @@ parser.add_argument('--t0', type=float, required=True)
 parser.add_argument('--t1', type=float, required=True)
 parser.add_argument('--adjoint', action='store_true')
 parser.add_argument('--viz', action='store_true')
-parser.add_argument('--niters', type=int, default=1000)
+parser.add_argument('--niters', type=int, required=True)
 parser.add_argument('--lr', type=float, default=1e-3)
 parser.add_argument('--num_samples', type=int, default=512)
 parser.add_argument('--width', type=int, default=64)
@@ -49,37 +51,6 @@ else:
     from torchdiffeq import odeint
 
 
-class CNF(nn.Module):
-    """Adapted from the NumPy implementation at:
-    https://gist.github.com/rtqichen/91924063aa4cc95e7ef30b3a5491cc52
-    """
-
-    def __init__(self, in_out_dim, hidden_dim, width):
-        super().__init__()
-        self.in_out_dim = in_out_dim
-        self.hidden_dim = hidden_dim
-        self.width = width
-        self.hyper_net = HyperNetwork(in_out_dim, hidden_dim, width)
-
-    def forward(self, t, states):
-        z = states[0]
-        logp_z = states[1]
-
-        batchsize = z.shape[0]
-
-        with torch.set_grad_enabled(True):
-            z.requires_grad_(True)
-
-            W, B, U = self.hyper_net(t)
-
-            Z = torch.unsqueeze(z, 0).repeat(self.width, 1, 1)
-
-            h = torch.tanh(torch.matmul(Z, W) + B)
-            dz_dt = torch.matmul(h, U).mean(0)
-
-            dlogp_z_dt = -trace_df_dz(dz_dt, z).view(batchsize, 1)
-
-        return (dz_dt, dlogp_z_dt)
 
 
 def trace_df_dz(f, z):
@@ -91,47 +62,6 @@ def trace_df_dz(f, z):
         sum_diag += torch.autograd.grad(f[:, i].sum(), z, create_graph=True)[0].contiguous()[:, i].contiguous()
 
     return sum_diag.contiguous()
-
-
-class HyperNetwork(nn.Module):
-    """Hyper-network allowing f(z(t), t) to change with time.
-
-    Adapted from the NumPy implementation at:
-    https://gist.github.com/rtqichen/91924063aa4cc95e7ef30b3a5491cc52
-    """
-
-    def __init__(self, in_out_dim, hidden_dim, width):
-        super().__init__()
-
-        blocksize = width * in_out_dim
-
-        self.fc1 = nn.Linear(1, hidden_dim)
-        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
-        self.fc3 = nn.Linear(hidden_dim, 3 * blocksize + width)
-
-        self.in_out_dim = in_out_dim
-        self.hidden_dim = hidden_dim
-        self.width = width
-        self.blocksize = blocksize
-
-    def forward(self, t):
-        # predict params
-        params = t.reshape(1, 1)
-        params = torch.tanh(self.fc1(params))
-        params = torch.tanh(self.fc2(params))
-        params = self.fc3(params)
-
-        # restructure
-        params = params.reshape(-1)
-        W = params[:self.blocksize].reshape(self.width, self.in_out_dim, 1)
-
-        U = params[self.blocksize:2 * self.blocksize].reshape(self.width, 1, self.in_out_dim)
-
-        G = params[2 * self.blocksize:3 * self.blocksize].reshape(self.width, 1, self.in_out_dim)
-        U = U * torch.sigmoid(G)
-
-        B = params[3 * self.blocksize:].reshape(self.width, 1, 1)
-        return [W, B, U]
 
 
 class RunningAverageMeter(object):
@@ -153,28 +83,28 @@ class RunningAverageMeter(object):
         self.val = val
 
 
-def get_distribution(distribution_name: str) -> Union[torch.distributions.Distribution, None]:
+def get_distribution(distribution_name: str) -> Union[torch.distributions.Distribution, str]:
     dist = None
     if distribution_name == 'circles':
-        return None
+        return "circles"
     if distribution_name == 'gauss3d':
         loc = torch.tensor([-2.0, 1.0, -5.0])
         scale = torch.diag(torch.tensor([0.5, 0.2, 0.6]))
         dist = MultivariateNormal(loc, scale)
     elif distribution_name == 'gauss4d':
-        loc = torch.tensor([-2.0, 1.0, -5.0, 3.0])
-        scale = torch.diag(torch.tensor([0.5, 0.2, 0.6, 0.1]))
+        loc = torch.tensor([-0.1, 0.2, -0.4, 0.4])
+        scale = torch.diag(torch.tensor([0.15, 0.01, 0.19, 0.08]))
         dist = MultivariateNormal(loc, scale)
     return dist
 
 
-def get_batch(num_samples, distribution_name: str) -> tuple[Tensor | Any, Any]:
+def get_batch(num_samples: int, distribution_name: str) -> tuple[Tensor | Any, Any]:
     if distribution_name == 'circles':
         points, _ = make_circles(n_samples=num_samples, noise=0.06, factor=0.5)
         x = torch.tensor(points).type(torch.float32).to(device)
     else:
         distribution = get_distribution(distribution_name)
-        x = distribution.sample(num_samples)
+        x = distribution.sample(torch.Size([num_samples])).to(device)
     logp_diff_t1 = torch.zeros(num_samples, 1).type(torch.float32).to(device)
 
     return x, logp_diff_t1
@@ -192,7 +122,7 @@ if __name__ == '__main__':
     time_stamp = datetime.now().isoformat()
     # -------
     # Model
-    func = CNF(in_out_dim=in_out_dim, hidden_dim=args.hidden_dim, width=args.width).to(device)
+    func = CNF(in_out_dim=in_out_dim, hidden_dim=args.hidden_dim, width=args.width,device=device)
     optimizer = optim.Adam(func.parameters(), lr=args.lr)
     p_z0 = base_distribution
     loss_meter = RunningAverageMeter()
@@ -239,9 +169,15 @@ if __name__ == '__main__':
         results = dict()
         results['trajectory-opt'] = args.trajectory_opt
         results['base_distribution'] = base_distribution
-        results['target_distribution'] = get_distribution(args.distribution)
-        pickle.dump(obj=results, file=open(f'artifacts/lnode_{time_stamp}.pkl', "wb"))
-        torch.save(obj=func.state_dict(), f=f"artifacts/trajectory_model_{time_stamp}.model")
+        target_distribution = get_distribution(args.distribution)
+        results['dim'] = in_out_dim
+        results['target_distribution'] = target_distribution
+        results['niters'] = args.niters
+        results['loss'] = loss_meter.avg
+        results['args'] = vars(args)
+        results['model'] = func.state_dict()
+        artifact_version_name = f'{time_stamp}_target_distribution{str(target_distribution)}_niters_{args.niters}'
+        pickle.dump(obj=results, file=open(f'artifacts/{args.trajectory_opt}_{artifact_version_name}.pkl', "wb"))
 
     except KeyboardInterrupt:
         if args.train_dir is not None:
