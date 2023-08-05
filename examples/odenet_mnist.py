@@ -303,42 +303,43 @@ if __name__ == '__main__':
             ResBlock(64, 64, stride=2, downsample=conv1x1(64, 64, 2)),
         ]
 
-    feature_layers = [ODEBlock(ODEfunc(64))] if is_odenet else [ResBlock(64, 64) for _ in range(6)]
-    fc_layers = [norm(64), nn.ReLU(inplace=True), nn.AdaptiveAvgPool2d((1, 1)), Flatten(), nn.Linear(64, 10)]
-
-    model = nn.Sequential(*downsampling_layers, *feature_layers, *fc_layers).to(device)
-
-    logger.info(model)
-    logger.info(f'Number of parameters: {count_parameters(model)}')
-
-    criterion = nn.CrossEntropyLoss().to(device)
-
-    train_loader, test_loader, train_eval_loader = get_mnist_loaders(
-        args.data_aug, args.batch_size, args.test_batch_size
-    )
-
-    data_gen = inf_generator(train_loader)
-    batches_per_epoch = len(train_loader)
-
-    lr_fn = learning_rate_with_decay(
-        args.batch_size, batch_denom=128, batches_per_epoch=batches_per_epoch, boundary_epochs=[60, 100, 140],
-        decay_rates=[1, 0.1, 0.01, 0.001]
-    )
-
-    optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, momentum=0.9)
-
-    best_acc = 0
-    batch_time_meter = RunningAverageMeter()
-    f_nfe_meter = RunningAverageMeter()
-    b_nfe_meter = RunningAverageMeter()
-    end = time.time()
-
     integration_times = [(0, 0.25), (0, 1), (0, 10)]
 
     # Dictionary to store test accuracy values for each integration time interval
     test_acc_results = {}
 
     for integration_time in integration_times:
+
+        feature_layers = [ODEBlock(ODEfunc(64))] if is_odenet else [ResBlock(64, 64) for _ in range(6)]
+        feature_layers[0].integration_time = torch.tensor(integration_time).float().to(device)
+        fc_layers = [norm(64), nn.ReLU(inplace=True), nn.AdaptiveAvgPool2d((1, 1)), Flatten(), nn.Linear(64, 10)]
+
+        model = nn.Sequential(*downsampling_layers, *feature_layers, *fc_layers).to(device)
+
+        logger.info(model)
+        logger.info(f'Number of parameters: {count_parameters(model)}')
+
+        criterion = nn.CrossEntropyLoss().to(device)
+
+        train_loader, test_loader, train_eval_loader = get_mnist_loaders(
+            args.data_aug, args.batch_size, args.test_batch_size
+        )
+
+        data_gen = inf_generator(train_loader)
+        batches_per_epoch = len(train_loader)
+
+        lr_fn = learning_rate_with_decay(
+            args.batch_size, batch_denom=128, batches_per_epoch=batches_per_epoch, boundary_epochs=[60, 100, 140],
+            decay_rates=[1, 0.1, 0.01, 0.001]
+        )
+
+        optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, momentum=0.9)
+
+        best_acc = 0
+        batch_time_meter = RunningAverageMeter()
+        f_nfe_meter = RunningAverageMeter()
+        b_nfe_meter = RunningAverageMeter()
+        end = time.time()
 
         test_acc_values = []
 
@@ -353,9 +354,6 @@ if __name__ == '__main__':
             y = y.to(device)
             logits = model(x)
             loss = criterion(logits, y)
-
-            if is_odenet:
-                feature_layers[0].integration_time = torch.tensor(integration_time).float().to(device)
 
             if is_odenet:
                 nfe_forward = feature_layers[0].nfe
@@ -380,7 +378,8 @@ if __name__ == '__main__':
                     val_acc = accuracy(model, test_loader)
                     test_acc_values.append(val_acc)
                     if val_acc > best_acc:
-                        torch.save({'state_dict': model.state_dict(), 'args': args}, os.path.join(args.save, 'model.pth'))
+                        torch.save({'state_dict': model.state_dict(), 'args': args},
+                                   os.path.join(args.save, 'model.pth'))
                         best_acc = val_acc
                     logger.info(
                         "Epoch {:04d} | Time {:.3f} ({:.3f}) | NFE-F {:.1f} | NFE-B {:.1f} | "
@@ -390,6 +389,8 @@ if __name__ == '__main__':
                         )
                     )
         test_acc_results[integration_time] = test_acc_values
+        logger.info(
+            f"Integration time: {integration_time[1]} :: Average test loss: {sum(test_acc_values) / len(test_acc_values)}")
 
     plt.figure()
     for integration_time_interval, test_acc_values in test_acc_results.items():
