@@ -3,9 +3,9 @@ import argparse
 import logging
 import time
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn as nn
-from matplotlib import pyplot as plt
 from torch.utils.data import DataLoader
 import torchvision.datasets as datasets
 import torchvision.transforms as transforms
@@ -15,7 +15,7 @@ parser.add_argument('--network', type=str, choices=['resnet', 'odenet'], default
 parser.add_argument('--tol', type=float, default=1e-3)
 parser.add_argument('--adjoint', type=eval, default=False, choices=[True, False])
 parser.add_argument('--downsampling-method', type=str, default='conv', choices=['conv', 'res'])
-parser.add_argument('--nepochs', type=int, default=160)
+parser.add_argument('--nepochs', type=int, default=2)
 parser.add_argument('--data_aug', type=eval, default=True, choices=[True, False])
 parser.add_argument('--lr', type=float, default=0.1)
 parser.add_argument('--batch_size', type=int, default=128)
@@ -263,28 +263,41 @@ def get_logger(logpath, filepath, package_files=None, displaying=True, saving=Tr
         console_handler.setLevel(level)
         _logger.addHandler(console_handler)
     _logger.info(filepath)
-    with open(filepath, "r") as f:
-        _logger.info(f.read())
-
-    for f in package_files:
-        _logger.info(f)
-        with open(f, "r") as package_f:
-            _logger.info(package_f.read())
+    # with open(filepath, "r") as f:
+    #     _logger.info(f.read())
+    #
+    # for f in package_files:
+    #     _logger.info(f)
+    #     with open(f, "r") as package_f:
+    #         _logger.info(package_f.read())
 
     return _logger
+
+
+def save_to_csv(filename, sheetname, data):
+    df = pd.DataFrame(data, columns=["Epoch", "Batch Time", "Forward NFE", "Backward NFE", "Train Accuracy",
+                                     "Test Accuracy"])
+    with pd.ExcelWriter(filename, engine='openpyxl', mode='a') as writer:
+        df.to_excel(writer, sheet_name=sheetname, index=False)
 
 
 if __name__ == '__main__':
 
     makedirs(args.save)
     logger = get_logger(logpath=os.path.join(args.save, 'logs'), filepath=os.path.abspath(__file__))
-    logger.info(args)
+
+    excel_filename = os.path.join(args.save, f"data_{args.network}_{args.adjoint}.xlsx")
+    sheet_name = f"batch_size_{args.batch_size}"
+
+    # logger.info(args)
 
     device = torch.device(
         f'cuda:{str(args.gpu)}' if torch.cuda.is_available() else 'cpu'
     )
 
     is_odenet = args.network == 'odenet'
+
+    downsampling_layers = []
 
     if args.downsampling_method == 'conv':
         downsampling_layers = [
@@ -303,109 +316,90 @@ if __name__ == '__main__':
             ResBlock(64, 64, stride=2, downsample=conv1x1(64, 64, 2)),
         ]
 
-    integration_times = [(0, 0.05), (0, 0.1), (0, 0.15), (0, 0.20), (0, 0.5), (0, 1), (0,10)]
+    feature_layers = [ODEBlock(ODEfunc(64))] if is_odenet else [ResBlock(64, 64) for _ in range(6)]
+    fc_layers = [norm(64), nn.ReLU(inplace=True), nn.AdaptiveAvgPool2d((1, 1)), Flatten(), nn.Linear(64, 10)]
 
-    # Dictionary to store test accuracy values for each integration time interval
-    test_acc_results = {}
+    model = nn.Sequential(*downsampling_layers, *feature_layers, *fc_layers).to(device)
 
-    for integration_time in integration_times:
+    # logger.info(model)
+    logger.info(f'Number of parameters: {count_parameters(model)}')
 
-        feature_layers = [ODEBlock(ODEfunc(64))] if is_odenet else [ResBlock(64, 64) for _ in range(6)]
-        feature_layers[0].integration_time = torch.tensor(integration_time).float().to(device)
-        fc_layers = [norm(64), nn.ReLU(inplace=True), nn.AdaptiveAvgPool2d((1, 1)), Flatten(), nn.Linear(64, 10)]
+    criterion = nn.CrossEntropyLoss().to(device)
 
-        model = nn.Sequential(*downsampling_layers, *feature_layers, *fc_layers).to(device)
+    train_loader, test_loader, train_eval_loader = get_mnist_loaders(
+        args.data_aug, args.batch_size, args.test_batch_size
+    )
 
-        logger.info(model)
-        logger.info(f'Number of parameters: {count_parameters(model)}')
+    data_gen = inf_generator(train_loader)
+    batches_per_epoch = len(train_loader)
 
-        logger.info(f"Integration time: {integration_time[1]}")
+    lr_fn = learning_rate_with_decay(
+        args.batch_size, batch_denom=128, batches_per_epoch=batches_per_epoch, boundary_epochs=[60, 100, 140],
+        decay_rates=[1, 0.1, 0.01, 0.001]
+    )
 
-        criterion = nn.CrossEntropyLoss().to(device)
+    optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, momentum=0.9)
 
-        train_loader, test_loader, train_eval_loader = get_mnist_loaders(
-            args.data_aug, args.batch_size, args.test_batch_size
-        )
+    best_acc = 0
+    batch_time_meter = RunningAverageMeter()
+    f_nfe_meter = RunningAverageMeter()
+    b_nfe_meter = RunningAverageMeter()
+    end = time.time()
 
-        data_gen = inf_generator(train_loader)
-        batches_per_epoch = len(train_loader)
+    epoch_data = []
 
-        lr_fn = learning_rate_with_decay(
-            args.batch_size, batch_denom=128, batches_per_epoch=batches_per_epoch, boundary_epochs=[60, 100, 140],
-            decay_rates=[1, 0.1, 0.01, 0.001]
-        )
+    for itr in range(args.nepochs * batches_per_epoch):
 
-        optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, momentum=0.9)
+        for param_group in optimizer.param_groups:
+            param_group['lr'] = lr_fn(itr)
 
-        best_acc = 0
-        batch_time_meter = RunningAverageMeter()
-        f_nfe_meter = RunningAverageMeter()
-        b_nfe_meter = RunningAverageMeter()
+        optimizer.zero_grad()
+        x, y = data_gen.__next__()
+        x = x.to(device)
+        y = y.to(device)
+        logits = model(x)
+        loss = criterion(logits, y)
+
+        if is_odenet:
+            nfe_forward = feature_layers[0].nfe
+            feature_layers[0].nfe = 0
+
+        loss.backward()
+        optimizer.step()
+
+        if is_odenet:
+            nfe_backward = feature_layers[0].nfe
+            feature_layers[0].nfe = 0
+
+        batch_time_meter.update(time.time() - end)
+
+        if is_odenet:
+            f_nfe_meter.update(nfe_forward)
+            b_nfe_meter.update(nfe_backward)
         end = time.time()
 
-        test_acc_values = []
-
-        for itr in range(args.nepochs * batches_per_epoch):
-
-            for param_group in optimizer.param_groups:
-                param_group['lr'] = lr_fn(itr)
-
-            optimizer.zero_grad()
-            x, y = data_gen.__next__()
-            x = x.to(device)
-            y = y.to(device)
-            logits = model(x)
-            loss = criterion(logits, y)
-
-            if is_odenet:
-                nfe_forward = feature_layers[0].nfe
-                feature_layers[0].nfe = 0
-
-            loss.backward()
-            optimizer.step()
-
-            if is_odenet:
-                nfe_backward = feature_layers[0].nfe
-                feature_layers[0].nfe = 0
-
-            batch_time_meter.update(time.time() - end)
-            if is_odenet:
-                f_nfe_meter.update(nfe_forward)
-                b_nfe_meter.update(nfe_backward)
-            end = time.time()
-
-            if itr % batches_per_epoch == 0:
-                with torch.no_grad():
-                    train_acc = accuracy(model, train_eval_loader)
-                    val_acc = accuracy(model, test_loader)
-                    test_acc_values.append(val_acc)
-                    if val_acc > best_acc:
-                        torch.save({'state_dict': model.state_dict(), 'args': args},
-                                   os.path.join(args.save, 'model.pth'))
-                        best_acc = val_acc
-                    logger.info(
-                        "Epoch {:04d} | Time {:.3f} ({:.3f}) | NFE-F {:.1f} | NFE-B {:.1f} | "
-                        "Train Acc {:.4f} | Test Acc {:.4f}".format(
-                            itr // batches_per_epoch, batch_time_meter.val, batch_time_meter.avg, f_nfe_meter.avg,
-                            b_nfe_meter.avg, train_acc, val_acc
-                        )
+        if itr % batches_per_epoch == 0:
+            with torch.no_grad():
+                train_acc = accuracy(model, train_eval_loader)
+                val_acc = accuracy(model, test_loader)
+                if val_acc > best_acc:
+                    torch.save({'state_dict': model.state_dict(), 'args': args},
+                               os.path.join(args.save, 'model.pth'))
+                    best_acc = val_acc
+                logger.info(
+                    "Epoch {:04d} | Time {:.3f} ({:.3f}) | NFE-F {:.1f} | NFE-B {:.1f} | "
+                    "Train Acc {:.4f} | Test Acc {:.4f}".format(
+                        itr // batches_per_epoch, batch_time_meter.val, batch_time_meter.avg, f_nfe_meter.avg,
+                        b_nfe_meter.avg, train_acc, val_acc
                     )
-        test_acc_results[integration_time] = test_acc_values
-        logger.info(
-            f"Integration time: {integration_time[1]} :: Average test loss: {sum(test_acc_values) / len(test_acc_values)}")
-
-    plt.figure()
-    for integration_time_interval, test_acc_values in test_acc_results.items():
-        avg_test_acc = sum(test_acc_values) / len(test_acc_values)
-        plt.plot([integration_time_interval[1]], [avg_test_acc], marker='o', label=str(integration_time_interval))
-    plt.xlabel("Integration Time Upper Limit")
-    plt.ylabel("Average Test Accuracy")
-    plt.title("Average Test Accuracy vs Integration Time")
-    plt.legend()
-
-    # Save the plot as an image
-    plot_filename = "test_accuracy_plot.png"
-    plt.savefig(plot_filename)
-    print(f"Plot saved as '{plot_filename}'")
-
-    plt.show()
+                )
+                epoch_data.append([
+                    itr // batches_per_epoch,
+                    batch_time_meter.val,
+                    f_nfe_meter.avg if is_odenet else 0,
+                    b_nfe_meter.avg if is_odenet else 0,
+                    train_acc,
+                    val_acc
+                ])
+    save_to_csv(excel_filename, sheet_name,epoch_data)
+    print(f"Data saved to '{excel_filename}', sheet '{sheet_name}'")
