@@ -402,4 +402,10 @@ if __name__ == '__main__':
     plt.ylabel("Average Test Accuracy")
     plt.title("Average Test Accuracy vs Integration Time")
     plt.legend()
+
+    # Save the plot as an image
+    plot_filename = "test_accuracy_plot.png"
+    plt.savefig(plot_filename)
+    print(f"Plot saved as '{plot_filename}'")
+
     plt.show()
