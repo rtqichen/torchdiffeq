@@ -44,3 +44,9 @@ Epoch 0001 | Time 0.276 (0.171) | NFE-F 20.0 | NFE-B 21.0 | Train Acc 0.9833 | T
 Number of parameters: 208266
 Epoch 0000 | Time 0.420 (0.420) | NFE-F 32.0 | NFE-B 0.0 | Train Acc 0.0975 | Test Acc 0.0974
 Epoch 0001 | Time 0.507 (0.182) | NFE-F 20.3 | NFE-B 0.0 | Train Acc 0.9800 | Test Acc 0.9820
+/data/s2226022/torchdiffeq/examples/odenet_mnist.py
+Number of parameters: 576778
+Epoch 0000 | Time 0.112 (0.112) | NFE-F 0.0 | NFE-B 0.0 | Train Acc 0.0975 | Test Acc 0.0974
+Epoch 0001 | Time 0.155 (0.033) | NFE-F 0.0 | NFE-B 0.0 | Train Acc 0.9836 | Test Acc 0.9853
+/data/s2226022/torchdiffeq/examples/odenet_mnist.py
+Number of parameters: 576778
