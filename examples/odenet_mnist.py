@@ -5,6 +5,7 @@ import time
 import numpy as np
 import torch
 import torch.nn as nn
+from matplotlib import pyplot as plt
 from torch.utils.data import DataLoader
 import torchvision.datasets as datasets
 import torchvision.transforms as transforms
@@ -247,31 +248,30 @@ def makedirs(dirname):
         os.makedirs(dirname)
 
 
-def get_logger(logpath, filepath, package_files=[], displaying=True, saving=True, debug=False):
-    logger = logging.getLogger()
-    if debug:
-        level = logging.DEBUG
-    else:
-        level = logging.INFO
-    logger.setLevel(level)
+def get_logger(logpath, filepath, package_files=None, displaying=True, saving=True, debug=False):
+    if package_files is None:
+        package_files = []
+    _logger = logging.getLogger()
+    level = logging.DEBUG if debug else logging.INFO
+    _logger.setLevel(level)
     if saving:
         info_file_handler = logging.FileHandler(logpath, mode="a")
         info_file_handler.setLevel(level)
-        logger.addHandler(info_file_handler)
+        _logger.addHandler(info_file_handler)
     if displaying:
         console_handler = logging.StreamHandler()
         console_handler.setLevel(level)
-        logger.addHandler(console_handler)
-    logger.info(filepath)
+        _logger.addHandler(console_handler)
+    _logger.info(filepath)
     with open(filepath, "r") as f:
-        logger.info(f.read())
+        _logger.info(f.read())
 
     for f in package_files:
-        logger.info(f)
+        _logger.info(f)
         with open(f, "r") as package_f:
-            logger.info(package_f.read())
+            _logger.info(package_f.read())
 
-    return logger
+    return _logger
 
 
 if __name__ == '__main__':
@@ -280,7 +280,9 @@ if __name__ == '__main__':
     logger = get_logger(logpath=os.path.join(args.save, 'logs'), filepath=os.path.abspath(__file__))
     logger.info(args)
 
-    device = torch.device('cuda:' + str(args.gpu) if torch.cuda.is_available() else 'cpu')
+    device = torch.device(
+        f'cuda:{str(args.gpu)}' if torch.cuda.is_available() else 'cpu'
+    )
 
     is_odenet = args.network == 'odenet'
 
@@ -307,7 +309,7 @@ if __name__ == '__main__':
     model = nn.Sequential(*downsampling_layers, *feature_layers, *fc_layers).to(device)
 
     logger.info(model)
-    logger.info('Number of parameters: {}'.format(count_parameters(model)))
+    logger.info(f'Number of parameters: {count_parameters(model)}')
 
     criterion = nn.CrossEntropyLoss().to(device)
 
@@ -331,46 +333,70 @@ if __name__ == '__main__':
     b_nfe_meter = RunningAverageMeter()
     end = time.time()
 
-    for itr in range(args.nepochs * batches_per_epoch):
+    integration_times = [(0, 0.25), (0, 1), (0, 10)]
 
-        for param_group in optimizer.param_groups:
-            param_group['lr'] = lr_fn(itr)
+    # Dictionary to store test accuracy values for each integration time interval
+    test_acc_results = {}
 
-        optimizer.zero_grad()
-        x, y = data_gen.__next__()
-        x = x.to(device)
-        y = y.to(device)
-        logits = model(x)
-        loss = criterion(logits, y)
+    for integration_time in integration_times:
 
-        if is_odenet:
-            nfe_forward = feature_layers[0].nfe
-            feature_layers[0].nfe = 0
+        test_acc_values = []
 
-        loss.backward()
-        optimizer.step()
+        for itr in range(args.nepochs * batches_per_epoch):
 
-        if is_odenet:
-            nfe_backward = feature_layers[0].nfe
-            feature_layers[0].nfe = 0
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = lr_fn(itr)
 
-        batch_time_meter.update(time.time() - end)
-        if is_odenet:
-            f_nfe_meter.update(nfe_forward)
-            b_nfe_meter.update(nfe_backward)
-        end = time.time()
+            optimizer.zero_grad()
+            x, y = data_gen.__next__()
+            x = x.to(device)
+            y = y.to(device)
+            logits = model(x)
+            loss = criterion(logits, y)
 
-        if itr % batches_per_epoch == 0:
-            with torch.no_grad():
-                train_acc = accuracy(model, train_eval_loader)
-                val_acc = accuracy(model, test_loader)
-                if val_acc > best_acc:
-                    torch.save({'state_dict': model.state_dict(), 'args': args}, os.path.join(args.save, 'model.pth'))
-                    best_acc = val_acc
-                logger.info(
-                    "Epoch {:04d} | Time {:.3f} ({:.3f}) | NFE-F {:.1f} | NFE-B {:.1f} | "
-                    "Train Acc {:.4f} | Test Acc {:.4f}".format(
-                        itr // batches_per_epoch, batch_time_meter.val, batch_time_meter.avg, f_nfe_meter.avg,
-                        b_nfe_meter.avg, train_acc, val_acc
+            if is_odenet:
+                feature_layers[0].integration_time = torch.tensor(integration_time).float().to(device)
+
+            if is_odenet:
+                nfe_forward = feature_layers[0].nfe
+                feature_layers[0].nfe = 0
+
+            loss.backward()
+            optimizer.step()
+
+            if is_odenet:
+                nfe_backward = feature_layers[0].nfe
+                feature_layers[0].nfe = 0
+
+            batch_time_meter.update(time.time() - end)
+            if is_odenet:
+                f_nfe_meter.update(nfe_forward)
+                b_nfe_meter.update(nfe_backward)
+            end = time.time()
+
+            if itr % batches_per_epoch == 0:
+                with torch.no_grad():
+                    train_acc = accuracy(model, train_eval_loader)
+                    val_acc = accuracy(model, test_loader)
+                    test_acc_values.append(val_acc)
+                    if val_acc > best_acc:
+                        torch.save({'state_dict': model.state_dict(), 'args': args}, os.path.join(args.save, 'model.pth'))
+                        best_acc = val_acc
+                    logger.info(
+                        "Epoch {:04d} | Time {:.3f} ({:.3f}) | NFE-F {:.1f} | NFE-B {:.1f} | "
+                        "Train Acc {:.4f} | Test Acc {:.4f}".format(
+                            itr // batches_per_epoch, batch_time_meter.val, batch_time_meter.avg, f_nfe_meter.avg,
+                            b_nfe_meter.avg, train_acc, val_acc
+                        )
                     )
-                )
+        test_acc_results[integration_time] = test_acc_values
+
+    plt.figure()
+    for integration_time_interval, test_acc_values in test_acc_results.items():
+        avg_test_acc = sum(test_acc_values) / len(test_acc_values)
+        plt.plot([integration_time_interval[1]], [avg_test_acc], marker='o', label=str(integration_time_interval))
+    plt.xlabel("Integration Time Upper Limit")
+    plt.ylabel("Average Test Accuracy")
+    plt.title("Average Test Accuracy vs Integration Time")
+    plt.legend()
+    plt.show()
