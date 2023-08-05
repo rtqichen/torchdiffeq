@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, SubsetRandomSampler
 import torchvision.datasets as datasets
 import torchvision.transforms as transforms
 
@@ -15,11 +15,12 @@ parser.add_argument('--network', type=str, choices=['resnet', 'odenet'], default
 parser.add_argument('--tol', type=float, default=1e-3)
 parser.add_argument('--adjoint', type=eval, default=False, choices=[True, False])
 parser.add_argument('--downsampling-method', type=str, default='conv', choices=['conv', 'res'])
-parser.add_argument('--nepochs', type=int, default=2)
+parser.add_argument('--nepochs', type=int, default=160)
 parser.add_argument('--data_aug', type=eval, default=True, choices=[True, False])
 parser.add_argument('--lr', type=float, default=0.1)
 parser.add_argument('--batch_size', type=int, default=128)
 parser.add_argument('--test_batch_size', type=int, default=1000)
+parser.add_argument('--data_percentage', type=float, default=1.0)
 
 parser.add_argument('--save', type=str, default='./experiment1')
 parser.add_argument('--debug', action='store_true')
@@ -179,9 +180,11 @@ def get_mnist_loaders(data_aug=False, batch_size=128, test_batch_size=1000, perc
         transforms.ToTensor(),
     ])
 
+    train_set = datasets.MNIST(root='.data/mnist', train=True, download=True, transform=transform_train)
+    num_train_samples = int(len(train_set) * perc)
     train_loader = DataLoader(
-        datasets.MNIST(root='.data/mnist', train=True, download=True, transform=transform_train), batch_size=batch_size,
-        shuffle=True, num_workers=2, drop_last=True
+        train_set, batch_size=batch_size, shuffle=True, num_workers=2, drop_last=True,
+        sampler=SubsetRandomSampler(range(num_train_samples))
     )
 
     train_eval_loader = DataLoader(
@@ -281,8 +284,8 @@ def save_to_csv(filename, sheetname, data):
     if not os.path.exists(filename):
         df.to_excel(filename, sheet_name=sheetname, index=False)
     else:
-        # If the Excel file exists, open it and append the new data
-        with pd.ExcelWriter(filename, engine='openpyxl', mode='a') as writer:
+        # If the Excel file exists, open it and rewrite the new data
+        with pd.ExcelWriter(filename, engine='openpyxl', mode='w') as writer:
             df.to_excel(writer, sheet_name=sheetname, index=False)
 
 
@@ -292,7 +295,7 @@ if __name__ == '__main__':
     logger = get_logger(logpath=os.path.join(args.save, 'logs'), filepath=os.path.abspath(__file__))
 
     excel_filename = os.path.join(args.save, f"data_{args.network}_{args.adjoint}.xlsx")
-    sheet_name = f"batch_size_{args.batch_size}"
+    sheet_name = f"batch_size_{args.data_percentage}"
 
     # logger.info(args)
 
@@ -332,8 +335,7 @@ if __name__ == '__main__':
     criterion = nn.CrossEntropyLoss().to(device)
 
     train_loader, test_loader, train_eval_loader = get_mnist_loaders(
-        args.data_aug, args.batch_size, args.test_batch_size
-    )
+        args.data_aug, args.batch_size, args.test_batch_size, args.data_percentage)
 
     data_gen = inf_generator(train_loader)
     batches_per_epoch = len(train_loader)
@@ -406,5 +408,5 @@ if __name__ == '__main__':
                     train_acc,
                     val_acc
                 ])
-    save_to_csv(excel_filename, sheet_name,epoch_data)
+    save_to_csv(excel_filename, sheet_name, epoch_data)
     print(f"Data saved to '{excel_filename}', sheet '{sheet_name}'")
