@@ -303,12 +303,14 @@ if __name__ == '__main__':
             ResBlock(64, 64, stride=2, downsample=conv1x1(64, 64, 2)),
         ]
 
-    integration_times = [(0, 0.25), (0, 1), (0, 10)]
+    integration_times = [(0, 0.05), (0, 0.1), (0, 0.15), (0, 0.20), (0, 0.5), (0, 1), (0,10)]
 
     # Dictionary to store test accuracy values for each integration time interval
     test_acc_results = {}
 
     for integration_time in integration_times:
+        logger.info(f"Integration time: {integration_time[1]}")
+        print(f"Integration time: {integration_time[1]}")
 
         feature_layers = [ODEBlock(ODEfunc(64))] if is_odenet else [ResBlock(64, 64) for _ in range(6)]
         feature_layers[0].integration_time = torch.tensor(integration_time).float().to(device)
@@ -391,6 +393,7 @@ if __name__ == '__main__':
         test_acc_results[integration_time] = test_acc_values
         logger.info(
             f"Integration time: {integration_time[1]} :: Average test loss: {sum(test_acc_values) / len(test_acc_values)}")
+        print(f"Integration time: {integration_time[1]} :: Average test loss: {sum(test_acc_values) / len(test_acc_values)}")
 
     plt.figure()
     for integration_time_interval, test_acc_values in test_acc_results.items():
