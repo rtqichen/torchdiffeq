@@ -309,8 +309,6 @@ if __name__ == '__main__':
     test_acc_results = {}
 
     for integration_time in integration_times:
-        logger.info(f"Integration time: {integration_time[1]}")
-        print(f"Integration time: {integration_time[1]}")
 
         feature_layers = [ODEBlock(ODEfunc(64))] if is_odenet else [ResBlock(64, 64) for _ in range(6)]
         feature_layers[0].integration_time = torch.tensor(integration_time).float().to(device)
@@ -320,6 +318,8 @@ if __name__ == '__main__':
 
         logger.info(model)
         logger.info(f'Number of parameters: {count_parameters(model)}')
+
+        logger.info(f"Integration time: {integration_time[1]}")
 
         criterion = nn.CrossEntropyLoss().to(device)
 
@@ -393,7 +393,6 @@ if __name__ == '__main__':
         test_acc_results[integration_time] = test_acc_values
         logger.info(
             f"Integration time: {integration_time[1]} :: Average test loss: {sum(test_acc_values) / len(test_acc_values)}")
-        print(f"Integration time: {integration_time[1]} :: Average test loss: {sum(test_acc_values) / len(test_acc_values)}")
 
     plt.figure()
     for integration_time_interval, test_acc_values in test_acc_results.items():
