@@ -277,8 +277,13 @@ def get_logger(logpath, filepath, package_files=None, displaying=True, saving=Tr
 def save_to_csv(filename, sheetname, data):
     df = pd.DataFrame(data, columns=["Epoch", "Batch Time", "Forward NFE", "Backward NFE", "Train Accuracy",
                                      "Test Accuracy"])
-    with pd.ExcelWriter(filename, engine='openpyxl', mode='a') as writer:
-        df.to_excel(writer, sheet_name=sheetname, index=False)
+    # Check if the Excel file exists
+    if not os.path.exists(filename):
+        df.to_excel(filename, sheet_name=sheetname, index=False)
+    else:
+        # If the Excel file exists, open it and append the new data
+        with pd.ExcelWriter(filename, engine='openpyxl', mode='a') as writer:
+            df.to_excel(writer, sheet_name=sheetname, index=False)
 
 
 if __name__ == '__main__':
