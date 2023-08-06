@@ -15,7 +15,7 @@ parser.add_argument('--network', type=str, choices=['resnet', 'odenet'], default
 parser.add_argument('--tol', type=float, default=1e-3)
 parser.add_argument('--adjoint', type=eval, default=False, choices=[True, False])
 parser.add_argument('--downsampling-method', type=str, default='conv', choices=['conv', 'res'])
-parser.add_argument('--nepochs', type=int, default=160)
+parser.add_argument('--nepochs', type=int, default=50)
 parser.add_argument('--data_aug', type=eval, default=True, choices=[True, False])
 parser.add_argument('--lr', type=float, default=0.1)
 parser.add_argument('--batch_size', type=int, default=128)
@@ -183,7 +183,7 @@ def get_mnist_loaders(data_aug=False, batch_size=128, test_batch_size=1000, perc
     train_set = datasets.MNIST(root='.data/mnist', train=True, download=True, transform=transform_train)
     num_train_samples = int(len(train_set) * perc)
     train_loader = DataLoader(
-        train_set, batch_size=batch_size, shuffle=True, num_workers=2, drop_last=True,
+        train_set, batch_size=batch_size, num_workers=2, drop_last=True,
         sampler=SubsetRandomSampler(range(num_train_samples))
     )
 
