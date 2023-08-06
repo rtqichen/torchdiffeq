@@ -15,7 +15,7 @@ parser.add_argument('--network', type=str, choices=['resnet', 'odenet'], default
 parser.add_argument('--tol', type=float, default=1e-3)
 parser.add_argument('--adjoint', type=eval, default=False, choices=[True, False])
 parser.add_argument('--downsampling-method', type=str, default='conv', choices=['conv', 'res'])
-parser.add_argument('--nepochs', type=int, default=50)
+parser.add_argument('--nepochs', type=int, default=2)
 parser.add_argument('--data_aug', type=eval, default=True, choices=[True, False])
 parser.add_argument('--lr', type=float, default=0.1)
 parser.add_argument('--batch_size', type=int, default=128)
@@ -165,7 +165,7 @@ class RunningAverageMeter(object):
         self.val = val
 
 
-def get_mnist_loaders(data_aug=False, batch_size=128, test_batch_size=1000, perc=1.0):
+def get_cifar10_loaders(data_aug=False, batch_size=128, test_batch_size=1000, perc=1.0):
     if data_aug:
         transform_train = transforms.Compose([
             transforms.RandomCrop(28, padding=4),
@@ -180,21 +180,21 @@ def get_mnist_loaders(data_aug=False, batch_size=128, test_batch_size=1000, perc
         transforms.ToTensor(),
     ])
 
-    train_set = datasets.MNIST(root='.data/mnist', train=True, download=True, transform=transform_train)
+    train_set = datasets.CIFAR10(root='.data/cifar10', train=True, download=True, transform=transform_train)
     num_train_samples = int(len(train_set) * perc)
     train_loader = DataLoader(
-        train_set, batch_size=batch_size, num_workers=2, drop_last=True,
+        train_set, batch_size=batch_size, num_workers=4, drop_last=True,
         sampler=SubsetRandomSampler(range(num_train_samples))
     )
 
     train_eval_loader = DataLoader(
-        datasets.MNIST(root='.data/mnist', train=True, download=True, transform=transform_test),
-        batch_size=test_batch_size, shuffle=False, num_workers=2, drop_last=True
+        datasets.CIFAR10(root='.data/cifar10', train=True, download=True, transform=transform_test),
+        batch_size=test_batch_size, shuffle=False, num_workers=4, drop_last=True
     )
 
     test_loader = DataLoader(
-        datasets.MNIST(root='.data/mnist', train=False, download=True, transform=transform_test),
-        batch_size=test_batch_size, shuffle=False, num_workers=2, drop_last=True
+        datasets.CIFAR10(root='.data/cifar10', train=False, download=True, transform=transform_test),
+        batch_size=test_batch_size, shuffle=False, num_workers=4, drop_last=True
     )
 
     return train_loader, test_loader, train_eval_loader
@@ -306,7 +306,7 @@ if __name__ == '__main__':
     makedirs(args.save)
     logger = get_logger(logpath=os.path.join(args.save, 'logs'), filepath=os.path.abspath(__file__))
 
-    excel_filename = os.path.join(args.save, f"mnist_{args.network}_{args.adjoint}.xlsx")
+    excel_filename = os.path.join(args.save, f"cifar10_{args.network}_{args.adjoint}.xlsx")
     sheet_name = f"percentage_{args.data_percentage}"
 
     # logger.info(args)
@@ -321,7 +321,7 @@ if __name__ == '__main__':
 
     if args.downsampling_method == 'conv':
         downsampling_layers = [
-            nn.Conv2d(1, 64, 3, 1),
+            nn.Conv2d(3, 64, 3, 1),
             norm(64),
             nn.ReLU(inplace=True),
             nn.Conv2d(64, 64, 4, 2, 1),
@@ -331,7 +331,7 @@ if __name__ == '__main__':
         ]
     elif args.downsampling_method == 'res':
         downsampling_layers = [
-            nn.Conv2d(1, 64, 3, 1),
+            nn.Conv2d(3, 64, 3, 1),
             ResBlock(64, 64, stride=2, downsample=conv1x1(64, 64, 2)),
             ResBlock(64, 64, stride=2, downsample=conv1x1(64, 64, 2)),
         ]
@@ -346,7 +346,7 @@ if __name__ == '__main__':
 
     criterion = nn.CrossEntropyLoss().to(device)
 
-    train_loader, test_loader, train_eval_loader = get_mnist_loaders(
+    train_loader, test_loader, train_eval_loader = get_cifar10_loaders(
         args.data_aug, args.batch_size, args.test_batch_size, args.data_percentage)
 
     data_gen = inf_generator(train_loader)
