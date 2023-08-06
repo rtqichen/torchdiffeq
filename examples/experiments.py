@@ -3,9 +3,9 @@ import os.path
 import subprocess
 
 # List of different arguments to try
-networks = ['resnet', 'odenet']
+networks = ['odenet']
 batch_sizes = [128]
-data_percentages = [0.25, 0.5, 0.75, 1.0]  # List of data percentages
+data_percentages = [0.75, 1.0]  # List of data percentages
 
 
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))

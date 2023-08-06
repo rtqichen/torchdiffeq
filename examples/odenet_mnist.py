@@ -295,7 +295,7 @@ if __name__ == '__main__':
     logger = get_logger(logpath=os.path.join(args.save, 'logs'), filepath=os.path.abspath(__file__))
 
     excel_filename = os.path.join(args.save, f"data_{args.network}_{args.adjoint}.xlsx")
-    sheet_name = f"batch_size_{args.data_percentage}"
+    sheet_name = f"percentage_{args.data_percentage}"
 
     # logger.info(args)
 
