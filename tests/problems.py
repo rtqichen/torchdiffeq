@@ -58,7 +58,7 @@ DTYPES = (torch.float32, torch.float64, torch.complex64)
 DEVICES = ['cpu']
 if torch.cuda.is_available():
     DEVICES.append('cuda')
-FIXED_METHODS = ('euler', 'midpoint', 'rk4', 'explicit_adams', 'implicit_adams')
+FIXED_METHODS = ('euler', 'midpoint', 'heun3', 'rk4', 'explicit_adams', 'implicit_adams')
 ADAMS_METHODS = ('explicit_adams', 'implicit_adams')
 ADAPTIVE_METHODS = ('adaptive_heun', 'fehlberg2', 'bosh3', 'dopri5', 'dopri8')
 SCIPY_METHODS = ('scipy_solver',)
