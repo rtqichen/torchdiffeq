@@ -9,6 +9,7 @@ from .fixed_adams import AdamsBashforth, AdamsBashforthMoulton
 from .dopri8 import Dopri8Solver
 from .scipy_wrapper import ScipyWrapperODESolver
 from .misc import _check_inputs, _flat_to_shape
+from .interp import _interp_evaluate
 
 SOLVERS = {
     'dopri8': Dopri8Solver,
@@ -89,6 +90,55 @@ def odeint(func, y0, t, *, rtol=1e-7, atol=1e-9, method=None, options=None, even
         return solution
     else:
         return event_t, solution
+
+
+def odeint_dense(func, y0, t0, t1, *, rtol=1e-7, atol=1e-9, method=None, options=None):
+
+    assert torch.is_tensor(y0)  # TODO: handle tuple of tensors
+
+    t = torch.tensor([t0, t1]).to(t0)
+
+    shapes, func, y0, t, rtol, atol, method, options, _, _ = _check_inputs(func, y0, t, rtol, atol, method, options, None, SOLVERS)
+
+    assert method == "dopri5"
+
+    solver = Dopri5Solver(func=func, y0=y0, rtol=rtol, atol=atol, **options)    
+    
+    # The integration loop
+    solution = torch.empty(len(t), *solver.y0.shape, dtype=solver.y0.dtype, device=solver.y0.device)
+    solution[0] = solver.y0
+    t = t.to(solver.dtype)
+    solver._before_integrate(t)
+    t0 = solver.rk_state.t0
+
+    times = [t0]
+    interp_coeffs = []
+
+    for i in range(1, len(t)):
+        next_t = t[i]
+        while next_t > solver.rk_state.t1:
+            solver.rk_state = solver._adaptive_step(solver.rk_state)
+            t1 = solver.rk_state.t1
+
+            if t1 != t0:
+                # Step accepted.
+                t0 = t1
+                times.append(t1)
+                interp_coeffs.append(torch.stack(solver.rk_state.interp_coeff))
+
+        solution[i] = _interp_evaluate(solver.rk_state.interp_coeff, solver.rk_state.t0, solver.rk_state.t1, next_t)
+
+    times = torch.stack(times).reshape(-1).cpu()
+    interp_coeffs = torch.stack(interp_coeffs)
+
+    def dense_output_fn(t_eval):
+        idx = torch.searchsorted(times, t_eval, side="right")
+        t0 = times[idx - 1]
+        t1 = times[idx]
+        coef = [interp_coeffs[idx - 1][i] for i in range(interp_coeffs.shape[1])]
+        return _interp_evaluate(coef, t0, t1, t_eval)
+
+    return dense_output_fn
 
 
 def odeint_event(func, y0, t0, *, event_fn, reverse_time=False, odeint_interface=odeint, **kwargs):
