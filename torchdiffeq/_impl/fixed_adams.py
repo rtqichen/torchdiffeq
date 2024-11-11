@@ -146,10 +146,16 @@ _DIVISOR = [
     31384184832000, 62768369664000, 32011868528640000, 64023737057280000, 51090942171709440000, 102181884343418880000
 ]
 
-_BASHFORTH_DIVISOR = [torch.tensor([b / divisor for b in bashforth], dtype=torch.float64)
-                      for bashforth, divisor in zip(_BASHFORTH_COEFFICIENTS, _DIVISOR)]
-_MOULTON_DIVISOR = [torch.tensor([m / divisor for m in moulton], dtype=torch.float64)
-                    for moulton, divisor in zip(_MOULTON_COEFFICIENTS, _DIVISOR)]
+_BASHFORTH_DIVISOR = [
+    torch.tensor([b / divisor for b in bashforth],
+                 dtype=torch.get_default_dtype())
+    for bashforth, divisor in zip(_BASHFORTH_COEFFICIENTS, _DIVISOR)
+]
+_MOULTON_DIVISOR = [
+    torch.tensor([m / divisor for m in moulton],
+                 dtype=torch.get_default_dtype())
+    for moulton, divisor in zip(_MOULTON_COEFFICIENTS, _DIVISOR)
+]
 
 _MIN_ORDER = 4
 _MAX_ORDER = 12

@@ -257,7 +257,7 @@ class TestNorms(unittest.TestCase):
 
                     with self.subTest(dtype=dtype, device=device, method=method):
                         x0 = torch.tensor([1.0, 2.0], device=device, dtype=dtype)
-                        t = torch.tensor([0., 1.0], device=device, dtype=torch.float64)
+                        t = torch.tensor([0., 1.0], device=device, dtype=torch.get_default_dtype())
 
                         norm_f = _NeuralF(width=10, oscillate=True).to(device, dtype)
                         torchdiffeq.odeint(norm_f, x0, t, method=method, options=dict(norm=norm))
@@ -282,7 +282,7 @@ class TestNorms(unittest.TestCase):
                             tol = 1e-6
 
                         x0 = torch.tensor([1.0, 2.0], device=device, dtype=dtype)
-                        t = torch.tensor([0., 1.0], device=device, dtype=torch.float64)
+                        t = torch.tensor([0., 1.0], device=device, dtype=torch.get_default_dtype())
 
                         ode_f = _NeuralF(width=1024, oscillate=True).to(device, dtype)
 

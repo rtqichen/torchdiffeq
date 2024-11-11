@@ -152,7 +152,7 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeEventODESolver):
                  ifactor=10.0,
                  dfactor=0.2,
                  max_num_steps=2 ** 31 - 1,
-                 dtype=torch.float64,
+                 dtype=torch.get_default_dtype(),
                  **kwargs):
         super(RKAdaptiveStepsizeODESolver, self).__init__(dtype=dtype, y0=y0, **kwargs)
 

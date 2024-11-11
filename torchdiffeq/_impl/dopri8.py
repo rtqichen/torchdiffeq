@@ -61,11 +61,11 @@ C_mid[12] = (- 41.7923486424390588923 * (h**5) + 116.2662185791119533462 * (h**4
 C_mid[13] = (20.3006925822100825485 * (h**5) - 53.9020777466385396792 * (h**4) + 50.2558364226176017553 * (h**3) - 19.0082099341608028453 * (h**2) + 2.3537586759714983486 * h) / (1 / h)
 
 
-A = torch.tensor(A, dtype=torch.float64)
-B = [torch.tensor(B_, dtype=torch.float64) for B_ in B]
-C_sol = torch.tensor(C_sol, dtype=torch.float64)
-C_err = torch.tensor(C_err, dtype=torch.float64)
-_C_mid = torch.tensor(C_mid, dtype=torch.float64)
+A = torch.tensor(A, dtype=torch.get_default_dtype())
+B = [torch.tensor(B_, dtype=torch.get_default_dtype()) for B_ in B]
+C_sol = torch.tensor(C_sol, dtype=torch.get_default_dtype())
+C_err = torch.tensor(C_err, dtype=torch.get_default_dtype())
+_C_mid = torch.tensor(C_mid, dtype=torch.get_default_dtype())
 
 _DOPRI8_TABLEAU = _ButcherTableau(alpha=A, beta=B, c_sol=C_sol, c_error=C_err)
 

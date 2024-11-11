@@ -65,11 +65,20 @@ SCIPY_METHODS = ('scipy_solver',)
 METHODS = FIXED_METHODS + ADAPTIVE_METHODS + SCIPY_METHODS
 
 
-def construct_problem(device, npts=10, ode='constant', reverse=False, dtype=torch.float64):
+def construct_problem(device,
+                      npts=10,
+                      ode='constant',
+                      reverse=False,
+                      dtype=torch.get_default_dtype()):
 
     f = PROBLEMS[ode]().to(dtype=dtype, device=device)
 
-    t_points = torch.linspace(1, 8, npts, dtype=torch.float64, device=device, requires_grad=True)
+    t_points = torch.linspace(1,
+                              8,
+                              npts,
+                              dtype=torch.get_default_dtype(),
+                              device=device,
+                              requires_grad=True)
     sol = f.y_exact(t_points).to(dtype)
 
     def _flip(x, dim):
