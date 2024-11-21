@@ -4,7 +4,7 @@ from .dopri5 import Dopri5Solver
 from .bosh3 import Bosh3Solver
 from .adaptive_heun import AdaptiveHeunSolver
 from .fehlberg2 import Fehlberg2
-from .fixed_grid import Euler, Midpoint, Heun3, RK4
+from .fixed_grid import Euler, Midpoint, Heun2, Heun3, RK4
 from .fixed_adams import AdamsBashforth, AdamsBashforthMoulton
 from .dopri8 import Dopri8Solver
 from .scipy_wrapper import ScipyWrapperODESolver
@@ -19,6 +19,7 @@ SOLVERS = {
     'adaptive_heun': AdaptiveHeunSolver,
     'euler': Euler,
     'midpoint': Midpoint,
+    'heun2': Heun2,
     'heun3': Heun3,
     'rk4': RK4,
     'explicit_adams': AdamsBashforth,

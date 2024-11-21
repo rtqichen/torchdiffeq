@@ -137,6 +137,25 @@ def rk3_step_func(func, t0, dt, t1, y0, butcher_tableu=None, f0=None, perturb=Fa
     return dt * (k1 * butcher_tableu[3][1] + k2 * butcher_tableu[3][2] + k3 * butcher_tableu[3][3])
 
 
+def rk2_step_func(func, t0, dt, t1, y0, butcher_tableu=None, f0=None, perturb=False):
+    """butcher_tableu should be of the form
+
+    [
+        [0  , 0     , 0     ],
+        [c_2, a_{21}, 0     ],
+        [0  , b_1   , b_2   ],
+    ]
+
+    https://en.wikipedia.org/wiki/List_of_Runge-Kutta_methods
+    """
+    k1 = f0
+    if k1 is None:
+        k1 = func(t0, y0, perturb=Perturb.NEXT if perturb else Perturb.NONE)
+
+    k2 = func(t0 + dt * butcher_tableu[1][0], y0 + dt * k1 * butcher_tableu[1][1], perturb=Perturb.PREV if perturb else Perturb.NONE)
+    return dt * (k1 * butcher_tableu[2][1] + k2 * butcher_tableu[2][2])
+
+
 class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeEventODESolver):
     order: int
     tableau: _ButcherTableau
