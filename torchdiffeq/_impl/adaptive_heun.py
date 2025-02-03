@@ -22,4 +22,4 @@ _AH_C_MID = torch.tensor([
 class AdaptiveHeunSolver(RKAdaptiveStepsizeODESolver):
     order = 2
     tableau = _ADAPTIVE_HEUN_TABLEAU
-    _mid = _AH_C_MID
+    mid = _AH_C_MID

@@ -73,4 +73,4 @@ _DOPRI8_TABLEAU = _ButcherTableau(alpha=A, beta=B, c_sol=C_sol, c_error=C_err)
 class Dopri8Solver(RKAdaptiveStepsizeODESolver):
     order = 8
     tableau = _DOPRI8_TABLEAU
-    _mid = _C_mid
+    mid = _C_mid

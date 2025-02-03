@@ -65,13 +65,8 @@ _TSITOURAS_TABLEAU = _ButcherTableau(
     ], dtype=torch.float64),
 )
 
-class Tsit5Solver(RKAdaptiveStepsizeODESolver):
-    order = 5
-    tableau = _TSITOURAS_TABLEAU
-    _mid = torch.tensor([], dtype=torch.float64)
-
-    def mid(self, x: torch.Tensor, *args, **kwargs):
-        _mid = torch.stack([
+x = 1 / 2
+TSIT_C_MID = torch.tensor([
             -1.0530884977290216*x*(x-1.329989018975412)*(x*x-1.4364028541716351*x+0.7139816917074209),
             0.1017*x*x*(x*x-2.1966568338249754*x+1.2949852507374631),
             2.490627285651252793*x*x*(x*x-2.38535645472061657*x+1.57803468208092486),
@@ -79,6 +74,9 @@ class Tsit5Solver(RKAdaptiveStepsizeODESolver):
             47.37952196281928122*(x-1.203071208372362603)*(x-0.658047292653547382)*x*x,
             -34.87065786149660974*(x-1.2)*(x-2/3)*x*x,
             2.5*(x-1)*(x-0.6)*x*x
-        ])
+        ], dtype=torch.float64)
 
-        return _mid
+class Tsit5Solver(RKAdaptiveStepsizeODESolver):
+    order = 5
+    tableau = _TSITOURAS_TABLEAU
+    mid = TSIT_C_MID

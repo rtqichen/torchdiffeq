@@ -19,4 +19,4 @@ _BS_C_MID = torch.tensor([0., 0.5, 0., 0.], dtype=torch.float64)
 class Bosh3Solver(RKAdaptiveStepsizeODESolver):
     order = 3
     tableau = _BOGACKI_SHAMPINE_TABLEAU
-    _mid = _BS_C_MID
+    mid = _BS_C_MID
