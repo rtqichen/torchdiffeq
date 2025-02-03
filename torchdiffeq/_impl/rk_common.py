@@ -159,7 +159,7 @@ def rk2_step_func(func, t0, dt, t1, y0, butcher_tableu=None, f0=None, perturb=Fa
 class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeEventODESolver):
     order: int
     tableau: _ButcherTableau
-    mid: torch.Tensor
+    _mid: torch.Tensor
 
     def __init__(self, func, y0, rtol, atol,
                  min_step=0,
@@ -200,13 +200,16 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeEventODESolver):
                                        beta=[b.to(device=device, dtype=y0.dtype) for b in self.tableau.beta],
                                        c_sol=self.tableau.c_sol.to(device=device, dtype=y0.dtype),
                                        c_error=self.tableau.c_error.to(device=device, dtype=y0.dtype))
-        self.mid = self.mid.to(device=device, dtype=y0.dtype)
+        self._mid = self._mid.to(device=device, dtype=y0.dtype)
 
     @classmethod
     def valid_callbacks(cls):
         return super(RKAdaptiveStepsizeODESolver, cls).valid_callbacks() | {'callback_step',
                                                                             'callback_accept_step',
                                                                             'callback_reject_step'}
+    
+    def mid(self, *args, **kwargs):
+        return self._mid
 
     def _before_integrate(self, t):
         t0 = t[0]
@@ -361,7 +364,7 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeEventODESolver):
     def _interp_fit(self, y0, y1, k, dt):
         """Fit an interpolating polynomial to the results of a Runge-Kutta step."""
         dt = dt.type_as(y0)
-        y_mid = y0 + torch.sum(k * (dt * self.mid), dim=-1).view_as(y0)
+        y_mid = y0 + torch.sum(k * (dt * self.mid(torch.tensor(0.5).to(y0))), dim=-1).view_as(y0)
         f0 = k[..., 0]
         f1 = k[..., -1]
         return _interp_fit(y0, y1, y_mid, f0, f1, dt)

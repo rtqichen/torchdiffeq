@@ -19,4 +19,4 @@ _FE_C_MID = torch.tensor([0.0, 0.5, 0.0], dtype=torch.float64)
 class Fehlberg2(RKAdaptiveStepsizeODESolver):
     order = 2
     tableau = _FEHLBERG2_TABLEAU
-    mid = _FE_C_MID
+    _mid = _FE_C_MID

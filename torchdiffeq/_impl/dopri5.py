@@ -33,4 +33,4 @@ DPS_C_MID = torch.tensor([
 class Dopri5Solver(RKAdaptiveStepsizeODESolver):
     order = 5
     tableau = _DORMAND_PRINCE_SHAMPINE_TABLEAU
-    mid = DPS_C_MID
+    _mid = DPS_C_MID
