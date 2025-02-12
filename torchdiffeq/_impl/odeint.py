@@ -2,6 +2,7 @@ import torch
 from torch.autograd.functional import vjp
 from .dopri5 import Dopri5Solver
 from .bosh3 import Bosh3Solver
+from .radau import RadauSolver
 from .adaptive_heun import AdaptiveHeunSolver
 from .fehlberg2 import Fehlberg2
 from .fixed_grid import Euler, Midpoint, Heun2, Heun3, RK4
@@ -14,6 +15,7 @@ from .interp import _interp_evaluate
 SOLVERS = {
     'dopri8': Dopri8Solver,
     'dopri5': Dopri5Solver,
+    'radau': RadauSolver,
     'bosh3': Bosh3Solver,
     'fehlberg2': Fehlberg2,
     'adaptive_heun': AdaptiveHeunSolver,
