@@ -99,7 +99,7 @@ class FixedGridODESolver(metaclass=abc.ABCMeta):
     def _step_func(self, func, t0, dt, t1, y0):
         pass
 
-    def integrate(self, t):
+    def integrate(self, t, condition=None):
         time_grid = self.grid_constructor(self.func, self.y0, t)
         assert time_grid[0] == t[0] and time_grid[-1] == t[-1]
 
@@ -108,11 +108,16 @@ class FixedGridODESolver(metaclass=abc.ABCMeta):
 
         j = 1
         y0 = self.y0
+        if condition is not None:
+            y0_condition = y0.clone()
         for t0, t1 in zip(time_grid[:-1], time_grid[1:]):
             dt = t1 - t0
             self.func.callback_step(t0, y0, dt)
             dy, f0 = self._step_func(self.func, t0, dt, t1, y0)
             y1 = y0 + dy
+            if condition is not None:
+            #replace all channels of y1 except ch 0 with y0_condition
+                y1[:,condition:,:,:] = y0_condition[:,condition:,:,:]
 
             while j < len(t) and t1 >= t[j]:
                 if self.interp == "linear":
