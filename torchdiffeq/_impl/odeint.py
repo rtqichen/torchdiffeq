@@ -8,7 +8,7 @@ from .fehlberg2 import Fehlberg2
 from .fixed_grid import Euler, Midpoint, Heun2, Heun3, RK4
 from .fixed_adams import AdamsBashforth, AdamsBashforthMoulton
 from .dopri8 import Dopri8Solver
-from .scipy_wrapper import ScipyWrapperODESolver
+from .scipy_wrapper import ScipyWrapperODESolver, RK45Solver, DOP853Solver, Radau, BDF
 from .misc import _check_inputs, _flat_to_shape
 from .interp import _interp_evaluate
 
@@ -29,7 +29,10 @@ SOLVERS = {
     # Backward compatibility: use the same name as before
     'fixed_adams': AdamsBashforthMoulton,
     # ~Backwards compatibility
-    'scipy_solver': ScipyWrapperODESolver,
+    'scipy_rk45': RK45Solver,
+    'scipy_dop853': DOP853Solver,
+    'scipy_radau': Radau,
+    'scipy_bdf': BDF,
 }
 
 
