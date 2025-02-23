@@ -4,7 +4,7 @@ from .dopri5 import Dopri5Solver
 from .bosh3 import Bosh3Solver
 from .adaptive_heun import AdaptiveHeunSolver
 from .fehlberg2 import Fehlberg2
-from .fixed_grid import Euler, Midpoint, Heun2, Heun3, RK4
+from .fixed_grid import Euler, Midpoint, Heun3, RK4
 from .fixed_adams import AdamsBashforth, AdamsBashforthMoulton
 from .dopri8 import Dopri8Solver
 from .tsit5 import Tsit5Solver
@@ -21,7 +21,6 @@ SOLVERS = {
     'adaptive_heun': AdaptiveHeunSolver,
     'euler': Euler,
     'midpoint': Midpoint,
-    'heun2': Heun2,
     'heun3': Heun3,
     'rk4': RK4,
     'explicit_adams': AdamsBashforth,
@@ -31,9 +30,7 @@ SOLVERS = {
     # ~Backwards compatibility
     'scipy_solver': ScipyWrapperODESolver,
 }
-
-
-def odeint(func, y0, t, *, rtol=1e-7, atol=1e-9, method=None, options=None, event_fn=None):
+def odeint(func, y0, t, *, rtol=1e-7, atol=1e-9, method=None, options=None, event_fn=None, condition=None):
     """Integrate a system of ordinary differential equations.
 
     Solves the initial value problem for a non-stiff system of first order ODEs:
@@ -79,7 +76,7 @@ def odeint(func, y0, t, *, rtol=1e-7, atol=1e-9, method=None, options=None, even
     solver = SOLVERS[method](func=func, y0=y0, rtol=rtol, atol=atol, **options)
 
     if event_fn is None:
-        solution = solver.integrate(t)
+        solution = solver.integrate(t, condition)
     else:
         event_t, solution = solver.integrate_until_event(t[0], event_fn)
         event_t = event_t.to(t)
@@ -93,7 +90,7 @@ def odeint(func, y0, t, *, rtol=1e-7, atol=1e-9, method=None, options=None, even
         return solution
     else:
         return event_t, solution
-
+    
 
 def odeint_dense(func, y0, t0, t1, *, rtol=1e-7, atol=1e-9, method=None, options=None):
 
