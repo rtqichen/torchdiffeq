@@ -105,6 +105,8 @@ class FixedGridODESolver(metaclass=abc.ABCMeta):
 
         solution = torch.empty(len(t), *self.y0.shape, dtype=self.y0.dtype, device=self.y0.device)
         solution[0] = self.y0
+        all_ys = torch.empty(len(t-1), *self.y0.shape, dtype=self.y0.dtype, device=self.y0.device)
+        all_ys[0] = self.y0
 
         j = 1
         y0 = self.y0
@@ -114,9 +116,9 @@ class FixedGridODESolver(metaclass=abc.ABCMeta):
             dt = t1 - t0
             self.func.callback_step(t0, y0, dt)
             dy, f0 = self._step_func(self.func, t0, dt, t1, y0)
-            y1 = y0 + dy
+            y1 = y0 + dy[:,0:1,...]
             if condition is not None:
-            #replace all channels of y1 except ch 0 with y0_condition
+            #replace all channels of y1  except ch 0 with y0_condition
                 y1[:,condition:,:,:] = y0_condition[:,condition:,:,:]
 
             while j < len(t) and t1 >= t[j]:
@@ -129,8 +131,9 @@ class FixedGridODESolver(metaclass=abc.ABCMeta):
                     raise ValueError(f"Unknown interpolation method {self.interp}")
                 j += 1
             y0 = y1
-
-        return solution
+            all_ys[j-1]=y0
+            
+        return solution, all_ys
 
     def integrate_until_event(self, t0, event_fn):
         assert self.step_size is not None, "Event handling for fixed step solvers currently requires `step_size` to be provided in options."

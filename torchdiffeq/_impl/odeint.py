@@ -4,7 +4,7 @@ from .dopri5 import Dopri5Solver
 from .bosh3 import Bosh3Solver
 from .adaptive_heun import AdaptiveHeunSolver
 from .fehlberg2 import Fehlberg2
-from .fixed_grid import Euler, Midpoint, Heun2, Heun3, RK4
+from .fixed_grid import Euler, Midpoint, Heun3, RK4
 from .fixed_adams import AdamsBashforth, AdamsBashforthMoulton
 from .dopri8 import Dopri8Solver
 from .scipy_wrapper import ScipyWrapperODESolver
@@ -19,7 +19,6 @@ SOLVERS = {
     'adaptive_heun': AdaptiveHeunSolver,
     'euler': Euler,
     'midpoint': Midpoint,
-    'heun2': Heun2,
     'heun3': Heun3,
     'rk4': RK4,
     'explicit_adams': AdamsBashforth,
@@ -29,8 +28,6 @@ SOLVERS = {
     # ~Backwards compatibility
     'scipy_solver': ScipyWrapperODESolver,
 }
-
-
 def odeint(func, y0, t, *, rtol=1e-7, atol=1e-9, method=None, options=None, event_fn=None, condition=None):
     """Integrate a system of ordinary differential equations.
 
@@ -91,7 +88,7 @@ def odeint(func, y0, t, *, rtol=1e-7, atol=1e-9, method=None, options=None, even
         return solution
     else:
         return event_t, solution
-
+    
 
 def odeint_dense(func, y0, t0, t1, *, rtol=1e-7, atol=1e-9, method=None, options=None):
 
