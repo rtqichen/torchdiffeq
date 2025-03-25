@@ -44,6 +44,8 @@ class TestGradient(unittest.TestCase):
                         eps = 1e-5
                     elif ode == 'sine':
                         eps = 5e-3
+                    elif ode == 'exp':
+                        eps = 1e-2
                     else:
                         raise RuntimeError
 

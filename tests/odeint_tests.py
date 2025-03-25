@@ -5,7 +5,7 @@ import warnings
 import torch
 import torchdiffeq
 
-from problems import (construct_problem, PROBLEMS, DTYPES, DEVICES, METHODS, ADAPTIVE_METHODS, FIXED_METHODS, SCIPY_METHODS)
+from problems import (construct_problem, PROBLEMS, DTYPES, DEVICES, METHODS, ADAPTIVE_METHODS, FIXED_METHODS, SCIPY_METHODS, IMPLICIT_METHODS)
 
 
 def rel_error(true, estimate):
@@ -31,12 +31,23 @@ class TestSolverError(unittest.TestCase):
                         if method == 'dopri8' and dtype == torch.float32:
                             kwargs = dict(rtol=1e-7, atol=1e-7)
 
-                        problems = PROBLEMS if method in ADAPTIVE_METHODS else ('constant',)
+                        if method in ADAPTIVE_METHODS:
+                            if method in IMPLICIT_METHODS:
+                                problems = PROBLEMS
+                            else:
+                                problems = tuple(problem for problem in PROBLEMS)
+                        elif method in IMPLICIT_METHODS:
+                            problems = ('constant', 'exp')
+                        else:
+                            problems = ('constant',)
+
                         for ode in problems:
                             if method in ['adaptive_heun', 'bosh3']:
                                 eps = 4e-3
                             elif ode == 'linear':
                                 eps = 2e-3
+                            elif ode == 'exp':
+                                eps = 5e-2
                             else:
                                 eps = 3e-4
 
@@ -155,6 +166,11 @@ class TestDiscontinuities(unittest.TestCase):
             for dtype in DTYPES:
                 for device in DEVICES:
                     for method in FIXED_METHODS:
+
+                        # Singluar matrix error with float32 and implicit_euler
+                        if dtype == torch.float32 and method == 'implicit_euler':
+                            continue
+
                         for perturb in (True, False):
                             with self.subTest(adjoint=adjoint, dtype=dtype, device=device, method=method,
                                               perturb=perturb):

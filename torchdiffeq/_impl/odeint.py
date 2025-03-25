@@ -5,6 +5,10 @@ from .bosh3 import Bosh3Solver
 from .adaptive_heun import AdaptiveHeunSolver
 from .fehlberg2 import Fehlberg2
 from .fixed_grid import Euler, Midpoint, Heun2, Heun3, RK4
+from .fixed_grid_implicit import ImplicitEuler, ImplicitMidpoint, Trapezoid
+from .fixed_grid_implicit import GaussLegendre4, GaussLegendre6
+from .fixed_grid_implicit import RadauIIA3, RadauIIA5
+from .fixed_grid_implicit import SDIRK2, TRBDF2
 from .fixed_adams import AdamsBashforth, AdamsBashforthMoulton
 from .dopri8 import Dopri8Solver
 from .tsit5 import Tsit5Solver
@@ -26,6 +30,15 @@ SOLVERS = {
     'rk4': RK4,
     'explicit_adams': AdamsBashforth,
     'implicit_adams': AdamsBashforthMoulton,
+    'implicit_euler': ImplicitEuler,
+    'implicit_midpoint': ImplicitMidpoint,
+    'trapezoid': Trapezoid,
+    'radauIIA3': RadauIIA3,
+    'gl4': GaussLegendre4,
+    'radauIIA5': RadauIIA5,
+    'gl6': GaussLegendre6,
+    'sdirk2': SDIRK2,
+    'trbdf2': TRBDF2,
     # Backward compatibility: use the same name as before
     'fixed_adams': AdamsBashforthMoulton,
     # ~Backwards compatibility

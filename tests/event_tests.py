@@ -25,8 +25,10 @@ class TestEventHandling(unittest.TestCase):
                             with self.subTest(reverse=reverse, dtype=dtype, device=device, ode=ode, method=method):
                                 if method == "explicit_adams":
                                     tol = 7e-2
-                                elif method == "euler":
+                                elif method == "euler" or method == "implicit_euler":
                                     tol = 5e-3
+                                elif method == "gl6":
+                                    tol = 2e-3
                                 else:
                                     tol = 1e-4
 

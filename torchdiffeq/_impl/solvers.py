@@ -2,6 +2,7 @@ import abc
 import torch
 from .event_handling import find_event
 from .misc import _handle_unused_kwargs
+from .misc import _compute_error_ratio, _linf_norm
 
 
 class AdaptiveStepsizeODESolver(metaclass=abc.ABCMeta):
