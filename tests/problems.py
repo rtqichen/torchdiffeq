@@ -53,15 +53,26 @@ class LinearODE(torch.nn.Module):
         return torch.stack([torch.tensor(ans_) for ans_ in ans]).reshape(len(t_numpy), self.dim).to(t)
 
 
-PROBLEMS = {'constant': ConstantODE, 'linear': LinearODE, 'sine': SineODE}
+class ExpODE(torch.nn.Module):
+    def forward(self, t, y):
+        return -0.1 * self.y_exact(t)
+    
+    def y_exact(self, t):
+        return torch.exp(-0.1 * t)
+
+
+PROBLEMS = {'constant': ConstantODE, 'linear': LinearODE, 'sine': SineODE, 'exp': ExpODE}
 DTYPES = (torch.float32, torch.float64)
 DEVICES = ['cpu']
 if torch.cuda.is_available():
     DEVICES.append('cuda')
-FIXED_METHODS = ('euler', 'midpoint', 'heun2', 'heun3', 'rk4', 'explicit_adams', 'implicit_adams')
+FIXED_EXPLICIT_METHODS = ('euler', 'midpoint', 'heun2', 'heun3', 'rk4', 'explicit_adams', 'implicit_adams')
+FIXED_IMPLICIT_METHODS = ('implicit_euler', 'implicit_midpoint', 'trapezoid', 'radauIIA3', 'gl4', 'radauIIA5', 'gl6', 'sdirk2', 'trbdf2')
+FIXED_METHODS = FIXED_EXPLICIT_METHODS + FIXED_IMPLICIT_METHODS
 ADAMS_METHODS = ('explicit_adams', 'implicit_adams')
 ADAPTIVE_METHODS = ('adaptive_heun', 'fehlberg2', 'bosh3', 'tsit5', 'dopri5', 'dopri8')
 SCIPY_METHODS = ('scipy_solver',)
+IMPLICIT_METHODS = FIXED_IMPLICIT_METHODS
 METHODS = FIXED_METHODS + ADAPTIVE_METHODS + SCIPY_METHODS
 
 
