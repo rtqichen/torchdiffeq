@@ -104,7 +104,8 @@ def _assert_one_dimensional(name, t):
 
 
 def _assert_increasing(name, t):
-    assert (t[1:] > t[:-1]).all(), '{} must be strictly increasing or decreasing'.format(name)
+    cond = (t[1:] > t[:-1]).all().item()
+    torch._check(cond, f"{name} must be strictly increasing or decreasing")
 
 
 def _assert_floating(name, t):
@@ -380,7 +381,8 @@ def _check_timelike(name, timelike, can_grad):
     if not can_grad:
         assert not timelike.requires_grad, "{} cannot require gradient".format(name)
     diff = timelike[1:] > timelike[:-1]
-    assert diff.all() or (~diff).all(), '{} must be strictly increasing or decreasing'.format(name)
+    cond = torch.logical_or(diff.all(), (~diff).all()).item()
+    torch._check(cond, f"{name} must be strictly increasing or decreasing")
 
 
 def _flip_option(options, option_name):
