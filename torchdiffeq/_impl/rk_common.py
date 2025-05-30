@@ -448,7 +448,7 @@ class FixedGridFIRKODESolver(FixedGridODESolver):
                 break
 
             s = -torch.matmul(Jinv, f)
-            if torch.any(torch.isnan(s)) or torch.any(torch.isinf(s)):
+            if not torch.all(torch.isfinite(s)):
                 break
 
             k = k + s.reshape_as(k)
@@ -537,7 +537,7 @@ class FixedGridDIRKODESolver(FixedGridFIRKODESolver):
                     break
 
                 s = -torch.matmul(Jinv, f)
-                if torch.any(torch.isnan(s)) or torch.any(torch.isinf(s)):
+                if not torch.all(torch.isfinite(s)):
                     break
 
                 k[i] = k[i] + s.reshape_as(k[i])
