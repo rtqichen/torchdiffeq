@@ -116,7 +116,7 @@ class FixedGridODESolver(metaclass=abc.ABCMeta):
             dt = t1 - t0
             self.func.callback_step(t0, y0, dt)
             dy, f0 = self._step_func(self.func, t0, dt, t1, y0)
-            y1 = y0 + dy[:,0:1,...]
+            y1 = y0 + dy
             if condition is not None:
             #replace all channels of y1  except ch 0 with y0_condition
                 y1[:,condition:,:,:] = y0_condition[:,condition:,:,:]
