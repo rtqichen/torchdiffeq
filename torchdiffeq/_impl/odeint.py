@@ -13,6 +13,7 @@ from .fixed_adams import AdamsBashforth, AdamsBashforthMoulton
 from .dopri8 import Dopri8Solver
 from .tsit5 import Tsit5Solver
 from .scipy_wrapper import ScipyWrapperODESolver
+from .stiff_solver import EnhancedNeuralODESolver
 from .misc import _check_inputs, _flat_to_shape
 from .interp import _interp_evaluate
 
@@ -39,6 +40,7 @@ SOLVERS = {
     'gl6': GaussLegendre6,
     'sdirk2': SDIRK2,
     'trbdf2': TRBDF2,
+    'enhanced_neural': EnhancedNeuralODESolver,
     # Backward compatibility: use the same name as before
     'fixed_adams': AdamsBashforthMoulton,
     # ~Backwards compatibility
