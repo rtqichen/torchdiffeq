@@ -439,16 +439,16 @@ class FixedGridFIRKODESolver(FixedGridODESolver):
         y = torch.matmul(k, beta * dt).add(y0.unsqueeze(-1)).movedim(-1, 0)
         f = self._residual(func, k, y, t0, dt, t1)
         J = torch.ones_like(f).diag()
+        Jinv = torch.ones_like(f).diag() # Sherman-Morrison Good Method
+
         converged = False
         for _ in range(self.max_iters):
             if torch.linalg.norm(f, 2) < tol:
                 converged = True
                 break
 
-            # If the matrix becomes singular, just stop and return the last value
-            try:
-                s = -torch.linalg.solve(J, f)
-            except torch._C._LinAlgError:
+            s = -torch.matmul(Jinv, f)
+            if not torch.all(torch.isfinite(s)):
                 break
 
             k = k + s.reshape_as(k)
@@ -457,6 +457,8 @@ class FixedGridFIRKODESolver(FixedGridODESolver):
             z = newf - f
             f = newf
             J = J + (torch.outer ((z - torch.linalg.vecdot(J,s)),s)) / (torch.dot(s,s))
+            sJinv = torch.matmul(s, Jinv)
+            Jinv = Jinv + (torch.outer((s - torch.linalg.vecdot(Jinv, z)), sJinv)) / (torch.dot(sJinv, z))
 
         if not converged:
             warnings.warn('Functional iteration did not converge. Solution may be incorrect.')
@@ -526,16 +528,16 @@ class FixedGridDIRKODESolver(FixedGridFIRKODESolver):
             y_i = torch.matmul(k_i, beta_i * dt).add(y0)
             f = self._residual(func, k_i, y_i, ti, perturb)
             J = torch.ones_like(f).diag()
+            Jinv = torch.ones_like(f).diag()
+
             converged = False
             for _ in range(self.max_iters):
                 if torch.linalg.norm(f, 2) < tol:
                     converged = True
                     break
 
-                # If the matrix becomes singular, just stop and return the last value
-                try:
-                    s = -torch.linalg.solve(J, f)
-                except torch._C._LinAlgError:
+                s = -torch.matmul(Jinv, f)
+                if not torch.all(torch.isfinite(s)):
                     break
 
                 k[i] = k[i] + s.reshape_as(k[i])
@@ -545,6 +547,8 @@ class FixedGridDIRKODESolver(FixedGridFIRKODESolver):
                 z = newf - f
                 f = newf
                 J = J + (torch.outer ((z - torch.linalg.vecdot(J,s)),s)) / (torch.dot(s,s))
+                sJinv = torch.matmul(s, Jinv)
+                Jinv = Jinv + (torch.outer((s - torch.linalg.vecdot(Jinv, z)), sJinv)) / (torch.dot(sJinv, z))
 
             if not converged:
                 warnings.warn('Functional iteration did not converge. Solution may be incorrect.')
