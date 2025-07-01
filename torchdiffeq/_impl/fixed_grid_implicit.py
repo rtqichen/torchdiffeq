@@ -34,6 +34,21 @@ class ImplicitMidpoint(FixedGridFIRKODESolver):
     order = 2
     tableau = _IMPLICIT_MIDPOINT_TABLEAU
 
+_TRAPEZOID_TABLEAU = _ButcherTableau(
+    alpha=torch.tensor([0, 1], dtype=torch.float64),
+    beta=[
+        torch.tensor([0], dtype=torch.float64),
+        torch.tensor([1 /2, 1 / 2], dtype=torch.float64),
+    ],
+    c_sol=torch.tensor([1 / 2, 1 / 2], dtype=torch.float64),
+    c_error=torch.tensor([], dtype=torch.float64),
+)
+
+class Trapezoid(FixedGridDIRKODESolver):
+    order = 2
+    tableau = _TRAPEZOID_TABLEAU
+
+
 _GAUSS_LEGENDRE_4_TABLEAU = _ButcherTableau(
     alpha=torch.tensor([1 / 2 - _sqrt_3 / 6, 1 / 2 - _sqrt_3 / 6], dtype=torch.float64),
     beta=[
@@ -43,21 +58,6 @@ _GAUSS_LEGENDRE_4_TABLEAU = _ButcherTableau(
     c_sol=torch.tensor([1 / 2, 1 / 2], dtype=torch.float64),
     c_error=torch.tensor([], dtype=torch.float64),
 )
-
-_TRAPEZOID_TABLEAU = _ButcherTableau(
-    alpha=torch.tensor([0, 1], dtype=torch.float64),
-    beta=[
-        torch.tensor([0, 0], dtype=torch.float64),
-        torch.tensor([1 /2, 1 / 2], dtype=torch.float64),
-    ],
-    c_sol=torch.tensor([1 / 2, 1 / 2], dtype=torch.float64),
-    c_error=torch.tensor([], dtype=torch.float64),
-)
-
-class Trapezoid(FixedGridFIRKODESolver):
-    order = 2
-    tableau = _TRAPEZOID_TABLEAU
-
 
 class GaussLegendre4(FixedGridFIRKODESolver):
     order = 4
