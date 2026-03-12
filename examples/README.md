@@ -56,3 +56,21 @@ The result should look similar to this:
 More comprehensive code for continuous normalizing flows (CNFs) has its own public repository. Tools for training, evaluating, and visualizing CNFs for reversible generative modeling are provided along with FFJORD, a linear cost stochastic approximation of CNFs.
 
 Find the code in https://github.com/rtqichen/ffjord. This code contains some advanced tricks for `torchdiffeq`.
+
+## Wave Equation (PDE via Method of Lines)
+The `wave_equation.py` file demonstrates solving the 1D wave equation using the method of lines. The PDE `u_tt = c^2 * u_xx` is spatially discretized with finite differences to form a first-order ODE system, which is then integrated using `torchdiffeq`.
+
+To solve the wave equation and visualize the space-time evolution, run
+```
+python wave_equation.py --viz
+```
+This produces a space-time heatmap, spatial snapshots, and an energy conservation plot.
+
+To train a Neural ODE to learn the wave dynamics from data, run
+```
+python wave_equation.py --train --viz
+```
+The adjoint method can also be used for memory-efficient backpropagation:
+```
+python wave_equation.py --train --adjoint --viz
+```
