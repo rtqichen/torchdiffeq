@@ -166,7 +166,7 @@ class AdamsBashforthMoulton(FixedGridODESolver):
 
     def __init__(self, func, y0, rtol=1e-3, atol=1e-4, implicit=True, max_iters=_MAX_ITERS, max_order=_MAX_ORDER,
                  **kwargs):
-        super(AdamsBashforthMoulton, self).__init__(func, y0, rtol=rtol, atol=rtol, **kwargs)
+        super(AdamsBashforthMoulton, self).__init__(func, y0, rtol=rtol, atol=atol, **kwargs)
         assert max_order <= _MAX_ORDER, "max_order must be at most {}".format(_MAX_ORDER)
         if max_order < _MIN_ORDER:
             warnings.warn("max_order is below {}, so the solver reduces to `rk4`.".format(_MIN_ORDER))
