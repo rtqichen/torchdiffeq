@@ -93,6 +93,7 @@ See example of simulating and differentiating through a bouncing ball in [`examp
 Adaptive-step:
  - `dopri8` Runge-Kutta of order 8 of Dormand-Prince-Shampine.
  - `dopri5` Runge-Kutta of order 5 of Dormand-Prince-Shampine **[default]**.
+ - `tsit5` Tsitouras 5/4 Runge-Kutta method
  - `bosh3` Runge-Kutta of order 3 of Bogacki-Shampine.
  - `fehlberg2` Runge-Kutta-Fehlberg of order 2.
  - `adaptive_heun` Runge-Kutta of order 2.
@@ -103,6 +104,24 @@ Fixed-step:
  - `rk4` Fourth-order Runge-Kutta with 3/8 rule.
  - `explicit_adams` Explicit Adams-Bashforth.
  - `implicit_adams` Implicit Adams-Bashforth-Moulton.
+
+Implicit Fixed-step:
+ - `implicit_euler` Backward Euler method.
+ - `implicit_midpoint` Implicit midpoint method.
+ - `trapezoid` Implicit trapezoidal or Crank-Nicolson method.
+ - `radauIIA3` A-B-L stable fully implicit Runge-Kutta of order 3
+ - `radauIIA5` A-B-L stable fully implicit Runge-Kutta of order 5
+ - `gl4` Gauss-Lengedre 2-stage fully implicit Runge-Kutta of order 4
+ - `gl6` Gauss-Lengedre 2-stage fully implicit Runge-Kutta of order 6
+ - `sdirk2` Singly-diagonally implicit Runge-Kutta of order 2
+ - `trbdf2` Explicit-first singly-diagonally implicit Runge-Kutta of order 2
+
+Implicit Adaptive-step:
+ - `adaptive_gl4` Gauss-Lengedre 2-stage fully implicit Runge-Kutta of order 4
+ - `adaptive_gl6` Gauss-Lengedre 2-stage fully implicit Runge-Kutta of order 6
+ - `kvaerno3` A-L stable explicit-first singly-diagonally implicit Runge-Kutta of order 3
+ - `kvaerno4` A-L stable explicit-first singly-diagonally implicit Runge-Kutta of order 4
+ - `kvaerno5` A-L stable explicit-first singly-diagonally implicit Runge-Kutta of order 5
 
 Additionally, all solvers available through SciPy are wrapped for use with `scipy_solver`.
 

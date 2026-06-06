@@ -380,33 +380,9 @@ class FixedGridFIRKODESolver(FixedGridODESolver):
     tableau: _ButcherTableau
 
     def __init__(self, func, y0, step_size=None, grid_constructor=None, interp='linear', perturb=False, max_iters=100, **unused_kwargs):
+        super(FixedGridFIRKODESolver, self).__init__(func, y0, step_size, grid_constructor, interp, perturb, **unused_kwargs)
 
         self.max_iters = max_iters
-        self.atol = unused_kwargs.pop('atol')
-        unused_kwargs.pop('rtol', None)
-        unused_kwargs.pop('norm', None)
-        _handle_unused_kwargs(self, unused_kwargs)
-        del unused_kwargs
-
-        self.func = func
-        self.y0 = y0
-        self.dtype = y0.dtype
-        self.device = y0.device
-        self.step_size = step_size
-        self.interp = interp
-        self.perturb = perturb
-
-        if step_size is None:
-            if grid_constructor is None:
-                self.grid_constructor = lambda f, y0, t: t
-            else:
-                self.grid_constructor = grid_constructor
-        else:
-            if grid_constructor is None:
-                self.grid_constructor = self._grid_constructor_from_step_size(step_size)
-            else:
-                raise ValueError("step_size and grid_constructor are mutually exclusive arguments.")
-            
         self.tableau = _ButcherTableau(alpha=self.tableau.alpha.to(device=self.device, dtype=y0.dtype),
                                        beta=[b.to(device=self.device, dtype=y0.dtype) for b in self.tableau.beta],
                                        c_sol=self.tableau.c_sol.to(device=self.device, dtype=y0.dtype),
@@ -438,17 +414,24 @@ class FixedGridFIRKODESolver(FixedGridODESolver):
         # Broyden's Method to solve the system of nonlinear equations
         y = torch.matmul(k, beta * dt).add(y0.unsqueeze(-1)).movedim(-1, 0)
         f = self._residual(func, k, y, t0, dt, t1)
-        J = torch.ones_like(f).diag()
+        values = torch.ones_like(f)
+        indices = torch.arange(values.numel(), dtype=torch.int64, device=values.device)
+        indices = torch.stack((indices, indices))
+        size = (f.numel(), f.numel())
+        Jinv = torch.sparse_coo_tensor(indices, values, size).coalesce() # Sherman-Morrison Good Method
+
         converged = False
+        dense_update = False
         for _ in range(self.max_iters):
-            if torch.linalg.norm(f, 2) < tol:
+            if (
+                (torch.linalg.vector_norm(f) < (tol * torch.linalg.vector_norm(k))) or
+                (torch.linalg.vector_norm(f) < (tol * tol))
+            ):
                 converged = True
                 break
 
-            # If the matrix becomes singular, just stop and return the last value
-            try:
-                s = -torch.linalg.solve(J, f)
-            except torch._C._LinAlgError:
+            s = -torch.sparse.mm(Jinv, f.unsqueeze(1)).squeeze(1)
+            if not torch.all(torch.isfinite(s)):
                 break
 
             k = k + s.reshape_as(k)
@@ -456,7 +439,18 @@ class FixedGridFIRKODESolver(FixedGridODESolver):
             newf = self._residual(func, k, y, t0, dt, t1)
             z = newf - f
             f = newf
-            J = J + (torch.outer ((z - torch.linalg.vecdot(J,s)),s)) / (torch.dot(s,s))
+
+            sJinv = torch.sparse.mm(Jinv.t(), s.unsqueeze(1)).squeeze(1)
+
+            if dense_update:
+                update = (torch.outer((s - torch.sparse.mm(Jinv, z.unsqueeze(1)).squeeze(1)), sJinv)) / (torch.dot(sJinv, z))
+                update = update.to_sparse()
+            else:
+                # Only update nonzero elements
+                update = torch.mul((s - torch.sparse.mm(Jinv, z.unsqueeze(1)).squeeze(1))[Jinv.indices()[0,:]], sJinv[Jinv.indices()[1,:]]) / (torch.dot(sJinv, z))
+                update = torch.sparse_coo_tensor(Jinv.indices(), update, size)
+
+            Jinv = (Jinv + update).coalesce()
 
         if not converged:
             warnings.warn('Functional iteration did not converge. Solution may be incorrect.')
@@ -505,7 +499,7 @@ class FixedGridDIRKODESolver(FixedGridFIRKODESolver):
         dt = dt.to(t_dtype)
         t1 = t1.to(t_dtype)
 
-        k = [f0.clone()] * len(self.tableau.alpha)
+        k = [f0.clone() for _ in range(len(self.tableau.alpha))]
 
         for i, (alpha_i, beta_i) in enumerate(zip(self.tableau.alpha, self.tableau.beta)):
             perturb = Perturb.NONE
@@ -525,17 +519,24 @@ class FixedGridDIRKODESolver(FixedGridFIRKODESolver):
             # Broyden's Method to solve the system of nonlinear equations
             y_i = torch.matmul(k_i, beta_i * dt).add(y0)
             f = self._residual(func, k_i, y_i, ti, perturb)
-            J = torch.ones_like(f).diag()
+            values = torch.ones_like(f)
+            indices = torch.arange(values.numel(), dtype=torch.int64, device=values.device)
+            indices = torch.stack((indices, indices))
+            size = (f.numel(), f.numel())
+            Jinv = torch.sparse_coo_tensor(indices, values, size).coalesce() # Sherman-Morrison Good Method
+
             converged = False
+            dense_update = False
             for _ in range(self.max_iters):
-                if torch.linalg.norm(f, 2) < tol:
+                if (
+                    (torch.linalg.vector_norm(f) < (tol * torch.linalg.vector_norm(k[i].unsqueeze(-1)))) or
+                    (torch.linalg.vector_norm(f) < (tol * tol))
+                ):
                     converged = True
                     break
 
-                # If the matrix becomes singular, just stop and return the last value
-                try:
-                    s = -torch.linalg.solve(J, f)
-                except torch._C._LinAlgError:
+                s = -torch.sparse.mm(Jinv, f.unsqueeze(1)).squeeze(1)
+                if not torch.all(torch.isfinite(s)):
                     break
 
                 k[i] = k[i] + s.reshape_as(k[i])
@@ -544,7 +545,18 @@ class FixedGridDIRKODESolver(FixedGridFIRKODESolver):
                 newf = self._residual(func, k_i, y_i, ti, perturb)
                 z = newf - f
                 f = newf
-                J = J + (torch.outer ((z - torch.linalg.vecdot(J,s)),s)) / (torch.dot(s,s))
+
+                sJinv = torch.sparse.mm(Jinv.t(), s.unsqueeze(1)).squeeze(1)
+
+                if dense_update:
+                    update = (torch.outer((s - torch.sparse.mm(Jinv, z.unsqueeze(1)).squeeze(1)), sJinv)) / (torch.dot(sJinv, z))
+                    update = update.to_sparse()
+                else:
+                    # Only update nonzero elements
+                    update = torch.mul((s - torch.sparse.mm(Jinv, z.unsqueeze(1)).squeeze(1))[Jinv.indices()[0,:]], sJinv[Jinv.indices()[1,:]]) / (torch.dot(sJinv, z))
+                    update = torch.sparse_coo_tensor(Jinv.indices(), update, size)
+
+                Jinv = (Jinv + update).coalesce()
 
             if not converged:
                 warnings.warn('Functional iteration did not converge. Solution may be incorrect.')
@@ -552,6 +564,318 @@ class FixedGridDIRKODESolver(FixedGridFIRKODESolver):
         dy = torch.matmul(torch.stack(k, -1), dt * self.tableau.c_sol)
 
         return dy, f0
+    
+    def _residual(self, func, K, y, t, perturb):
+        res = K[...,-1] - func(t, y, perturb=perturb)
+        return res.flatten()
+
+class FIRKAdaptiveStepsizeODESolver(RKAdaptiveStepsizeODESolver):
+    order: int
+    tableau: _ButcherTableau
+    mid: torch.Tensor
+
+    def __init__(self, func, y0, rtol, atol,
+                 min_step=0,
+                 max_step=float('inf'),
+                 first_step=None,
+                 step_t=None,
+                 jump_t=None,
+                 safety=0.9,
+                 ifactor=10.0,
+                 dfactor=0.2,
+                 max_num_steps=2 ** 31 - 1,
+                 dtype=torch.float64,
+                 max_iters=100,
+                 **kwargs):
+        super(FIRKAdaptiveStepsizeODESolver, self).__init__(
+            func, y0, rtol, atol,
+            min_step,
+            max_step,
+            first_step,
+            step_t,
+            jump_t,
+            safety,
+            ifactor,
+            dfactor,
+            max_num_steps,
+            dtype,
+            **kwargs
+        )
+        self.max_iters = max_iters
+
+    def _runge_kutta_step(self, func, y0, f0, t0, dt, t1, tableau):
+        if not isinstance(t0, torch.Tensor):
+            t0 = torch.tensor(t0)
+        if not isinstance(dt, torch.Tensor):
+            dt = torch.tensor(dt)
+        if not isinstance(t1, torch.Tensor):
+            t1 = torch.tensor(t1)
+        
+        t_dtype = y0.abs().dtype
+        tol = 1e-8
+        if t_dtype == torch.float64:
+            tol = 1e-8
+        if t_dtype == torch.float32:
+            tol = 1e-6
+
+        t0 = t0.to(t_dtype)
+        dt = dt.to(t_dtype)
+        t1 = t1.to(t_dtype)
+
+        k = f0.clone().unsqueeze(-1).tile(len(tableau.alpha))
+        beta = torch.stack(tableau.beta, -1)
+
+        # Broyden's Method to solve the system of nonlinear equations
+        y = torch.matmul(k, beta * dt).add(y0.unsqueeze(-1)).movedim(-1, 0)
+        f = self._residual(func, k, y, t0, dt, t1)
+        values = torch.ones_like(f)
+        indices = torch.arange(values.numel(), dtype=torch.int64, device=values.device)
+        indices = torch.stack((indices, indices))
+        size = (f.numel(), f.numel())
+        Jinv = torch.sparse_coo_tensor(indices, values, size).coalesce() # Sherman-Morrison Good Method
+
+        converged = False
+        dense_update = False
+        for _ in range(self.max_iters):
+            if (
+                (torch.linalg.vector_norm(f) < (tol * torch.linalg.vector_norm(k))) or
+                (torch.linalg.vector_norm(f) < (tol * tol))
+            ):
+                converged = True
+                break
+
+            s = -torch.sparse.mm(Jinv, f.unsqueeze(1)).squeeze(1)
+            if not torch.all(torch.isfinite(s)):
+                break
+
+            k = k + s.reshape_as(k)
+            y = torch.matmul(k, beta * dt).add(y0.unsqueeze(-1)).movedim(-1, 0)
+            newf = self._residual(func, k, y, t0, dt, t1)
+            z = newf - f
+            f = newf
+
+            sJinv = torch.sparse.mm(Jinv.t(), s.unsqueeze(1)).squeeze(1)
+
+            if dense_update:
+                update = (torch.outer((s - torch.sparse.mm(Jinv, z.unsqueeze(1)).squeeze(1)), sJinv)) / (torch.dot(sJinv, z))
+                update = update.to_sparse()
+            else:
+                # Only update nonzero elements
+                update = torch.mul((s - torch.sparse.mm(Jinv, z.unsqueeze(1)).squeeze(1))[Jinv.indices()[0,:]], sJinv[Jinv.indices()[1,:]]) / (torch.dot(sJinv, z))
+                update = torch.sparse_coo_tensor(Jinv.indices(), update, size)
+
+            Jinv = (Jinv + update).coalesce()
+
+        if not converged:
+            warnings.warn('Functional iteration did not converge. Solution may be incorrect.')
+
+        y1 = y0 + torch.matmul(k, dt * tableau.c_sol)
+        f1 = k[..., -1]
+        y1_error = torch.sum(k * (dt * tableau.c_error), dim=-1)
+        return y1, f1, y1_error, k
+
+    def _residual(self, func, K, y, t0, dt, t1):
+        res = torch.zeros_like(K)
+        for i, (y_i, alpha_i) in enumerate(zip(y, self.tableau.alpha)):
+            perturb = Perturb.NONE
+            if alpha_i == 1.:
+                ti = t1
+                perturb = Perturb.PREV
+            elif alpha_i == 0.:
+                if not torch.all(self.tableau.beta[i]):
+                    # Same slope as stored so skip
+                    continue
+                ti = t0
+            else:
+                ti = t0 + alpha_i * dt
+            res[...,i] = K[...,i] - func(ti, y_i, perturb=perturb)
+        return res.flatten()
+
+    def _adaptive_step(self, rk_state):
+        """Take an adaptive Runge-Kutta step to integrate the ODE."""
+        y0, f0, _, t0, dt, interp_coeff = rk_state
+        if not torch.isfinite(dt):
+            dt = self.min_step
+        dt = dt.clamp(self.min_step, self.max_step)
+        self.func.callback_step(t0, y0, dt)
+        t1 = t0 + dt
+        # dtypes: self.y0.dtype (probably float32); self.dtype (probably float64)
+        # used for state and timelike objects respectively.
+        # Then:
+        # y0.dtype == self.y0.dtype
+        # f0.dtype == self.y0.dtype
+        # t0.dtype == self.dtype
+        # dt.dtype == self.dtype
+        # for coeff in interp_coeff: coeff.dtype == self.y0.dtype
+
+        ########################################################
+        #                      Assertions                      #
+        ########################################################
+        assert t0 + dt > t0, 'underflow in dt {}'.format(dt.item())
+        assert torch.isfinite(y0).all(), 'non-finite values in state `y`: {}'.format(y0)
+
+        ########################################################
+        #     Make step, respecting prescribed grid points     #
+        ########################################################
+
+        on_step_t = False
+        if len(self.step_t):
+            next_step_t = self.step_t[self.next_step_index]
+            on_step_t = t0 < next_step_t < t0 + dt
+            if on_step_t:
+                t1 = next_step_t
+                dt = t1 - t0
+
+        on_jump_t = False
+        if len(self.jump_t):
+            next_jump_t = self.jump_t[self.next_jump_index]
+            on_jump_t = t0 < next_jump_t < t0 + dt
+            if on_jump_t:
+                on_step_t = False
+                t1 = next_jump_t
+                dt = t1 - t0
+
+        # Must be arranged as doing all the step_t handling, then all the jump_t handling, in case we
+        # trigger both. (i.e. interleaving them would be wrong.)
+
+        y1, f1, y1_error, k = self._runge_kutta_step(self.func, y0, f0, t0, dt, t1, tableau=self.tableau)
+        # dtypes:
+        # y1.dtype == self.y0.dtype
+        # f1.dtype == self.y0.dtype
+        # y1_error.dtype == self.dtype
+        # k.dtype == self.y0.dtype
+
+        ########################################################
+        #                     Error Ratio                      #
+        ########################################################
+        error_ratio = _compute_error_ratio(y1_error, self.rtol, self.atol, y0, y1, self.norm)
+        accept_step = error_ratio <= 1
+
+        # Handle min max stepping
+        if dt > self.max_step:
+            accept_step = False
+        if dt <= self.min_step:
+            accept_step = True
+
+        # dtypes:
+        # error_ratio.dtype == self.dtype
+
+        ########################################################
+        #                   Update RK State                    #
+        ########################################################
+        if accept_step:
+            self.func.callback_accept_step(t0, y0, dt)
+            t_next = t1
+            y_next = y1
+            interp_coeff = self._interp_fit(y0, y_next, k, dt)
+            if on_step_t:
+                if self.next_step_index != len(self.step_t) - 1:
+                    self.next_step_index += 1
+            if on_jump_t:
+                if self.next_jump_index != len(self.jump_t) - 1:
+                    self.next_jump_index += 1
+                # We've just passed a discontinuity in f; we should update f to match the side of the discontinuity
+                # we're now on.
+                f1 = self.func(t_next, y_next, perturb=Perturb.NEXT)
+            f_next = f1
+        else:
+            self.func.callback_reject_step(t0, y0, dt)
+            t_next = t0
+            y_next = y0
+            f_next = f0
+        dt_next = _optimal_step_size(dt, error_ratio, self.safety, self.ifactor, self.dfactor, self.order)
+        dt_next = dt_next.clamp(self.min_step, self.max_step)
+        rk_state = _RungeKuttaState(y_next, f_next, t0, t_next, dt_next, interp_coeff)
+        return rk_state
+
+class DIRKAdaptiveStepsizeODESolver(FIRKAdaptiveStepsizeODESolver):
+
+    def _runge_kutta_step(self, func, y0, f0, t0, dt, t1, tableau):
+        if not isinstance(t0, torch.Tensor):
+            t0 = torch.tensor(t0)
+        if not isinstance(dt, torch.Tensor):
+            dt = torch.tensor(dt)
+        if not isinstance(t1, torch.Tensor):
+            t1 = torch.tensor(t1)
+        
+        t_dtype = y0.abs().dtype
+        tol = 1e-8
+        if t_dtype == torch.float64:
+            tol = 1e-8
+        if t_dtype == torch.float32:
+            tol = 1e-6
+
+        t0 = t0.to(t_dtype)
+        dt = dt.to(t_dtype)
+        t1 = t1.to(t_dtype)
+
+        k = [f0.clone() for _ in range(len(tableau.alpha))]
+
+        for i, (alpha_i, beta_i) in enumerate(zip(tableau.alpha, tableau.beta)):
+            perturb = Perturb.NONE
+            if alpha_i == 1.:
+                ti = t1
+                perturb = Perturb.PREV
+            elif alpha_i == 0.:
+                if not torch.all(tableau.beta[i]):
+                    # Same slope as stored so skip
+                    continue
+                ti = t0
+            else:
+                ti = t0 + alpha_i * dt
+
+            k_i = torch.stack(k[:i+1], -1)
+
+            # Broyden's Method to solve the system of nonlinear equations
+            y_i = torch.matmul(k_i, beta_i * dt).add(y0)
+            f = self._residual(func, k_i, y_i, ti, perturb)
+            values = torch.ones_like(f)
+            indices = torch.arange(values.numel(), dtype=torch.int64, device=values.device)
+            indices = torch.stack((indices, indices))
+            size = (f.numel(), f.numel())
+            Jinv = torch.sparse_coo_tensor(indices, values, size).coalesce() # Sherman-Morrison Good Method
+
+            converged = False
+            dense_update = False
+            for _ in range(self.max_iters):
+                if (
+                    (torch.linalg.vector_norm(f) < (tol * torch.linalg.vector_norm(k[i].unsqueeze(-1)))) or
+                    (torch.linalg.vector_norm(f) < (tol * tol))
+                ):
+                    converged = True
+                    break
+
+                s = -torch.sparse.mm(Jinv, f.unsqueeze(1)).squeeze(1)
+                if not torch.all(torch.isfinite(s)):
+                    break
+
+                k[i] = k[i] + s.reshape_as(k[i])
+                k_i = torch.stack(k[:i+1], -1)
+                y_i = torch.matmul(k_i, beta_i * dt).add(y0)
+                newf = self._residual(func, k_i, y_i, ti, perturb)
+                z = newf - f
+                f = newf
+
+                sJinv = torch.sparse.mm(Jinv.t(), s.unsqueeze(1)).squeeze(1)
+
+                if dense_update:
+                    update = (torch.outer((s - torch.sparse.mm(Jinv, z.unsqueeze(1)).squeeze(1)), sJinv)) / (torch.dot(sJinv, z))
+                    update = update.to_sparse()
+                else:
+                    # Only update nonzero elements
+                    update = torch.mul((s - torch.sparse.mm(Jinv, z.unsqueeze(1)).squeeze(1))[Jinv.indices()[0,:]], sJinv[Jinv.indices()[1,:]]) / (torch.dot(sJinv, z))
+                    update = torch.sparse_coo_tensor(Jinv.indices(), update, size)
+
+                Jinv = (Jinv + update).coalesce()
+
+            if not converged:
+                warnings.warn('Functional iteration did not converge. Solution may be incorrect.')
+
+        k = torch.stack(k, -1)
+        y1 = y0 + torch.matmul(k, dt * tableau.c_sol)
+        f1 = k[..., -1]
+        y1_error = torch.sum(k * (dt * tableau.c_error), dim=-1)
+        return y1, f1, y1_error, k
     
     def _residual(self, func, K, y, t, perturb):
         res = K[...,-1] - func(t, y, perturb=perturb)

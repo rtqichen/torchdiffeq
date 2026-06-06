@@ -263,9 +263,9 @@ class TestMinMaxStep(unittest.TestCase):
                             torchdiffeq.odeint(f, y0, t_points, method=method, options=options)
                             # Check min step produces far fewer evaluations
                             if min_step > 0:
-                                self.assertLess(f.nfe, 50)
+                                self.assertLess(f.nfe, 50, f'Using {method} with {options}')
                             else:
-                                self.assertGreater(f.nfe, 100)
+                                self.assertGreater(f.nfe, 100, f'Using {method} with {options}')
 
 
 class _NeuralF(torch.nn.Module):

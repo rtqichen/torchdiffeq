@@ -4,7 +4,7 @@
 
 Adaptive and fixed solvers all support several options. Also shown are their default values.
 
-**Adaptive solvers (dopri8, dopri5, bosh3, adaptive_heun):**<br>
+**Adaptive solvers (dopri8, dopri5, tsit5, bosh3, adaptive_heun):**<br>
 For these solvers, `rtol` and `atol` correspond to the tolerances for accepting/rejecting an adaptive step.
 
 - `first_step=None`: What size the first step of the solver should be; by default this is selected empirically.
@@ -28,6 +28,18 @@ For these solvers, `rtol` and `atol` correspond to the tolerances for accepting/
 - `grid_constructor=None`: A more fine-grained way of setting the steps, by setting these particular locations as the locations of the steps. Should be a callable `func, y0, t -> grid`, transforming the arguments `func, y0, t` of `odeint` into the desired grid (which should be a one dimensional tensor).
 
 - `perturb`: Defaults to False. If True, then automatically add small perturbations to the start and end of each step, so that stepping to discontinuities works. Note that this this may not be efficient when using PyTorch 1.6.0 or earlier.
+
+**Implicit fixed solvers (implicit_euler, implicit_midpoint, trapezoid, radauIIA3, radauIIA5, gl4, gl6, sdirk2, trbdf2):**<br>
+
+All options from adaptive solvers are here as well. Additional parameters also include:
+
+- `max_iters`: The maximum number of Sherman-Morrison iterations to minimize the implicit solution residual.
+
+**Implicit adaptive solvers (adaptive_gl4, adaptive_gl6, kvaerno3, kvaerno4, kvaerno5):**<br>
+
+All options from adaptive solvers are here as well. Additional parameters also include:
+
+- `max_iters`: The maximum number of Sherman-Morrison iterations to minimize the implicit solution residual.
 
 Individual solvers also offer certain options.
 
