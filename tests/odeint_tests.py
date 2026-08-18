@@ -166,11 +166,6 @@ class TestDiscontinuities(unittest.TestCase):
             for dtype in DTYPES:
                 for device in DEVICES:
                     for method in FIXED_METHODS:
-
-                        # Singluar matrix error with float32 and implicit_euler
-                        if dtype == torch.float32 and method == 'implicit_euler':
-                            continue
-
                         for perturb in (True, False):
                             with self.subTest(adjoint=adjoint, dtype=dtype, device=device, method=method,
                                               perturb=perturb):
