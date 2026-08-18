@@ -593,16 +593,21 @@ class FixedGridImplicitODESolver(FixedGridODESolver):
         except Exception:
             return x
 
-    def _check(self, converged, dy, method_name):
+    def _check(self, converged, dy, method_name, t0):
         if not torch.isfinite(dy).all():
             raise RuntimeError(
-                '{}: the implicit step produced non-finite values -- the nonlinear solve diverged. '
-                'Reduce `step_size`, or use an adaptive method such as `dopri5`.'.format(method_name))
+                '{}: the implicit step at t={:.6g} produced non-finite values -- the nonlinear solve '
+                'diverged. Reduce `step_size`, or use an adaptive method such as `dopri5`.'
+                .format(method_name, float(t0)))
         if not converged:
             warnings.warn(
-                "{}: the nonlinear solve did not reach its tolerance within max_iters={}. The solution "
-                "may be inaccurate; try a smaller `step_size`, or a larger `max_iters` via "
-                "`options=dict(max_iters=...)`.".format(method_name, self.max_iters),
+                "{}: the nonlinear solve did not converge at t={:.6g}. Treat the returned solution as "
+                "wrong rather than merely imprecise -- a step that fails here can settle on a different "
+                "branch of the solution entirely. Reduce `step_size` until this warning stops. Note that "
+                "`max_iters` rarely helps (the iteration stalls rather than running out of steps), and "
+                "`rtol`/`atol` only set how tightly this solve must converge, not the accuracy of the "
+                "integration itself -- for a fixed-grid method that is governed by `step_size`."
+                .format(method_name, float(t0)),
                 RuntimeWarning)
 
 
@@ -674,7 +679,7 @@ class FixedGridFIRKODESolver(FixedGridImplicitODESolver):
         k = _restore_explicit(x).reshape(*f0.shape, s)
 
         dy = torch.matmul(k, dt * self.tableau.c_sol)
-        self._check(converged, dy, type(self).__name__)
+        self._check(converged, dy, type(self).__name__, t0)
         return dy, f0
 
     def _stage_times(self, t0, dt, t1):
@@ -762,5 +767,5 @@ class FixedGridDIRKODESolver(FixedGridImplicitODESolver):
             all_converged = all_converged and converged
 
         dy = torch.matmul(torch.stack(k, -1), dt * self.tableau.c_sol)
-        self._check(all_converged, dy, type(self).__name__)
+        self._check(all_converged, dy, type(self).__name__, t0)
         return dy, f0
