@@ -21,13 +21,26 @@ For these solvers, `rtol` and `atol` correspond to the tolerances for accepting/
 
 - `norm`: What norm to compute the accept/reject criterion with respect to. Given tensor input, this defaults to an RMS norm. Given tupled input, this defaults to computing an RMS norm over each tensor, and then taking a max over the tuple, producing a mixed L-infinity/RMS norm. If passed this should be a function consuming a tensor/tuple with the same shape as `y0`, and return a scalar corresponding to its norm. When passed as part of `adjoint_options`, then the special value `"seminorm"` may be used to zero out the contribution from the parameters, as per the ["Hey, that's not an ODE"](https://arxiv.org/abs/2009.09457) paper.
 
-**Fixed solvers (euler, midpoint, rk4, explicit_adams, implicit_adams):**<br>
+**Adaptive implicit solvers (radau, lsoda):**<br>
+These choose their own step sizes *and* handle stiff problems, so they need neither `step_size` nor `grid_constructor`. Both support gradients by direct backpropagation as well as through `odeint_adjoint`, and both run on GPU and on batched states -- unlike `scipy_solver`, which drops to NumPy and only supports the adjoint.
+
+- `radau`: 3-stage Radau IIA, order 5. L-stable and stiffly accurate, with an embedded error estimator. A good default when the problem is stiff throughout.
+
+- `lsoda`: variable-order Adams-Moulton (orders 1-12) for non-stiff stretches and variable-order BDF (orders 1-5) for stiff ones, switching automatically between them. Prefer it when the problem is only stiff some of the time, or when you do not know in advance. Options: `max_order_adams=12`, `max_order_bdf=5`, `corrector_iters=4`, `switch_patience=3`, `switch_cooldown=10`, `max_rejects=40`.
+
+- Shared options: `first_step`, `min_step`, `max_step`, `max_num_steps`. `radau` also takes `newton_iters=12` and `grad_jacobian='exact'` -- switch the latter to `'iterative'` if the state is large enough that an exact Jacobian per step (one backward pass per component) costs more than the four extra residual evaluations the iterative re-attach needs.
+
+**Fixed solvers (euler, midpoint, heun2, heun3, rk4, explicit_adams, implicit_adams, and the implicit family implicit_euler, implicit_midpoint, trapezoid, radauIIA3, radauIIA5, gl4, gl6, sdirk2, trbdf2):**<br>
 
 - `step_size=None`: How large each discrete step should be. If not passed then this defaults to stepping between the values of `t`. Note that if using `t` just to specify the start and end of the regions of integration, then it is very important to specify this argument! It is mutually exclusive with the `grid_constructor` argument, below.
 
 - `grid_constructor=None`: A more fine-grained way of setting the steps, by setting these particular locations as the locations of the steps. Should be a callable `func, y0, t -> grid`, transforming the arguments `func, y0, t` of `odeint` into the desired grid (which should be a one dimensional tensor).
 
 - `perturb`: Defaults to False. If True, then automatically add small perturbations to the start and end of each step, so that stepping to discontinuities works. Note that this this may not be efficient when using PyTorch 1.6.0 or earlier.
+
+- `interp`: Defaults to `'linear'`. How values at requested times between grid points are interpolated; `'cubic'` uses the derivative at both ends and is markedly better when the output times are sparse relative to the steps. Note that with a non-uniform grid this interpolation can dominate the total error.
+
+- `max_iters`: Implicit fixed-grid solvers only, default 100. Iteration cap for the nonlinear solve at each step. Rarely the useful knob when the solve fails to converge -- the iteration usually stalls rather than running out of steps, and reducing `step_size` is what helps. Note that for these solvers `rtol`/`atol` set only how tightly the stage equations must be solved; the accuracy of the integration is governed by `step_size`.
 
 Individual solvers also offer certain options.
 

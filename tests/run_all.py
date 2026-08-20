@@ -1,4 +1,5 @@
 import unittest
+from adaptive_implicit_tests import *
 from api_tests import *
 from event_tests import *
 from gradient_tests import *
