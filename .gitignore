@@ -4,5 +4,6 @@
 *__pycache__*
 *.pyc
 .vscode
+.venv
 build
 dist
