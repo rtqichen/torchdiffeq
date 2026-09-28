@@ -369,7 +369,14 @@ class RadauIIA5Adaptive(AdaptiveStepsizeEventODESolver):
         needed many iterations is charged for it, because growing the step would
         make the next solve harder still.
         """
-        error_ratio = float(error_ratio)
+        # `.detach()` deliberately: this is the adaptive STEP CONTROLLER, not
+        # part of the solution. `error_ratio` inherits requires_grad from `y`
+        # whenever the caller wants gradients, and converting it to a Python
+        # float silently drops that gradient -- which is correct here (a
+        # discrete step-size decision is not differentiated) but emits
+        # "Converting a tensor with requires_grad=True to a scalar". Detaching
+        # first states the intent and keeps the warning for cases that matter.
+        error_ratio = float(error_ratio.detach())
         m = 2 * self.newton_iters
         safety = self.safety * (m + 1) / (m + n_iter)
         if error_ratio == 0:

@@ -204,7 +204,10 @@ class LSODA(AdaptiveStepsizeEventODESolver):
         return 1.0 / (self.rtol.to(y.dtype) * y.abs() + self.atol.to(y.dtype))
 
     def _wnorm(self, v, ewt):
-        return float((v.reshape(-1) * ewt).pow(2).mean().sqrt())
+        # `.detach()` for the same reason as `RadauIIA5Adaptive._step_factor`:
+        # this weighted norm only drives step/order control, so dropping its
+        # gradient is intended rather than accidental.
+        return float((v.reshape(-1) * ewt).pow(2).mean().sqrt().detach())
 
     def _jacobian(self, t, y):
         y_ = y.detach()
