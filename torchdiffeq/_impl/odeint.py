@@ -12,6 +12,8 @@ from .fixed_grid_implicit import SDIRK2, TRBDF2
 from .fixed_adams import AdamsBashforth, AdamsBashforthMoulton
 from .dopri8 import Dopri8Solver
 from .tsit5 import Tsit5Solver
+from .radau import RadauIIA5Adaptive
+from .lsoda import LSODA
 from .scipy_wrapper import ScipyWrapperODESolver
 from .misc import _check_inputs, _flat_to_shape
 from .interp import _interp_evaluate
@@ -20,6 +22,8 @@ SOLVERS = {
     'dopri8': Dopri8Solver,
     'dopri5': Dopri5Solver,
     'tsit5': Tsit5Solver,
+    'radau': RadauIIA5Adaptive,
+    'lsoda': LSODA,
     'bosh3': Bosh3Solver,
     'fehlberg2': Fehlberg2,
     'adaptive_heun': AdaptiveHeunSolver,

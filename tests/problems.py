@@ -71,8 +71,12 @@ FIXED_IMPLICIT_METHODS = ('implicit_euler', 'implicit_midpoint', 'trapezoid', 'r
 FIXED_METHODS = FIXED_EXPLICIT_METHODS + FIXED_IMPLICIT_METHODS
 ADAMS_METHODS = ('explicit_adams', 'implicit_adams')
 ADAPTIVE_METHODS = ('adaptive_heun', 'fehlberg2', 'bosh3', 'tsit5', 'dopri5', 'dopri8')
+# Adaptive *implicit* solvers. Kept out of ADAPTIVE_METHODS above: they carry a
+# Jacobian per step, so folding them into every parametrised test in the suite
+# takes it from two minutes to an hour. They are covered by adaptive_implicit_tests.
+ADAPTIVE_IMPLICIT_METHODS = ('radau', 'lsoda')
 SCIPY_METHODS = ('scipy_solver',)
-IMPLICIT_METHODS = FIXED_IMPLICIT_METHODS
+IMPLICIT_METHODS = FIXED_IMPLICIT_METHODS + ADAPTIVE_IMPLICIT_METHODS
 METHODS = FIXED_METHODS + ADAPTIVE_METHODS + SCIPY_METHODS
 
 

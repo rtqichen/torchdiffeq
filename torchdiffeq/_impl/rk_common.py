@@ -375,43 +375,245 @@ def _sort_tvals(tvals, t0):
     return torch.sort(tvals).values
 
 
-class FixedGridFIRKODESolver(FixedGridODESolver):
+class FixedGridImplicitODESolver(FixedGridODESolver):
+    """Common machinery for the fixed-grid implicit Runge-Kutta solvers.
+
+    Every step requires solving a system of nonlinear equations for the stage
+    derivatives `k`. For stage `i` the residual is
+
+        F(k) = k_i - f(t_i, y0 + dt * sum_j a_ij k_j)
+
+    and its Jacobian is `I - dt * a_ii * df/dy` (FIRK: `I - dt * (A kron df/dy)`).
+
+    This is solved by a damped Newton iteration using that Jacobian, evaluated at the
+    *current iterate*. Both of those matter on stiff problems:
+
+    * Seeding the iteration with the identity instead reduces the first step to a
+      plain functional (fixed point) iteration, which diverges whenever
+      `|dt * lambda| > 1` -- precisely the regime these solvers exist to handle.
+    * Freezing `df/dy` at `y0` is not enough either: for problems such as Robertson
+      the stiffness is invisible at the initial point (the stiff term is multiplied
+      by a component that starts at zero), so the Jacobian must be refreshed as the
+      iterate moves.
+    """
+
     order: int
     tableau: _ButcherTableau
 
-    def __init__(self, func, y0, step_size=None, grid_constructor=None, interp='linear', perturb=False, max_iters=100, **unused_kwargs):
+    # Number of step halvings the line search may try before declaring no descent.
+    _max_backtracks = 30
+
+    def __init__(self, func, y0, step_size=None, grid_constructor=None, interp='linear', perturb=False,
+                 max_iters=100, **unused_kwargs):
 
         self.max_iters = max_iters
-        self.atol = unused_kwargs.pop('atol')
-        unused_kwargs.pop('rtol', None)
-        unused_kwargs.pop('norm', None)
-        _handle_unused_kwargs(self, unused_kwargs)
-        del unused_kwargs
+        self.rtol = unused_kwargs.pop('rtol', 1e-7)
+        super(FixedGridImplicitODESolver, self).__init__(func=func, y0=y0, step_size=step_size,
+                                                        grid_constructor=grid_constructor, interp=interp,
+                                                        perturb=perturb, **unused_kwargs)
 
-        self.func = func
-        self.y0 = y0
-        self.dtype = y0.dtype
-        self.device = y0.device
-        self.step_size = step_size
-        self.interp = interp
-        self.perturb = perturb
-
-        if step_size is None:
-            if grid_constructor is None:
-                self.grid_constructor = lambda f, y0, t: t
-            else:
-                self.grid_constructor = grid_constructor
-        else:
-            if grid_constructor is None:
-                self.grid_constructor = self._grid_constructor_from_step_size(step_size)
-            else:
-                raise ValueError("step_size and grid_constructor are mutually exclusive arguments.")
-            
         self.tableau = _ButcherTableau(alpha=self.tableau.alpha.to(device=self.device, dtype=y0.dtype),
                                        beta=[b.to(device=self.device, dtype=y0.dtype) for b in self.tableau.beta],
                                        c_sol=self.tableau.c_sol.to(device=self.device, dtype=y0.dtype),
                                        c_error=self.tableau.c_error.to(device=self.device, dtype=y0.dtype))
-        
+
+    # ------------------------------------------------------------------ helpers
+
+    def _newton_tol(self, y0, dt):
+        """Tolerance for the nonlinear solve, expressed in units of the residual.
+
+        Derived from the user's `atol`/`rtol` rather than hardcoded, so it tracks the
+        accuracy actually being asked for, and floored at the level of floating point
+        round-off so that it always remains attainable.
+
+        The residual has the units of `dy/dt`, whereas `atol`/`rtol` describe `y`. The
+        two are reconciled by dividing by `dt`: an error of `tol` in `y` corresponds to
+        one of `tol / dt` in the stage derivatives. Comparing an unscaled residual
+        against a `y`-scale tolerance is what makes an otherwise perfectly converged
+        solve report failure on problems where `f` is large -- which is every stiff
+        problem.
+        """
+        dtype = y0.abs().dtype
+        scale = float(y0.abs().max().detach())
+        atol = float(self.atol.max() if torch.is_tensor(self.atol) else self.atol)
+        rtol = float(self.rtol.max() if torch.is_tensor(self.rtol) else self.rtol)
+        # Ask for rather more than the discretisation error we are aiming for,
+        # otherwise the nonlinear solve caps the accuracy of the high order methods.
+        tol_y = 1e-3 * (atol + rtol * scale)
+        tol_y = max(tol_y, 100 * torch.finfo(dtype).eps * max(scale, 1.0))
+        return tol_y / max(abs(float(dt)), torch.finfo(dtype).tiny)
+
+    def _jacobian(self, func, t, y, perturb=Perturb.NONE):
+        """(n, n) Jacobian of the flattened `func(t, .)` at `y`. Detached."""
+        n = y.numel()
+        y_ = y.detach()
+
+        def _g(z):
+            return func(t, z.view_as(y_), perturb=perturb).reshape(-1)
+
+        if torch.isfinite(y_).all():
+            try:
+                with torch.enable_grad():
+                    J = torch.autograd.functional.jacobian(_g, y_.reshape(-1), vectorize=True)
+                J = J.reshape(n, n).detach()
+                if torch.isfinite(J).all():
+                    return J
+            except Exception:
+                pass
+            try:
+                return self._fd_jacobian(_g, y_.reshape(-1), n)
+            except Exception:
+                pass
+        return torch.zeros(n, n, dtype=y_.dtype, device=y_.device)
+
+    @staticmethod
+    def _fd_jacobian(g, y_flat, n):
+        """Finite difference fallback, for functions autograd cannot differentiate."""
+        with torch.no_grad():
+            f0 = g(y_flat)
+            eps = torch.finfo(y_flat.abs().dtype).eps ** 0.5
+            J = torch.empty(n, n, dtype=f0.dtype, device=f0.device)
+            for i in range(n):
+                h = eps * max(float(y_flat[i].abs()), 1.0)
+                y_pert = y_flat.clone()
+                y_pert[i] = y_pert[i] + h
+                J[:, i] = (g(y_pert) - f0) / h
+        return J
+
+    @torch.no_grad()
+    def _solve_newton(self, residual_fn, jac_fn, x, tol):
+        """Damped Newton iteration on `residual_fn(x) == 0`, starting from `x`.
+
+        `jac_fn(x)` returns the Jacobian of the residual at `x`. It is refreshed
+        whenever the iteration stops converging quickly, and refined by Broyden's
+        "good" update in between. A backtracking line search keeps the residual
+        monotonically decreasing, so a bad step can never blow the iterate up to
+        inf/NaN and poison the rest of the integration.
+
+        Returns `(x, converged)`.
+        """
+        f = residual_fn(x)
+        if not torch.isfinite(f).all():
+            return x, False
+        f_norm = torch.linalg.norm(f, 2)
+        if f_norm < tol:
+            return x, True
+
+        J = jac_fn(x)
+        fresh = True
+
+        for _ in range(self.max_iters):
+            try:
+                step = -torch.linalg.solve(J, f)
+            except Exception:
+                # Singular Jacobian: nudge the diagonal and retry once.
+                eye = torch.eye(J.shape[0], dtype=J.dtype, device=J.device)
+                scale_ = torch.linalg.matrix_norm(J, ord=float('inf')).clamp(min=1.0)
+                try:
+                    step = -torch.linalg.solve(J + 1e-10 * scale_ * eye, f)
+                except Exception:
+                    return x, False
+            if not torch.isfinite(step).all():
+                if fresh:
+                    return x, False
+                J, fresh = jac_fn(x), True
+                continue
+
+            if torch.linalg.norm(step, 2) <= tol:
+                # Newton increment test. The step is an estimate of how far the current
+                # iterate still is from the root, so this says the remaining error is
+                # already below tolerance. It is the criterion that actually matters:
+                # the residual itself stalls at round-off (relative to `f`, which is
+                # huge on a stiff problem) and may never reach an absolute threshold.
+                return x + step, True
+
+            # Backtracking line search: never accept a step that makes things worse.
+            # With an exact Jacobian the Newton direction always reduces ||F|| for a
+            # small enough step, but "small enough" can be very small indeed on a
+            # strongly nonlinear problem (Robertson's 3e7 y^2 term, say), so the
+            # backtracking has to be allowed a wide range before giving up.
+            damp = 1.0
+            accepted = False
+            for _ in range(self._max_backtracks):
+                x_new = x + damp * step
+                f_new = residual_fn(x_new)
+                if torch.isfinite(f_new).all():
+                    f_new_norm = torch.linalg.norm(f_new, 2)
+                    if f_new_norm < f_norm:
+                        accepted = True
+                        break
+                damp *= 0.5
+
+            if not accepted:
+                if fresh:
+                    # Exact Jacobian and still no descent: we are as close as we get.
+                    return x, bool(f_norm < tol)
+                J, fresh = jac_fn(x), True
+                continue
+
+            s = damp * step
+            z = f_new - f
+            rate = f_new_norm / f_norm
+            x, f, f_norm = x_new, f_new, f_new_norm
+
+            if f_norm < tol:
+                return x, True
+
+            if damp < 1.0 or rate > 0.5:
+                # Converging slowly: the Jacobian is no longer a good model.
+                J, fresh = jac_fn(x), True
+            else:
+                # vecdot conjugates its first argument, so this is ||s||^2 and the
+                # outer product uses s-conjugate: both reduce to the usual Broyden
+                # update for real tensors, and stay correct for complex states.
+                denom = torch.linalg.vecdot(s, s).real
+                if denom > 0:
+                    J = J + torch.outer(z - torch.mv(J, s), s.conj()) / denom
+                    fresh = False
+
+        return x, bool(f_norm < tol)
+
+    @staticmethod
+    def _reattach(residual_fn, jac_fn, x):
+        """Re-attach the autograd graph with one differentiable Newton step from `x`.
+
+        The Newton iteration above runs under `no_grad`, so `x` carries no history.
+        Since the residual vanishes at `x`, `x - J^{-1} F(x)` has the same value but
+        the correct derivative with respect to `y0` and any parameters of `func` --
+        this is the implicit function theorem, and it is both cheaper and more
+        accurate than backpropagating through every iteration.
+        """
+        if not torch.is_grad_enabled():
+            return x
+        f = residual_fn(x)
+        if not f.requires_grad or not torch.isfinite(f).all():
+            return x
+        try:
+            return x - torch.linalg.solve(jac_fn(x), f)
+        except Exception:
+            return x
+
+    def _check(self, converged, dy, method_name, t0):
+        if not torch.isfinite(dy).all():
+            raise RuntimeError(
+                '{}: the implicit step at t={:.6g} produced non-finite values -- the nonlinear solve '
+                'diverged. Reduce `step_size`, or use an adaptive method such as `dopri5`.'
+                .format(method_name, float(t0)))
+        if not converged:
+            warnings.warn(
+                "{}: the nonlinear solve did not converge at t={:.6g}. Treat the returned solution as "
+                "wrong rather than merely imprecise -- a step that fails here can settle on a different "
+                "branch of the solution entirely. Reduce `step_size` until this warning stops. Note that "
+                "`max_iters` rarely helps (the iteration stalls rather than running out of steps), and "
+                "`rtol`/`atol` only set how tightly this solve must converge, not the accuracy of the "
+                "integration itself -- for a fixed-grid method that is governed by `step_size`."
+                .format(method_name, float(t0)),
+                RuntimeWarning)
+
+
+class FixedGridFIRKODESolver(FixedGridImplicitODESolver):
+    """Fully implicit Runge-Kutta: all stages are solved as one coupled system."""
+
     def _step_func(self, func, t0, dt, t1, y0):
         if not isinstance(t0, torch.Tensor):
             t0 = torch.tensor(t0)
@@ -420,70 +622,91 @@ class FixedGridFIRKODESolver(FixedGridODESolver):
         if not isinstance(t1, torch.Tensor):
             t1 = torch.tensor(t1)
         f0 = func(t0, y0, perturb=Perturb.NEXT if self.perturb else Perturb.NONE)
-        
-        t_dtype = y0.abs().dtype
-        tol = 1e-8
-        if t_dtype == torch.float64:
-            tol = 1e-8
-        if t_dtype == torch.float32:
-            tol = 1e-6
 
+        t_dtype = y0.abs().dtype
         t0 = t0.to(t_dtype)
         dt = dt.to(t_dtype)
         t1 = t1.to(t_dtype)
 
-        k = f0.clone().unsqueeze(-1).tile(len(self.tableau.alpha))
-        beta = torch.stack(self.tableau.beta, -1)
+        n = y0.numel()
+        s = len(self.tableau.alpha)
+        # beta_T[j, i] == a_ij, so `k @ beta_T` forms sum_j a_ij k_j for every stage i.
+        beta_T = torch.stack(self.tableau.beta, -1)
+        A = torch.stack(self.tableau.beta, 0)  # A[i, j] == a_ij
+        dt_y = dt.to(y0.dtype)
 
-        # Broyden's Method to solve the system of nonlinear equations
-        y = torch.matmul(k, beta * dt).add(y0.unsqueeze(-1)).movedim(-1, 0)
-        f = self._residual(func, k, y, t0, dt, t1)
-        J = torch.ones_like(f).diag()
-        converged = False
-        for _ in range(self.max_iters):
-            if torch.linalg.norm(f, 2) < tol:
-                converged = True
-                break
+        stages = self._stage_times(t0, dt, t1)
 
-            # If the matrix becomes singular, just stop and return the last value
-            try:
-                s = -torch.linalg.solve(J, f)
-            except torch._C._LinAlgError:
-                break
+        def _stage_states(x):
+            k = x.reshape(*f0.shape, s)
+            return k, torch.matmul(k, beta_T * dt).add(y0.unsqueeze(-1)).movedim(-1, 0)
 
-            k = k + s.reshape_as(k)
-            y = torch.matmul(k, beta * dt).add(y0.unsqueeze(-1)).movedim(-1, 0)
-            newf = self._residual(func, k, y, t0, dt, t1)
-            z = newf - f
-            f = newf
-            J = J + (torch.outer ((z - torch.linalg.vecdot(J,s)),s)) / (torch.dot(s,s))
+        def residual_fn(x):
+            k, y = _stage_states(x)
+            return self._residual(func, k, y, stages)
 
-        if not converged:
-            warnings.warn('Functional iteration did not converge. Solution may be incorrect.')
+        def jac_fn(x):
+            # J[(a,i),(b,j)] = delta_ab delta_ij - dt * a_ij * (df/dy at stage i)_ab,
+            # with the unknown flattened as k[state, stage].
+            _, y = _stage_states(x)
+            J = torch.eye(n * s, dtype=y0.dtype, device=y0.device)
+            for i, (ti, perturb, skip) in enumerate(stages):
+                if skip:
+                    continue
+                Jf = self._jacobian(func, ti, y[i], perturb=perturb).to(y0.dtype)
+                for j in range(s):
+                    a_ij = A[i, j]
+                    if a_ij != 0:
+                        J[i::s, j::s] -= (dt_y * a_ij) * Jf
+            return J
+
+        has_explicit = any(skip for _, _, skip in stages)
+
+        def _restore_explicit(x):
+            # An explicit stage is not part of the nonlinear system, so the Newton
+            # iteration never gives it an autograd history. Put `f0` itself back, both
+            # so that its own contribution to `dy` carries a gradient and so that the
+            # other stages' residuals see that `f0` depends on `y0` and on `func`'s
+            # parameters. Numerically this is a no-op: k_i already equals f0 there.
+            if not has_explicit:
+                return x
+            k = x.reshape(*f0.shape, s)
+            return torch.stack([f0 if stages[i][2] else k[..., i] for i in range(s)], dim=-1).reshape(-1)
+
+        k0 = f0.detach().reshape(-1, 1).tile(s).reshape(-1)
+        x, converged = self._solve_newton(residual_fn, jac_fn, k0, self._newton_tol(y0, dt))
+        x = self._reattach(residual_fn, jac_fn, _restore_explicit(x))
+        k = _restore_explicit(x).reshape(*f0.shape, s)
 
         dy = torch.matmul(k, dt * self.tableau.c_sol)
-
+        self._check(converged, dy, type(self).__name__, t0)
         return dy, f0
-    
-    def _residual(self, func, K, y, t0, dt, t1):
-        res = torch.zeros_like(K)
-        for i, (y_i, alpha_i) in enumerate(zip(y, self.tableau.alpha)):
-            perturb = Perturb.NONE
-            if alpha_i == 1.:
-                ti = t1
-                perturb = Perturb.PREV
-            elif alpha_i == 0.:
-                if not torch.all(self.tableau.beta[i]):
-                    # Same slope as stored so skip
-                    continue
-                ti = t0
-            else:
-                ti = t0 + alpha_i * dt
-            res[...,i] = K[...,i] - func(ti, y_i, perturb=perturb)
-        return res.flatten()
-    
 
-class FixedGridDIRKODESolver(FixedGridFIRKODESolver):
+    def _stage_times(self, t0, dt, t1):
+        """Per-stage `(t_i, perturb, skip)`. `skip` marks an explicit first stage."""
+        out = []
+        for i, alpha_i in enumerate(self.tableau.alpha):
+            if alpha_i == 1.:
+                out.append((t1, Perturb.PREV, False))
+            elif alpha_i == 0.:
+                # An explicit stage: y_i == y0 and k_i == f0, which is how it is
+                # initialised, so its residual is identically zero.
+                out.append((t0, Perturb.NONE, not bool(torch.any(self.tableau.beta[i]))))
+            else:
+                out.append((t0 + alpha_i * dt, Perturb.NONE, False))
+        return out
+
+    def _residual(self, func, K, y, stages):
+        res = torch.zeros_like(K)
+        for i, (ti, perturb, skip) in enumerate(stages):
+            if skip:
+                continue
+            res[..., i] = K[..., i] - func(ti, y[i], perturb=perturb)
+        return res.flatten()
+
+
+class FixedGridDIRKODESolver(FixedGridImplicitODESolver):
+    """Diagonally implicit Runge-Kutta: the stages are solved one after another."""
 
     def _step_func(self, func, t0, dt, t1, y0):
         if not isinstance(t0, torch.Tensor):
@@ -493,19 +716,19 @@ class FixedGridDIRKODESolver(FixedGridFIRKODESolver):
         if not isinstance(t1, torch.Tensor):
             t1 = torch.tensor(t1)
         f0 = func(t0, y0, perturb=Perturb.NEXT if self.perturb else Perturb.NONE)
-        
-        t_dtype = y0.abs().dtype
-        tol = 1e-8
-        if t_dtype == torch.float64:
-            tol = 1e-8
-        if t_dtype == torch.float32:
-            tol = 1e-6
 
+        t_dtype = y0.abs().dtype
         t0 = t0.to(t_dtype)
         dt = dt.to(t_dtype)
         t1 = t1.to(t_dtype)
 
-        k = [f0.clone()] * len(self.tableau.alpha)
+        n = y0.numel()
+        tol = self._newton_tol(y0, dt)
+        eye = torch.eye(n, dtype=y0.dtype, device=y0.device)
+        dt_y = dt.to(y0.dtype)
+
+        k = [f0] * len(self.tableau.alpha)
+        all_converged = True
 
         for i, (alpha_i, beta_i) in enumerate(zip(self.tableau.alpha, self.tableau.beta)):
             perturb = Perturb.NONE
@@ -513,46 +736,36 @@ class FixedGridDIRKODESolver(FixedGridFIRKODESolver):
                 ti = t1
                 perturb = Perturb.PREV
             elif alpha_i == 0.:
-                if not torch.all(self.tableau.beta[i]):
-                    # Same slope as stored so skip
+                if not torch.any(self.tableau.beta[i]):
+                    # Explicit first stage: k_i == f0 already.
                     continue
                 ti = t0
             else:
                 ti = t0 + alpha_i * dt
 
-            k_i = torch.stack(k[:i+1], -1)
+            prev = k[:i]
+            a_ii = beta_i[-1]
 
-            # Broyden's Method to solve the system of nonlinear equations
-            y_i = torch.matmul(k_i, beta_i * dt).add(y0)
-            f = self._residual(func, k_i, y_i, ti, perturb)
-            J = torch.ones_like(f).diag()
-            converged = False
-            for _ in range(self.max_iters):
-                if torch.linalg.norm(f, 2) < tol:
-                    converged = True
-                    break
+            def _stage_state(x, _prev=prev, _beta_i=beta_i):
+                k_i = torch.stack(_prev + [x.view_as(f0)], -1)
+                return k_i, torch.matmul(k_i, _beta_i * dt).add(y0)
 
-                # If the matrix becomes singular, just stop and return the last value
-                try:
-                    s = -torch.linalg.solve(J, f)
-                except torch._C._LinAlgError:
-                    break
+            def residual_fn(x, _ti=ti, _perturb=perturb):
+                k_i, y_i = _stage_state(x)
+                return (k_i[..., -1] - func(_ti, y_i, perturb=_perturb)).flatten()
 
-                k[i] = k[i] + s.reshape_as(k[i])
-                k_i = torch.stack(k[:i+1], -1)
-                y_i = torch.matmul(k_i, beta_i * dt).add(y0)
-                newf = self._residual(func, k_i, y_i, ti, perturb)
-                z = newf - f
-                f = newf
-                J = J + (torch.outer ((z - torch.linalg.vecdot(J,s)),s)) / (torch.dot(s,s))
+            def jac_fn(x, _ti=ti, _perturb=perturb, _a_ii=a_ii):
+                # dF/dk_i = I - dt * a_ii * df/dy, at the current stage state.
+                _, y_i = _stage_state(x)
+                if _a_ii == 0:
+                    return eye
+                Jf = self._jacobian(func, _ti, y_i, perturb=_perturb).to(y0.dtype)
+                return eye - (dt_y * _a_ii) * Jf
 
-            if not converged:
-                warnings.warn('Functional iteration did not converge. Solution may be incorrect.')
+            x, converged = self._solve_newton(residual_fn, jac_fn, k[i].detach().reshape(-1).clone(), tol)
+            k[i] = self._reattach(residual_fn, jac_fn, x).view_as(f0)
+            all_converged = all_converged and converged
 
         dy = torch.matmul(torch.stack(k, -1), dt * self.tableau.c_sol)
-
+        self._check(all_converged, dy, type(self).__name__, t0)
         return dy, f0
-    
-    def _residual(self, func, K, y, t, perturb):
-        res = K[...,-1] - func(t, y, perturb=perturb)
-        return res.flatten()
