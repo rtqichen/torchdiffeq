@@ -386,5 +386,66 @@ class TestCallbacks(unittest.TestCase):
                             self.assertEqual(adjoint_accept_counter + adjoint_reject_counter, adjoint_counter)
 
 
+class TestDenseOutput(unittest.TestCase):
+
+    def test_dense_output_decreasing_time(self):
+        for dtype in (torch.float32, torch.float64):
+            for start, end in ((0., 1.), (1., 0.)):
+                with self.subTest(dtype=dtype, start=start):
+                    y0 = torch.tensor([[1., -2.], [0.3, 4.]], dtype=dtype)
+                    t0 = torch.tensor(start, dtype=torch.float64)
+                    t1 = torch.tensor(end, dtype=torch.float64)
+                    dense = torchdiffeq.odeint_dense(lambda t, y: t ** 2 * torch.ones_like(y),
+                                                   y0, t0, t1, rtol=1e-7, atol=1e-9)
+                    for fraction in (0., 0.25, 0.5, 0.75, 1.):
+                        query = t0 + fraction * (t1 - t0)
+                        expected = y0 + (query ** 3 - t0 ** 3) / 3
+                        torch.testing.assert_close(dense(query), expected, rtol=2e-6, atol=2e-6)
+
+    def test_dense_output_initial_time_and_state_gradients(self):
+        for start, end in ((0., 1.), (1., 0.)):
+            with self.subTest(start=start):
+                y0 = torch.tensor([1., -2., 0.3], dtype=torch.float64, requires_grad=True)
+                t0 = torch.tensor(start, dtype=torch.float64, requires_grad=True)
+                query = torch.tensor(0.4, dtype=torch.float64, requires_grad=True)
+                rate = torch.tensor(0.7, dtype=torch.float64, requires_grad=True)
+                dense = torchdiffeq.odeint_dense(lambda t, y: rate * y, y0, t0, end,
+                                               rtol=1e-11, atol=1e-13)
+                output = dense(query)
+                expected = y0 * torch.exp(rate * (query - t0))
+                inputs = (y0, t0, query, rate)
+                actual_grads = torch.autograd.grad(output.sum(), inputs, allow_unused=True)
+                expected_grads = torch.autograd.grad(expected.sum(), inputs)
+                torch.testing.assert_close(output, expected, rtol=1e-9, atol=1e-11)
+                for actual, expected_grad in zip(actual_grads, expected_grads):
+                    self.assertIsNotNone(actual)
+                    torch.testing.assert_close(actual, expected_grad, rtol=1e-7, atol=1e-9)
+
+    def test_dense_output_nonautonomous_time_gradients(self):
+        for start, end in ((0.2, 1.2), (1.2, 0.2)):
+            with self.subTest(start=start):
+                y0 = torch.tensor([1., -2.], dtype=torch.float64, requires_grad=True)
+                t0 = torch.tensor(start, dtype=torch.float64, requires_grad=True)
+                query = torch.tensor(0.6, dtype=torch.float64, requires_grad=True)
+                dense = torchdiffeq.odeint_dense(lambda t, y: t ** 2 * torch.ones_like(y),
+                                               y0, t0, end, rtol=1e-11, atol=1e-13)
+                output = dense(query)
+                grads = torch.autograd.grad(output.sum(), (t0, query), allow_unused=True)
+                self.assertIsNotNone(grads[0])
+                torch.testing.assert_close(grads[0], -y0.numel() * t0 ** 2)
+                torch.testing.assert_close(grads[1], y0.numel() * query ** 2)
+
+    def test_dense_output_closed_step_endpoint(self):
+        for start, end in ((0., 1.), (1., 0.)):
+            with self.subTest(start=start):
+                y0 = torch.tensor([1., -2.], dtype=torch.float64)
+                t0 = torch.tensor(start, dtype=torch.float64)
+                t1 = torch.tensor(end, dtype=torch.float64)
+                dense = torchdiffeq.odeint_dense(lambda t, y: torch.ones_like(y), y0, t0, t1,
+                                               options={'first_step': 1., 'max_step': 1.})
+                torch.testing.assert_close(dense(t0), y0)
+                torch.testing.assert_close(dense(t1), y0 + t1 - t0)
+
+
 if __name__ == '__main__':
     unittest.main()

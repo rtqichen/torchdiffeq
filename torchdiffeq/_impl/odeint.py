@@ -112,9 +112,9 @@ def odeint_dense(func, y0, t0, t1, *, rtol=1e-7, atol=1e-9, method=None, options
 
     assert torch.is_tensor(y0)  # TODO: handle tuple of tensors
 
-    t = torch.tensor([t0, t1]).to(t0)
+    t = torch.stack([t0, torch.as_tensor(t1, dtype=t0.dtype, device=t0.device)])
 
-    shapes, func, y0, t, rtol, atol, method, options, _, _ = _check_inputs(func, y0, t, rtol, atol, method, options, None, SOLVERS)
+    shapes, func, y0, t, rtol, atol, method, options, _, t_is_reversed = _check_inputs(func, y0, t, rtol, atol, method, options, None, SOLVERS)
 
     assert method == "dopri5"
 
@@ -148,7 +148,11 @@ def odeint_dense(func, y0, t0, t1, *, rtol=1e-7, atol=1e-9, method=None, options
     interp_coeffs = torch.stack(interp_coeffs)
 
     def dense_output_fn(t_eval):
-        idx = torch.searchsorted(times, t_eval, side="right")
+        t_eval = t_eval.to(times)
+        if t_is_reversed:
+            t_eval = -t_eval
+        # The last accepted endpoint belongs to the final interpolation interval.
+        idx = torch.searchsorted(times, t_eval, side="right").clamp(1, len(times) - 1)
         t0 = times[idx - 1]
         t1 = times[idx]
         coef = [interp_coeffs[idx - 1][i] for i in range(interp_coeffs.shape[1])]
