@@ -136,9 +136,12 @@ class OdeintAdjointMethod(torch.autograd.Function):
                     # We don't compute this unless we need to, to save some computation.
                     func_eval = func(t[i], y[i])
                     # Time is real, so use the real inner product for complex states.
-                    dLd_cur_t = (func_eval * grad_y[i].conj()).sum()
-                    if torch.is_complex(dLd_cur_t):
-                        dLd_cur_t = dLd_cur_t.real
+                    if torch.is_complex(grad_y[i]):
+                        dLd_cur_t = (func_eval * grad_y[i].conj()).sum().real
+                    elif torch.is_complex(func_eval):
+                        dLd_cur_t = (func_eval.conj() * grad_y[i]).sum().real
+                    else:
+                        dLd_cur_t = func_eval.reshape(-1).dot(grad_y[i].reshape(-1))
                     aug_state[0] -= dLd_cur_t
                     time_vjps[i] = dLd_cur_t
 
