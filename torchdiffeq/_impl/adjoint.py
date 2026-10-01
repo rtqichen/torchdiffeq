@@ -5,6 +5,13 @@ from .odeint import SOLVERS, odeint
 from .misc import _check_inputs, _flat_to_shape, _mixed_norm, _all_callback_names, _all_adjoint_callback_names
 
 
+def _restore_dtype(tensor, dtype):
+    # Flattening the augmented state can promote real entries to complex.
+    if torch.is_complex(tensor) and not dtype.is_complex:
+        tensor = tensor.real
+    return tensor.to(dtype=dtype)
+
+
 class OdeintAdjointMethod(torch.autograd.Function):
 
     @staticmethod
@@ -55,6 +62,7 @@ class OdeintAdjointMethod(torch.autograd.Function):
                 grad_y = grad_y[0]
 
             adjoint_params = tuple(adjoint_params)
+            state_dtype = y.dtype
 
             ##################################
             #      Set up initial state      #
@@ -72,8 +80,8 @@ class OdeintAdjointMethod(torch.autograd.Function):
             def augmented_dynamics(t, y_aug):
                 # Dynamics of the original system augmented with
                 # the adjoint wrt y, and an integrator wrt t and args.
-                y = y_aug[1]
-                adj_y = y_aug[2]
+                y = _restore_dtype(y_aug[1], state_dtype)
+                adj_y = _restore_dtype(y_aug[2], state_dtype)
                 # ignore gradients wrt time and parameters
 
                 with torch.enable_grad():
@@ -91,8 +99,9 @@ class OdeintAdjointMethod(torch.autograd.Function):
                     _y = torch.as_strided(y, (), ())  # noqa
                     _params = tuple(torch.as_strided(param, (), ()) for param in adjoint_params)  # noqa
 
+                    # A complex state can have a real-valued vector field.
                     vjp_t, vjp_y, *vjp_params = torch.autograd.grad(
-                        func_eval, (t, y) + adjoint_params, -adj_y,
+                        func_eval, (t, y) + adjoint_params, _restore_dtype(-adj_y, func_eval.dtype),
                         allow_unused=True, retain_graph=True
                     )
 
@@ -126,7 +135,13 @@ class OdeintAdjointMethod(torch.autograd.Function):
                     # Compute the effect of moving the current time measurement point.
                     # We don't compute this unless we need to, to save some computation.
                     func_eval = func(t[i], y[i])
-                    dLd_cur_t = func_eval.reshape(-1).dot(grad_y[i].reshape(-1))
+                    # Time is real, so use the real inner product for complex states.
+                    if torch.is_complex(grad_y[i]):
+                        dLd_cur_t = (func_eval * grad_y[i].conj()).sum().real
+                    elif torch.is_complex(func_eval):
+                        dLd_cur_t = (func_eval.conj() * grad_y[i]).sum().real
+                    else:
+                        dLd_cur_t = func_eval.reshape(-1).dot(grad_y[i].reshape(-1))
                     aug_state[0] -= dLd_cur_t
                     time_vjps[i] = dLd_cur_t
 
@@ -141,14 +156,15 @@ class OdeintAdjointMethod(torch.autograd.Function):
                 aug_state[2] += grad_y[i - 1]  # update any gradients wrt state at this time point
 
             if t_requires_grad:
-                time_vjps[0] = aug_state[0]
+                time_vjps[0] = _restore_dtype(aug_state[0], t.dtype)
 
             # Only compute gradient wrt initial time when in event handling mode.
             if event_mode and t_requires_grad:
                 time_vjps = torch.cat([time_vjps[0].reshape(-1), torch.zeros_like(_t[1:])])
 
-            adj_y = aug_state[2]
-            adj_params = aug_state[3:]
+            adj_y = _restore_dtype(aug_state[2], state_dtype)
+            adj_params = [_restore_dtype(adj_param, param.dtype)
+                          for adj_param, param in zip(aug_state[3:], adjoint_params)]
 
         return (None, None, adj_y, time_vjps, None, None, None, None, None, None, None, None, None, None, *adj_params)
 
