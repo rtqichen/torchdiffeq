@@ -142,7 +142,7 @@ class FixedGridODESolver(metaclass=abc.ABCMeta):
             dy, f0 = self._step_func(self.func, t0, dt, t1, y0)
             y1 = y0 + dy
 
-            sign1 = torch.sign(event_module(t1, y1))
+            sign1 = torch.sign(event_module(t1, y1),enable_sign_updates=True)
 
             if sign0 != sign1:
                 if self.interp == "linear":

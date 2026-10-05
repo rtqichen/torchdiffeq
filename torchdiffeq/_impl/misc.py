@@ -139,12 +139,13 @@ class _CombinedEventModule(torch.nn.Module):
         self.base_func = event_fn
         self.register_buffer("initial_signs", torch.sign(self.base_func(t0,y0)))
         self.register_buffer("nonzero_mask", self.initial_signs.not_equal(0))
+        self.register_buffer("zero_mask", torch.logical_not(self.nonzero_mask))
 
-    def forward(self, t, y, enable_sign_updates = True):
+    def forward(self, t, y, enable_sign_updates = False):
         event_vals = self.base_func(t,y)
         filtered_event_vals = torch.where(self.nonzero_mask,self.initial_signs*event_vals,math.inf)
         min_val = torch.min(filtered_event_vals)
-        if enable_sign_updates and torch.all(min_val.gt(0)):
+        if enable_sign_updates and torch.all(min_val.gt(0)) and torch.any(torch.masked_select(event_vals.eq(0),self.zero_mask)):
             self.set_signs(torch.sign(event_vals))
         return min_val
     
@@ -157,7 +158,7 @@ class _CombinedEventModule(torch.nn.Module):
             for _ in range(nitrs.long()):
                 t_mid = (t1 + t0) / 2.0
                 y_mid = interp_fn(t_mid)
-                sign_change_mid = self(t_mid, y_mid, enable_sign_updates = False) <= 0
+                sign_change_mid = self(t_mid, y_mid) <= 0
                 t0 = torch.where(sign_change_mid, t0, t_mid)
                 t1 = torch.where(sign_change_mid, t_mid, t1)
             event_t = (t0 + t1) / 2.0
@@ -167,6 +168,7 @@ class _CombinedEventModule(torch.nn.Module):
     def set_signs(self,sign_tensor):
         self.initial_signs = sign_tensor
         self.nozero_mask = self.initial_signs.not_equal(0)
+        self.zero_mask = torch.logical_not(self.nonzero_mask)
 
 class _TupleFunc(torch.nn.Module):
     def __init__(self, base_func, shapes):
