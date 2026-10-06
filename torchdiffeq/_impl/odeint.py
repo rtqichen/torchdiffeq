@@ -224,7 +224,9 @@ class ImplicitFnGradientRerouting(torch.autograd.Function):
         # Add the gradient from final state to final time value as if a regular odeint was called.
         grad_t = grad_t + torch.sum(grad_state * f_val)
 
-        dstate = dstate * (-grad_t / (dcdt + 1e-12)).reshape_as(c)
+        # For a transverse crossing the implicit derivative is scale invariant:
+        # adding an absolute epsilon changes gradients for equivalent event functions.
+        dstate = dstate * (-grad_t / dcdt).reshape_as(c)
 
         grad_state = grad_state + dstate
 
