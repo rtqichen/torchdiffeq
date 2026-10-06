@@ -219,10 +219,10 @@ class ImplicitFnGradientRerouting(torch.autograd.Function):
             c, (par_dt, dstate) = vjp(event_fn, (event_t, state_t))
 
         # Total derivative of event_fn wrt t evaluated at event_t.
-        dcdt = par_dt + torch.sum(dstate * f_val)
+        dcdt = par_dt + torch.sum(dstate.conj() * f_val).real
 
         # Add the gradient from final state to final time value as if a regular odeint was called.
-        grad_t = grad_t + torch.sum(grad_state * f_val)
+        grad_t = grad_t + torch.sum(grad_state.conj() * f_val).real
 
         dstate = dstate * (-grad_t / (dcdt + 1e-12)).reshape_as(c)
 
