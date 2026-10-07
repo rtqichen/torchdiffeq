@@ -1,6 +1,5 @@
 import abc
 import torch
-from .event_handling import find_event
 from .misc import _handle_unused_kwargs
 
 
@@ -38,13 +37,13 @@ class AdaptiveStepsizeODESolver(metaclass=abc.ABCMeta):
 class AdaptiveStepsizeEventODESolver(AdaptiveStepsizeODESolver, metaclass=abc.ABCMeta):
 
     @abc.abstractmethod
-    def _advance_until_event(self, event_fn):
+    def _advance_until_event(self, event_module):
         raise NotImplementedError
 
-    def integrate_until_event(self, t0, event_fn):
+    def integrate_until_event(self, t0, event_module):
         t0 = t0.to(self.y0.device, self.dtype)
         self._before_integrate(t0.reshape(-1))
-        event_time, y1 = self._advance_until_event(event_fn)
+        event_time, y1 = self._advance_until_event(event_module)
         solution = torch.stack([self.y0, y1], dim=0)
         return event_time, solution
 
@@ -127,14 +126,14 @@ class FixedGridODESolver(metaclass=abc.ABCMeta):
 
         return solution
 
-    def integrate_until_event(self, t0, event_fn):
+    def integrate_until_event(self, t0, event_module):
         assert self.step_size is not None, "Event handling for fixed step solvers currently requires `step_size` to be provided in options."
 
         t0 = t0.type_as(self.y0.abs())
         y0 = self.y0
         dt = self.step_size
 
-        sign0 = torch.sign(event_fn(t0, y0))
+        sign0 = torch.sign(event_module(t0, y0))
         max_itrs = 20000
         itr = 0
         while True:
@@ -143,7 +142,7 @@ class FixedGridODESolver(metaclass=abc.ABCMeta):
             dy, f0 = self._step_func(self.func, t0, dt, t1, y0)
             y1 = y0 + dy
 
-            sign1 = torch.sign(event_fn(t1, y1))
+            sign1 = torch.sign(event_module(t1, y1),enable_sign_updates=True)
 
             if sign0 != sign1:
                 if self.interp == "linear":
@@ -153,7 +152,7 @@ class FixedGridODESolver(metaclass=abc.ABCMeta):
                     interp_fn = lambda t: self._cubic_hermite_interp(t0, y0, f0, t1, y1, f1, t)
                 else:
                     raise ValueError(f"Unknown interpolation method {self.interp}")
-                event_time, y1 = find_event(interp_fn, sign0, t0, t1, event_fn, float(self.atol))
+                event_time, y1 = event_module.find_event(interp_fn, t0, t1, float(self.atol))
                 break
             else:
                 t0, y0 = t1, y1

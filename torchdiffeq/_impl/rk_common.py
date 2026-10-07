@@ -1,7 +1,6 @@
 import bisect
 import collections
 import torch
-from .event_handling import find_event
 from .interp import _interp_evaluate, _interp_fit
 from .misc import (_compute_error_ratio,
                    _select_initial_step,
@@ -249,19 +248,18 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeEventODESolver):
             n_steps += 1
         return _interp_evaluate(self.rk_state.interp_coeff, self.rk_state.t0, self.rk_state.t1, next_t)
 
-    def _advance_until_event(self, event_fn):
+    def _advance_until_event(self, event_module):
         """Returns t, state(t) such that event_fn(t, state(t)) == 0."""
-        if event_fn(self.rk_state.t1, self.rk_state.y1) == 0:
-            return (self.rk_state.t1, self.rk_state.y1)
-
+        
         n_steps = 0
-        sign0 = torch.sign(event_fn(self.rk_state.t1, self.rk_state.y1))
-        while sign0 == torch.sign(event_fn(self.rk_state.t1, self.rk_state.y1)):
+        sign0 = torch.sign(event_module(self.rk_state.t1, self.rk_state.y1))
+        while sign0 == torch.sign(event_module(self.rk_state.t1, self.rk_state.y1,enable_sign_updates=True)):
             assert n_steps < self.max_num_steps, 'max_num_steps exceeded ({}>={})'.format(n_steps, self.max_num_steps)
             self.rk_state = self._adaptive_step(self.rk_state)
             n_steps += 1
+
         interp_fn = lambda t: _interp_evaluate(self.rk_state.interp_coeff, self.rk_state.t0, self.rk_state.t1, t)
-        return find_event(interp_fn, sign0, self.rk_state.t0, self.rk_state.t1, event_fn, self.atol)
+        return event_module.find_event(interp_fn, self.rk_state.t0, self.rk_state.t1, self.atol)
 
     def _adaptive_step(self, rk_state):
         """Take an adaptive Runge-Kutta step to integrate the ODE."""
