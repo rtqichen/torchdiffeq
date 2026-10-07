@@ -386,5 +386,90 @@ class TestCallbacks(unittest.TestCase):
                             self.assertEqual(adjoint_accept_counter + adjoint_reject_counter, adjoint_counter)
 
 
+class TestAdamsGridSpacing(unittest.TestCase):
+    def test_shortened_final_step(self):
+        for method in ('explicit_adams', 'implicit_adams'):
+            for dtype in (torch.float32, torch.float64):
+                for reverse in (False, True):
+                    with self.subTest(method=method, dtype=dtype, reverse=reverse):
+                        t = torch.tensor([0., 1.], dtype=dtype)
+                        if reverse:
+                            t = t.flip(0)
+                        y0 = (t[0] ** 3 / 3).reshape(1)
+                        ys = torchdiffeq.odeint(lambda t, y: t ** 2 * torch.ones_like(y),
+                                               y0, t, method=method, options={'step_size': 0.3})
+                        torch.testing.assert_close(ys[:, 0], t ** 3 / 3, atol=2e-7, rtol=2e-6)
+
+    def test_changed_spacing_in_custom_and_default_grids(self):
+        grid = torch.tensor([0., 0.2, 0.4, 0.6, 0.65, 0.7, 0.75, 0.8, 0.9, 1.],
+                            dtype=torch.float64)
+        for method in ('explicit_adams', 'implicit_adams'):
+            for reverse in (False, True):
+                for custom_grid in (False, True):
+                    with self.subTest(method=method, reverse=reverse, custom_grid=custom_grid):
+                        integration_grid = grid.flip(0) if reverse else grid
+                        if custom_grid:
+                            t = integration_grid[[0, -1]]
+                            options = {'grid_constructor': lambda f, y0, t: integration_grid.to(t)}
+                        else:
+                            t = integration_grid
+                            options = {}
+                        ys = torchdiffeq.odeint(lambda t, y: t ** 2 * torch.ones_like(y),
+                                               (t[0] ** 3 / 3).reshape(1), t,
+                                               method=method, options=options)
+                        torch.testing.assert_close(ys[:, 0], t ** 3 / 3, atol=1e-13, rtol=1e-13)
+
+    def test_uniform_history_survives_roundoff_and_nonuniform_output_times(self):
+        for method in ('explicit_adams', 'implicit_adams'):
+            for dtype in (torch.float32, torch.float64):
+                with self.subTest(method=method, dtype=dtype):
+                    calls = []
+
+                    def f(t, y):
+                        calls.append(t)
+                        return torch.ones_like(y)
+
+                    t = torch.linspace(50., 51.2, 13, dtype=dtype)
+                    ys = torchdiffeq.odeint(f, torch.zeros(1, dtype=dtype), t, method=method)
+                    uniform_calls = len(calls)
+                    self.assertLess(uniform_calls, 3 * (len(t) - 1))
+                    torch.testing.assert_close(ys[:, 0], t - t[0], atol=1e-6, rtol=1e-6)
+
+                    calls.clear()
+                    # These are output times only; the custom integration grid is unchanged.
+                    output_t = torch.tensor([50., 50.03, 50.27, 50.8, 51.11, 51.2], dtype=dtype)
+                    ys = torchdiffeq.odeint(f, torch.zeros(1, dtype=dtype), output_t, method=method,
+                                           options={'grid_constructor': lambda f, y0, t_out: t})
+                    self.assertEqual(len(calls), uniform_calls)
+                    torch.testing.assert_close(ys[:, 0], output_t - output_t[0], atol=1e-6, rtol=1e-6)
+
+    def test_shortened_final_step_gradients(self):
+        for method in ('explicit_adams', 'implicit_adams'):
+            with self.subTest(method=method):
+                y0 = torch.tensor([0.4], dtype=torch.float64, requires_grad=True)
+                scale = torch.tensor(2., dtype=torch.float64, requires_grad=True)
+                t = torch.tensor([0., 1.], dtype=torch.float64, requires_grad=True)
+                ys = torchdiffeq.odeint(lambda t, y: scale * t ** 2 * torch.ones_like(y),
+                                       y0, t, method=method, options={'step_size': 0.3})
+                grads = torch.autograd.grad(ys[-1].sum(), (y0, scale, t))
+                torch.testing.assert_close(ys[-1], y0 + scale / 3, atol=1e-13, rtol=1e-13)
+                torch.testing.assert_close(grads[0], torch.ones_like(y0), atol=1e-13, rtol=1e-13)
+                torch.testing.assert_close(grads[1], torch.tensor(1. / 3, dtype=scale.dtype),
+                                           atol=1e-13, rtol=1e-13)
+                torch.testing.assert_close(grads[2], torch.tensor([0., 2.], dtype=t.dtype),
+                                           atol=1e-13, rtol=1e-13)
+
+    def test_large_time_origin_does_not_hide_changed_spacing(self):
+        offset = 2. ** 40
+        unit = 2. ** -12
+        t = offset + torch.tensor([0., 8., 16., 24., 28.], dtype=torch.float64) * unit
+        for method in ('explicit_adams', 'implicit_adams'):
+            with self.subTest(method=method):
+                ys = torchdiffeq.odeint(lambda time, y: (time - offset) * torch.ones_like(y),
+                                       torch.zeros(1, dtype=t.dtype), t, method=method)
+                expected = 0.5 * (t - offset) ** 2
+                torch.testing.assert_close(ys[:, 0], expected, atol=1e-18, rtol=1e-13)
+
+
 if __name__ == '__main__':
     unittest.main()

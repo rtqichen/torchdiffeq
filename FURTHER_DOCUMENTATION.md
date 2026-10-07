@@ -31,6 +31,8 @@ For these solvers, `rtol` and `atol` correspond to the tolerances for accepting/
 
 Individual solvers also offer certain options.
 
+The Adams solvers use fixed-step coefficients. When integration step lengths change, they restart their derivative history and use RK4 until equally spaced history is available again. The roundoff tolerance is capped relative to the previous step length so that large time origins do not hide substantial spacing changes.
+
 **explicit_adams:**<br>
 For this solver, `rtol` and `atol` are ignored. This solver also supports:
 

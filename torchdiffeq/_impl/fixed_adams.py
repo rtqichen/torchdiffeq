@@ -193,6 +193,17 @@ class AdamsBashforthMoulton(FixedGridODESolver):
         return error_ratio < 1
 
     def _step_func(self, func, t0, dt, t1, y0):
+        if self.prev_t is not None:
+            # Fixed Adams coefficients require equally spaced derivative history.
+            # Allow for roundoff when subtracting nearby grid timestamps.
+            time_scale = torch.stack([self.prev_t, t0, t1]).abs().max()
+            prev_dt = t0 - self.prev_t
+            eps = torch.finfo(t0.dtype).eps
+            # Absolute-time roundoff must not hide a large relative step change.
+            spacing_tol = torch.minimum(4 * eps * time_scale, eps ** 0.5 * prev_dt.abs())
+            if (dt - prev_dt).abs() > spacing_tol:
+                self.prev_f.clear()
+                self.prev_t = None
         f0 = func(t0, y0, perturb=Perturb.NEXT if self.perturb else Perturb.NONE)
         self._update_history(t0, f0)
         order = min(len(self.prev_f), self.max_order - 1)
