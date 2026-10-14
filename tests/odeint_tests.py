@@ -4,6 +4,7 @@ import warnings
 
 import torch
 import torchdiffeq
+from torchdiffeq._impl.misc import _PerturbFunc, Perturb
 
 from problems import (construct_problem, PROBLEMS, DTYPES, DEVICES, METHODS, ADAPTIVE_METHODS, FIXED_METHODS, SCIPY_METHODS, IMPLICIT_METHODS)
 
@@ -124,6 +125,45 @@ class _JumpF():
 
 
 class TestDiscontinuities(unittest.TestCase):
+    def test_perturb_large_times(self):
+        for dtype, origin in ((torch.float32, 2**24 + 8), (torch.float64, 2**53 + 8)):
+            for device in DEVICES:
+                for sign in (-1, 1):
+                    for perturb, direction in ((Perturb.NEXT, 1), (Perturb.PREV, -1)):
+                        with self.subTest(dtype=dtype, device=device, sign=sign, perturb=perturb):
+                            t = torch.tensor(sign * origin, dtype=dtype, device=device, requires_grad=True)
+                            y = torch.zeros((), dtype=dtype, device=device)
+                            actual = _PerturbFunc(lambda t, y: t)(t, y, perturb=perturb)
+                            self.assertEqual(actual.item(), sign * origin + 2 * direction)
+                            actual.backward()
+                            self.assertEqual(t.grad.item(), 1.)
+
+    def test_odeint_perturb_large_times(self):
+        for dtype, origin in ((torch.float32, 2**24 + 8), (torch.float64, 2**53 + 8)):
+            for device in DEVICES:
+                for sign in (-1, 1):
+                    for direction in (-1, 1):
+                        for method in ('euler', 'midpoint', 'rk4'):
+                            for adjoint in (False, True):
+                                with self.subTest(dtype=dtype, device=device, sign=sign, direction=direction,
+                                                  method=method, adjoint=adjoint):
+                                    start = sign * origin
+                                    t = torch.tensor([start, start + direction * 8], dtype=dtype, device=device)
+                                    x0 = torch.zeros((), dtype=dtype, device=device, requires_grad=True)
+                                    rate = torch.tensor(3., dtype=dtype, device=device, requires_grad=True)
+
+                                    def f(t, y):
+                                        active = (direction * (t - start) > 0).to(y)
+                                        return rate * active + 0 * y
+
+                                    odeint = (partial(torchdiffeq.odeint_adjoint, adjoint_params=(rate,))
+                                              if adjoint else torchdiffeq.odeint)
+                                    xs = odeint(f, x0, t, method=method, options=dict(step_size=4, perturb=True))
+                                    self.assertEqual(xs[-1].item(), direction * 24)
+                                    grad_x0, grad_rate = torch.autograd.grad(xs[-1], (x0, rate))
+                                    self.assertEqual(grad_x0.item(), 1.)
+                                    self.assertEqual(grad_rate.item(), direction * 8)
+
     def test_odeint_jump_t(self):
         for adjoint in (False, True):
             for dtype in DTYPES:
