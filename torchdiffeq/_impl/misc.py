@@ -187,10 +187,10 @@ class _PerturbFunc(torch.nn.Module):
         t = t.to(y.abs().dtype)
         if perturb is Perturb.NEXT:
             # Replace with next smallest representable value.
-            t = _nextafter(t, t + 1)
+            t = _nextafter(t, torch.full_like(t, float('inf')))
         elif perturb is Perturb.PREV:
             # Replace with prev largest representable value.
-            t = _nextafter(t, t - 1)
+            t = _nextafter(t, torch.full_like(t, -float('inf')))
         else:
             # Do nothing.
             pass
