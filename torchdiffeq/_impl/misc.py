@@ -69,7 +69,7 @@ def _select_initial_step(func, t0, y0, order, rtol, atol, norm, f0=None):
     d2 = torch.abs(norm((f1 - f0) / scale) / h0)
 
     if d1 <= 1e-15 and d2 <= 1e-15:
-        h1 = torch.max(torch.tensor(1e-6, dtype=dtype, device=device), h0 * 1e-3)
+        h1 = torch.max(torch.tensor(1e-6, dtype=h0.dtype, device=device), h0 * 1e-3)
     else:
         h1 = (0.01 / max(d1, d2)) ** (1. / float(order + 1))
     h1 = h1.abs()
