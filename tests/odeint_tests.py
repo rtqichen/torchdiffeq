@@ -57,6 +57,27 @@ class TestSolverError(unittest.TestCase):
                                 y = torchdiffeq.odeint(f, y0, t_points, method=method, **kwargs)
                                 self.assertLess(rel_error(sol, y), eps)
 
+    def test_stationary(self):
+        def f(t, y):
+            return torch.zeros_like(y)
+
+        for dtype in DTYPES + (torch.complex64, torch.complex128):
+            for device in DEVICES:
+                for method in ADAPTIVE_METHODS:
+                    for reverse in (False, True):
+                        for nonzero in (False, True):
+                            with self.subTest(dtype=dtype, device=device, method=method,
+                                              reverse=reverse, nonzero=nonzero):
+                                y0 = torch.zeros(4, dtype=dtype, device=device)
+                                if nonzero:
+                                    y0 = y0 + (1 + 1j if torch.is_complex(y0) else 1)
+                                t = torch.linspace(0, 1, 10, device=device, dtype=torch.float64)
+                                if reverse:
+                                    t = t.flip(0)
+                                y = torchdiffeq.odeint(f, y0, t, method=method)
+                                self.assertEqual(y.dtype, dtype)
+                                self.assertEqual((y - y0).abs().max().item(), 0.)
+
     def test_adjoint(self):
         for reverse in (False, True):
             for dtype in DTYPES:
