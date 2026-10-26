@@ -39,6 +39,8 @@ class ScipyWrapperODESolver(metaclass=abc.ABCMeta):
             min_step=self.min_step,
             max_step=self.max_step
         )
+        if not sol.success:
+            raise RuntimeError(f"SciPy solver '{self.solver}' failed: {sol.message}")
         sol = torch.tensor(sol.y).T.to(self.device, self.dtype)
         sol = sol.reshape(-1, *self.shape)
         return sol

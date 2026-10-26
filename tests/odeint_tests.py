@@ -95,6 +95,62 @@ class TestScipySolvers(unittest.TestCase):
                                 self.assertLess(rel_error(sol, y), eps)
 
 
+class TestScipyFailureReporting(unittest.TestCase):
+    def test_failed_integration(self):
+        for solver in ['RK45', 'DOP853', 'BDF']:
+            for reverse in (False, True):
+                for tuple_state in (False, True):
+                    with self.subTest(solver=solver, reverse=reverse, tuple_state=tuple_state):
+                        direction = -1 if reverse else 1
+                        t = direction * torch.tensor([0., 0.25, 2.], dtype=torch.float64)
+                        y0 = torch.tensor([1.], dtype=torch.float64)
+                        if tuple_state:
+                            y0 = (y0, y0.reshape(()))
+
+                            def func(t, y):
+                                return tuple(direction * y_i.square() for y_i in y)
+                        else:
+                            def func(t, y):
+                                return direction * y.square()
+
+                        # y = 1 / (1 - direction * t) blows up before the last
+                        # requested time. Do not return the valid partial prefix
+                        # as if the complete integration had succeeded.
+                        with self.assertRaisesRegex(RuntimeError, f"SciPy solver '{solver}' failed:"):
+                            torchdiffeq.odeint(func, y0, t, method='scipy_solver',
+                                              options={'solver': solver}, rtol=1e-8, atol=1e-10)
+
+    def test_successful_integration(self):
+        for solver in ['RK45', 'RK23', 'DOP853', 'Radau', 'BDF', 'LSODA']:
+            for reverse in (False, True):
+                for tuple_state in (False, True):
+                    with self.subTest(solver=solver, reverse=reverse, tuple_state=tuple_state):
+                        direction = -1 if reverse else 1
+                        t = direction * torch.tensor([0., 0.25, 0.5], dtype=torch.float64)
+                        matrix = torch.tensor([[1., 2.], [3., 4.]], dtype=torch.float64)
+                        scalar = torch.tensor(2., dtype=torch.float64)
+                        if tuple_state:
+                            y0 = (matrix, scalar)
+
+                            def func(t, y):
+                                return tuple(direction * y_i for y_i in y)
+                        else:
+                            y0 = matrix
+
+                            def func(t, y):
+                                return direction * y
+
+                        result = torchdiffeq.odeint(func, y0, t, method='scipy_solver',
+                                                   options={'solver': solver}, rtol=1e-8, atol=1e-10)
+                        results = result if tuple_state else (result,)
+                        initial_states = y0 if tuple_state else (y0,)
+                        for actual, initial in zip(results, initial_states):
+                            expected = torch.stack([initial * (direction * t_i).exp() for t_i in t])
+                            self.assertEqual(actual.shape, expected.shape)
+                            self.assertEqual(actual.dtype, initial.dtype)
+                            self.assertTrue(torch.allclose(actual, expected, rtol=1e-6, atol=1e-8))
+
+
 class TestNoIntegration(unittest.TestCase):
     def test_odeint(self):
         for reverse in (False, True):
