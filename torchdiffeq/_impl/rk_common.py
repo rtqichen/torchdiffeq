@@ -293,7 +293,7 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeEventODESolver):
         on_step_t = False
         if len(self.step_t):
             next_step_t = self.step_t[self.next_step_index]
-            on_step_t = t0 < next_step_t < t0 + dt
+            on_step_t = t0 < next_step_t <= t0 + dt
             if on_step_t:
                 t1 = next_step_t
                 dt = t1 - t0
@@ -301,7 +301,7 @@ class RKAdaptiveStepsizeODESolver(AdaptiveStepsizeEventODESolver):
         on_jump_t = False
         if len(self.jump_t):
             next_jump_t = self.jump_t[self.next_jump_index]
-            on_jump_t = t0 < next_jump_t < t0 + dt
+            on_jump_t = t0 < next_jump_t <= t0 + dt
             if on_jump_t:
                 on_step_t = False
                 t1 = next_jump_t
