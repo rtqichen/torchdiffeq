@@ -17,6 +17,7 @@ import torch
 
 from .event_handling import find_event
 from .interp import _interp_evaluate
+from .jacobian import JacobianEvaluator
 from .misc import Perturb, _compute_error_ratio, _select_initial_step, _handle_unused_kwargs
 from .solvers import AdaptiveStepsizeEventODESolver
 
@@ -66,6 +67,7 @@ class RadauIIA5Adaptive(AdaptiveStepsizeEventODESolver):
                  newton_iters=12,
                  grad_jacobian='exact',
                  grad_iters=4,
+                 jacobian='auto',
                  dtype=torch.float64,
                  **kwargs):
         super(RadauIIA5Adaptive, self).__init__(dtype=dtype, y0=y0, **kwargs)
@@ -88,6 +90,7 @@ class RadauIIA5Adaptive(AdaptiveStepsizeEventODESolver):
             raise ValueError("`grad_jacobian` must be 'iterative' or 'exact', got {!r}".format(grad_jacobian))
         self.grad_jacobian = grad_jacobian
         self.grad_iters = int(grad_iters)
+        self._jacobian_evaluator = JacobianEvaluator(jacobian, type(self).__name__)
         self.dtype = dtype
 
         y_dtype = y0.dtype
@@ -135,32 +138,7 @@ class RadauIIA5Adaptive(AdaptiveStepsizeEventODESolver):
 
     def _jacobian(self, t, y):
         """(n, n) Jacobian of the flattened `func(t, .)` at `y`, detached."""
-        y_ = y.detach()
-
-        def _g(z):
-            return self.func(t, z.view_as(y_)).reshape(-1)
-
-        try:
-            with torch.enable_grad():
-                J = torch.autograd.functional.jacobian(_g, y_.reshape(-1), vectorize=True)
-            J = J.reshape(self.n, self.n).detach()
-            if torch.isfinite(J).all():
-                return J
-        except Exception:
-            pass
-        return self._fd_jacobian(_g, y_.reshape(-1))
-
-    def _fd_jacobian(self, g, y_flat):
-        with torch.no_grad():
-            f0 = g(y_flat)
-            eps = torch.finfo(y_flat.abs().dtype).eps ** 0.5
-            J = torch.empty(self.n, self.n, dtype=f0.dtype, device=f0.device)
-            for i in range(self.n):
-                h = eps * max(float(y_flat[i].abs()), 1.0)
-                y_pert = y_flat.clone()
-                y_pert[i] = y_pert[i] + h
-                J[:, i] = (g(y_pert) - f0) / h
-        return J
+        return self._jacobian_evaluator(self.func, t, y)
 
     def _stage_residual(self, t, y, h, Z):
         """G(Z) = Z - h (A kron I) F(Z), with Z of shape (3, n)."""

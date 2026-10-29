@@ -3,6 +3,7 @@ import collections
 import torch
 from .event_handling import find_event
 from .interp import _interp_evaluate, _interp_fit
+from .jacobian import JacobianEvaluator
 from .misc import (_compute_error_ratio,
                    _select_initial_step,
                    _optimal_step_size,
@@ -404,9 +405,10 @@ class FixedGridImplicitODESolver(FixedGridODESolver):
     _max_backtracks = 30
 
     def __init__(self, func, y0, step_size=None, grid_constructor=None, interp='linear', perturb=False,
-                 max_iters=100, **unused_kwargs):
+                 max_iters=100, jacobian='auto', **unused_kwargs):
 
         self.max_iters = max_iters
+        self._jacobian_evaluator = JacobianEvaluator(jacobian, type(self).__name__)
         self.rtol = unused_kwargs.pop('rtol', 1e-7)
         super(FixedGridImplicitODESolver, self).__init__(func=func, y0=y0, step_size=step_size,
                                                         grid_constructor=grid_constructor, interp=interp,
@@ -445,40 +447,7 @@ class FixedGridImplicitODESolver(FixedGridODESolver):
 
     def _jacobian(self, func, t, y, perturb=Perturb.NONE):
         """(n, n) Jacobian of the flattened `func(t, .)` at `y`. Detached."""
-        n = y.numel()
-        y_ = y.detach()
-
-        def _g(z):
-            return func(t, z.view_as(y_), perturb=perturb).reshape(-1)
-
-        if torch.isfinite(y_).all():
-            try:
-                with torch.enable_grad():
-                    J = torch.autograd.functional.jacobian(_g, y_.reshape(-1), vectorize=True)
-                J = J.reshape(n, n).detach()
-                if torch.isfinite(J).all():
-                    return J
-            except Exception:
-                pass
-            try:
-                return self._fd_jacobian(_g, y_.reshape(-1), n)
-            except Exception:
-                pass
-        return torch.zeros(n, n, dtype=y_.dtype, device=y_.device)
-
-    @staticmethod
-    def _fd_jacobian(g, y_flat, n):
-        """Finite difference fallback, for functions autograd cannot differentiate."""
-        with torch.no_grad():
-            f0 = g(y_flat)
-            eps = torch.finfo(y_flat.abs().dtype).eps ** 0.5
-            J = torch.empty(n, n, dtype=f0.dtype, device=f0.device)
-            for i in range(n):
-                h = eps * max(float(y_flat[i].abs()), 1.0)
-                y_pert = y_flat.clone()
-                y_pert[i] = y_pert[i] + h
-                J[:, i] = (g(y_pert) - f0) / h
-        return J
+        return self._jacobian_evaluator(func, t, y, perturb=perturb)
 
     @torch.no_grad()
     def _solve_newton(self, residual_fn, jac_fn, x, tol):

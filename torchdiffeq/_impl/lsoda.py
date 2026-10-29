@@ -36,6 +36,7 @@ from fractions import Fraction as _Fr
 import torch
 
 from .event_handling import find_event
+from .jacobian import JacobianEvaluator
 from .misc import Perturb, _select_initial_step
 from .solvers import AdaptiveStepsizeEventODESolver
 
@@ -138,6 +139,7 @@ class LSODA(AdaptiveStepsizeEventODESolver):
                  switch_patience=3,
                  switch_cooldown=10,
                  max_rejects=40,
+                 jacobian='auto',
                  dtype=torch.float64,
                  **kwargs):
         super(LSODA, self).__init__(dtype=dtype, y0=y0, **kwargs)
@@ -156,6 +158,7 @@ class LSODA(AdaptiveStepsizeEventODESolver):
         self.switch_patience = int(switch_patience)
         self._switch_cooldown = int(switch_cooldown)
         self.max_rejects = int(max_rejects)
+        self._jacobian_evaluator = JacobianEvaluator(jacobian, type(self).__name__)
         self.qmax = {'adams': min(int(max_order_adams), 12), 'bdf': min(int(max_order_bdf), 5)}
         self.dtype = dtype
 
@@ -210,30 +213,7 @@ class LSODA(AdaptiveStepsizeEventODESolver):
         return float((v.reshape(-1) * ewt).pow(2).mean().sqrt().detach())
 
     def _jacobian(self, t, y):
-        y_ = y.detach()
-
-        def _g(z):
-            return self.func(t, z.view_as(y_)).reshape(-1)
-
-        try:
-            with torch.enable_grad():
-                J = torch.autograd.functional.jacobian(_g, y_.reshape(-1), vectorize=True)
-            J = J.reshape(self.n, self.n).detach()
-            if torch.isfinite(J).all():
-                return J
-        except Exception:
-            pass
-        with torch.no_grad():
-            f0 = _g(y_.reshape(-1))
-            eps = torch.finfo(y_.abs().dtype).eps ** 0.5
-            J = torch.empty(self.n, self.n, dtype=f0.dtype, device=f0.device)
-            flat = y_.reshape(-1)
-            for i in range(self.n):
-                step = eps * max(float(flat[i].abs()), 1.0)
-                pert = flat.clone()
-                pert[i] = pert[i] + step
-                J[:, i] = (_g(pert) - f0) / step
-        return J
+        return self._jacobian_evaluator(self.func, t, y)
 
     @staticmethod
     def _predict(zn, q):
