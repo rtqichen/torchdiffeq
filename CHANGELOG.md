@@ -2,6 +2,18 @@
 
 Changes in this fork (`0.2.5+stiff.fix`) relative to upstream torchdiffeq.
 
+## Forward sensitivities for `radau`
+
+**New, opt-in:** `torchdiffeq.odeint_sensitivity(func, y0, t, params, S0=None, ...)` returns `(y, S)` with
+`S = dy/dparams` for all parameter directions in one `radau` solve (staggered direct method, as in CVODES).
+`S0` carries the sensitivity of `y0`, so chained solves can pass `S` on. On a 16-state, 18-parameter stiff
+network all 18 directions cost about 3x a plain solve; forward-mode AD through `odeint` costs about 4.6x per
+direction there. Details and limits in [FURTHER_DOCUMENTATION.md](FURTHER_DOCUMENTATION.md#forward-sensitivities).
+
+No behaviour change otherwise: `radau`'s results and reverse-mode gradients are bitwise unchanged.
+
+Note: [bugs/FORWARD_MODE_SENSITIVITIES.md](bugs/FORWARD_MODE_SENSITIVITIES.md).
+
 ## Implicit solvers: checked Jacobian (`0903417`)
 
 **Fixed.** The implicit solvers (`radau`, `lsoda` and the fixed-grid family `implicit_euler`,

@@ -61,6 +61,23 @@ For this solver, `rtol` and `atol` correspond to the tolerance for convergence o
 **scipy_solver:**<br>
 - `solver`: which SciPy solver to use; corresponds to the `'method'` argument of `scipy.integrate.solve_ivp`.
 
+## Forward sensitivities
+
+`odeint_sensitivity(func, y0, t, params, S0=None, *, rtol, atol, method='radau', options)` returns `(y, S)` with `S[i, ..., k] = d y(t[i]) / d theta_k`, shape `(len(t), *y0.shape, p)`, for all `p` parameter directions in one solve. Use it when you need the full Jacobian of many outputs with respect to few parameters (Gauss-Newton, Levenberg-Marquardt, identifiability): reverse mode needs one backward pass per output, forward-mode AD one solve per parameter.
+
+```python
+y, S = odeint_sensitivity(model, y0, t, list(model.parameters()), method='radau', rtol=1e-8, atol=1e-8)
+# chain a second solve, carrying the sensitivities on
+y2, S2 = odeint_sensitivity(model, y[-1], t2, list(model.parameters()), S0=S[-1], method='radau')
+```
+
+- `params`: the tensors `func` uses, each with `requires_grad=True`; not limited to `nn.Parameter`s. Their elements are flattened in order into the `p` directions. A tensor `func` does not use gets a zero column.
+- `S0`: sensitivity of `y0`, shape `(*y0.shape, p)`, default zeros.
+- `y` is identical to what `odeint(..., method='radau')` returns under `no_grad`. The step sequence is chosen for `y` alone and is not itself differentiated (as with `errconS = False` in CVODES), so `S` is the exact derivative of the solution the solver produced, the same quantity reverse mode through `radau` computes. Neither `y` nor `S` carries an autograd graph.
+- The derivatives of `func` with respect to `y` and `params` come from autograd. With the default `options={'jacobian': 'auto'}` they are checked against finite differences on the 1st, 2nd, 4th, ... evaluation and a mismatch **raises** (there is no finite difference fallback for the parameter derivative). `'autograd'` skips the check; `'fd'` is not accepted.
+- Only `method='radau'` and a single-tensor `y0`; no events, no `grad_jacobian='iterative'`.
+- Cost: one solve plus, per accepted step, three evaluations of `func` with a backward pass over the state size, and one linear solve with `p` right-hand sides. On a 16-state, 18-parameter stiff network, about 3x a plain solve for all 18 directions.
+
  ## Adjoint options
 
  The function `odeint_adjoint` offers some adjoint-specific options.
