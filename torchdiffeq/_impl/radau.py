@@ -257,6 +257,8 @@ class RadauIIA5Adaptive(AdaptiveStepsizeEventODESolver):
         if torch.is_grad_enabled() and (y.requires_grad or _params_require_grad(self.func)):
             Z = self._reattach(t, y, h, Z, lu)
 
+        self._after_accepted_step(t, y, h, Z)
+
         y_new = (y.reshape(-1) + Z[2]).view_as(y)
         t_new = t + h
 
@@ -266,6 +268,11 @@ class RadauIIA5Adaptive(AdaptiveStepsizeEventODESolver):
         self.f = self.func(t_new, y_new)
         self.J_current = False
         self.h = (h * self._step_factor(error_ratio, n_iter)).clamp(self.min_step, self.max_step)
+
+    def _after_accepted_step(self, t, y, h, Z):
+        """Called once per accepted step, with the step's start point and its
+        converged stages, before the state advances. Does nothing here; the
+        forward-sensitivity solver uses it to advance the sensitivities."""
 
     def _reattach(self, t, y, h, Z, lu):
         """Give the converged stages an autograd history.
@@ -313,8 +320,6 @@ class RadauIIA5Adaptive(AdaptiveStepsizeEventODESolver):
         factor of (I - M^-1 dG/dZ). Building the exact matrix here makes the single
         re-attach step exact.
         """
-        n = self.n
-        h_y = h.to(y.dtype)
         y_flat = y.reshape(-1)
 
         # G[i] = Z[i] - h * sum_j A[i,j] * f(t_j, y + Z[j])
@@ -324,7 +329,12 @@ class RadauIIA5Adaptive(AdaptiveStepsizeEventODESolver):
         # fixed-grid solvers in rk_common solve for the stage *derivatives* K
         # instead, where the roles are genuinely reversed and J_i is correct.)
         Js = [self._jacobian(t + self.C[k] * h, (y_flat + Z[k]).view_as(y)) for k in range(3)]
+        return self._stage_matrix(Js, h, y)
 
+    def _stage_matrix(self, Js, h, y):
+        """I - h (A kron I) blockdiag(Js): dG/dZ given df/dy at each of the three stages."""
+        n = self.n
+        h_y = h.to(y.dtype)
         M = torch.eye(3 * n, dtype=y.dtype, device=y.device)
         for i in range(3):
             for j in range(3):
