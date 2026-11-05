@@ -86,15 +86,23 @@ class OdeintAdjointMethod(torch.autograd.Function):
                     # wrt t here means we won't compute that if we don't need it.
                     func_eval = func(t if t_requires_grad else t_, y)
 
-                    # Workaround for PyTorch bug #39784
-                    _t = torch.as_strided(t, (), ())  # noqa
-                    _y = torch.as_strided(y, (), ())  # noqa
-                    _params = tuple(torch.as_strided(param, (), ()) for param in adjoint_params)  # noqa
+                    if func_eval.requires_grad:
+                        # Workaround for PyTorch bug #39784
+                        _t = torch.as_strided(t, (), ())  # noqa
+                        _y = torch.as_strided(y, (), ())  # noqa
+                        _params = tuple(torch.as_strided(param, (), ()) for param in adjoint_params)  # noqa
 
-                    vjp_t, vjp_y, *vjp_params = torch.autograd.grad(
-                        func_eval, (t, y) + adjoint_params, -adj_y,
-                        allow_unused=True, retain_graph=True
-                    )
+                        vjp_t, vjp_y, *vjp_params = torch.autograd.grad(
+                            func_eval, (t, y) + adjoint_params, -adj_y,
+                            allow_unused=True, retain_graph=True
+                        )
+                    else:
+                        # Constant intervals have zero local VJPs, even without an autograd graph.
+                        # (autograd.grad would raise here: allow_unused only covers unused *inputs*, not an
+                        # output with no grad_fn, e.g. torch.ones_like(y) or a switch-disabled branch.)
+                        # The Nones below become zeros, so the state adjoint is still integrated through.
+                        vjp_t = vjp_y = None
+                        vjp_params = (None,) * len(adjoint_params)
 
                 # autograd.grad returns None if no gradient, set to zero.
                 vjp_t = torch.zeros_like(t) if vjp_t is None else vjp_t
