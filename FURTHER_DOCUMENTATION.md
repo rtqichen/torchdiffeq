@@ -57,6 +57,7 @@ For this solver, `rtol` and `atol` correspond to the tolerance for convergence o
  - `adjoint_params`: The parameters to compute gradients with respect to in the backward pass. Should be a tuple of tensors. Defaults to `tuple(func.parameters())`.
    - If passed then `func` does not have to be a `torch.nn.Module`.
    - If `func` has no parameters, `adjoint_params=()` must be specified.
+   - Constant vector-field intervals do not need an artificial autograd dependency. Their local VJPs are zero; the adjoint still propagates initial-state sensitivities and parameter sensitivities accumulated elsewhere in the solve.
 
 
  ## Callbacks
