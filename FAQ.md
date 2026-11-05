@@ -65,6 +65,9 @@ Prefer non-linearities with a theoretically unique adjoint/gradient such as Soft
 **Where is backpropagation for the Neural ODE defined?**<br>
 It's defined [here](https://github.com/rtqichen/torchdiffeq/blob/master/torchdiffeq/_impl/adjoint.py) if you use the adjoint method `odeint_adjoint`.
 
+**My vector field doesn't depend on the state (or some inputs) at all — e.g. `lambda t, y: torch.ones_like(y)`. What does `odeint_adjoint` compute for its adjoints?**<br>
+When a field evaluation has no autograd graph, its local VJPs are zero. The adjoint still propagates initial-state sensitivities and parameter sensitivities accumulated elsewhere, without requiring an artificial dependency such as `0 * y`. For a globally constant field, observation-time gradients include the usual endpoint terms; this does not imply support for differentiating discontinuous switching times.
+
 **What are Tableaus?**<br>
 Tableaus are ways to describe coefficients for [RK methods](https://en.wikipedia.org/wiki/Runge%E2%80%93Kutta_methods). The particular set of coefficients used on this repo was taken from [here](https://www.ams.org/journals/mcom/1986-46-173/S0025-5718-1986-0815836-3/).
 
