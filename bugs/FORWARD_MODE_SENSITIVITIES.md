@@ -164,12 +164,11 @@ update fails 11 of them; disabling the finite difference check fails the detache
 
 ### Found along the way, not fixed here
 
-- **Reverse mode through `radau` drops the gradient of a parameter that is not an `nn.Parameter`.** The
-  re-attach after the Newton loop runs only if `y` requires grad or `func.parameters()` does. A plain tensor
-  with `requires_grad=True` stored on `func` (or captured in a closure) gets no ODE contribution to its
-  gradient, silently: with `loss = y[-1, 2] + 1e-3 * lnk.sum()` on the 16-species network, `dloss/dlnk[0]`
-  is 1.000e-3 instead of 1.0024e-3. `odeint_sensitivity` takes `params` explicitly and is not affected.
-- **Forward-mode AD through `odeint` with `radau` crashes without `first_step`.** The automatic initial step
-  is computed from `func`, so with dual parameters the step size itself becomes a dual tensor, and
-  `_nextafter`'s custom autograd function has no forward-mode rule (`NotImplementedError`). Passing
-  `first_step` avoids it. `odeint_sensitivity` is not affected.
+Two bugs in the existing code, both present on `d33a877` already; neither affects `odeint_sensitivity`.
+Reproductions, measurements and suggested fixes in
+[RADAU_GRADIENT_AND_FORWARD_AD.md](RADAU_GRADIENT_AND_FORWARD_AD.md):
+
+- **A.** Reverse mode through `radau` returns a wrong gradient, silently, for a parameter that is not an
+  `nn.Parameter` (closure, plain tensor attribute), unless `y0` requires grad.
+- **B.** Forward-mode AD through `odeint` raises `NotImplementedError` for `radau`/`lsoda` without
+  `first_step`, and for `dopri5` always.
