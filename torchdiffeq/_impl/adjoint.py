@@ -1,7 +1,10 @@
 import warnings
 import torch
 import torch.nn as nn
+from .lsoda import LSODA
 from .odeint import SOLVERS, odeint
+from .radau import RadauIIA5Adaptive
+from .rk_common import FixedGridImplicitODESolver
 from .misc import _check_inputs, _flat_to_shape, _mixed_norm, _all_callback_names, _all_adjoint_callback_names
 
 
@@ -176,10 +179,16 @@ def odeint_adjoint(func, y0, t, *, rtol=1e-7, atol=1e-9, method=None, options=No
                          "`options` has been passed then `adjoint_options` must be passed as well.")
 
     if adjoint_options is None:
-        adjoint_options = {k: v for k, v in options.items() if k != "norm"} if options is not None else {}
+        adjoint_options = {k: v for k, v in options.items() if k not in ("norm", "jacobian")} if options is not None else {}
     else:
         # Avoid in-place modifying a user-specified dict.
         adjoint_options = adjoint_options.copy()
+
+    # The augmented dynamics compute their vector-Jacobian products without recording a graph, so autograd sees
+    # them as constant and would hand an implicit solver an all-zero Jacobian. Finite differences are the only
+    # source that works there, so they are the default whatever `options` asked for on the forward pass.
+    if issubclass(SOLVERS.get(adjoint_method, type(None)), (RadauIIA5Adaptive, LSODA, FixedGridImplicitODESolver)):
+        adjoint_options.setdefault("jacobian", "fd")
 
     if adjoint_params is None:
         adjoint_params = tuple(find_parameters(func))

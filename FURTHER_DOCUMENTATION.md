@@ -21,13 +21,28 @@ For these solvers, `rtol` and `atol` correspond to the tolerances for accepting/
 
 - `norm`: What norm to compute the accept/reject criterion with respect to. Given tensor input, this defaults to an RMS norm. Given tupled input, this defaults to computing an RMS norm over each tensor, and then taking a max over the tuple, producing a mixed L-infinity/RMS norm. If passed this should be a function consuming a tensor/tuple with the same shape as `y0`, and return a scalar corresponding to its norm. When passed as part of `adjoint_options`, then the special value `"seminorm"` may be used to zero out the contribution from the parameters, as per the ["Hey, that's not an ODE"](https://arxiv.org/abs/2009.09457) paper.
 
-**Fixed solvers (euler, midpoint, rk4, explicit_adams, implicit_adams):**<br>
+**Adaptive implicit solvers (radau, lsoda):**<br>
+These choose their own step sizes *and* handle stiff problems, so they need neither `step_size` nor `grid_constructor`. Both support gradients by direct backpropagation as well as through `odeint_adjoint`, and both run on GPU and on batched states -- unlike `scipy_solver`, which drops to NumPy and only supports the adjoint.
+
+- `radau`: 3-stage Radau IIA, order 5. L-stable and stiffly accurate, with an embedded error estimator. A good default when the problem is stiff throughout.
+
+- `lsoda`: variable-order Adams-Moulton (orders 1-12) for non-stiff stretches and variable-order BDF (orders 1-5) for stiff ones, switching automatically between them. Prefer it when the problem is only stiff some of the time, or when you do not know in advance. Options: `max_order_adams=12`, `max_order_bdf=5`, `corrector_iters=4`, `switch_patience=3`, `switch_cooldown=10`, `max_rejects=40`.
+
+- Shared options: `first_step`, `min_step`, `max_step`, `max_num_steps`. `radau` also takes `newton_iters=12` and `grad_jacobian='exact'` -- switch the latter to `'iterative'` if the state is large enough that an exact Jacobian per step (one backward pass per component) costs more than the four extra residual evaluations the iterative re-attach needs.
+
+- `jacobian='auto'`: Implicit solvers only (`radau`, `lsoda` and the fixed-grid implicit family). Where the Jacobian `df/dy` for the Newton iteration comes from. `'auto'` uses autograd and checks it against finite differences on the 1st, 2nd, 4th, 8th, ... evaluation; if they disagree, which is what happens when part of `func` is computed outside autograd (numpy/scipy, `.detach()`, `.item()`), it warns and uses finite differences for the rest of the solve. `'autograd'` skips the check, for a `func` you know to be fully differentiable. `'fd'` uses finite differences only, `n + 1` evaluations of `func` per Jacobian, for a `func` you know is not. Under `torch.inference_mode` (e.g. PyTorch Lightning's `test`/`validate`/`predict`) autograd still works, with inference mode briefly switched off; if `func` uses a tensor created inside inference mode that fails, and `'auto'` falls back to finite differences. `odeint_adjoint` always uses `'fd'` for the backward solve unless `adjoint_options` says otherwise, because the adjoint dynamics are not differentiable by autograd.
+
+**Fixed solvers (euler, midpoint, heun2, heun3, rk4, explicit_adams, implicit_adams, and the implicit family implicit_euler, implicit_midpoint, trapezoid, radauIIA3, radauIIA5, gl4, gl6, sdirk2, trbdf2):**<br>
 
 - `step_size=None`: How large each discrete step should be. If not passed then this defaults to stepping between the values of `t`. Note that if using `t` just to specify the start and end of the regions of integration, then it is very important to specify this argument! It is mutually exclusive with the `grid_constructor` argument, below.
 
 - `grid_constructor=None`: A more fine-grained way of setting the steps, by setting these particular locations as the locations of the steps. Should be a callable `func, y0, t -> grid`, transforming the arguments `func, y0, t` of `odeint` into the desired grid (which should be a one dimensional tensor).
 
 - `perturb`: Defaults to False. If True, then automatically add small perturbations to the start and end of each step, so that stepping to discontinuities works. Note that this this may not be efficient when using PyTorch 1.6.0 or earlier.
+
+- `interp`: Defaults to `'linear'`. How values at requested times between grid points are interpolated; `'cubic'` uses the derivative at both ends and is markedly better when the output times are sparse relative to the steps. Note that with a non-uniform grid this interpolation can dominate the total error.
+
+- `max_iters`: Implicit fixed-grid solvers only, default 100. Iteration cap for the nonlinear solve at each step. Rarely the useful knob when the solve fails to converge -- the iteration usually stalls rather than running out of steps, and reducing `step_size` is what helps. Note that for these solvers `rtol`/`atol` set only how tightly the stage equations must be solved; the accuracy of the integration is governed by `step_size`.
 
 Individual solvers also offer certain options.
 
@@ -45,6 +60,23 @@ For this solver, `rtol` and `atol` correspond to the tolerance for convergence o
 
 **scipy_solver:**<br>
 - `solver`: which SciPy solver to use; corresponds to the `'method'` argument of `scipy.integrate.solve_ivp`.
+
+## Forward sensitivities
+
+`odeint_sensitivity(func, y0, t, params, S0=None, *, rtol, atol, method='radau', options)` returns `(y, S)` with `S[i, ..., k] = d y(t[i]) / d theta_k`, shape `(len(t), *y0.shape, p)`, for all `p` parameter directions in one solve. Use it when you need the full Jacobian of many outputs with respect to few parameters (Gauss-Newton, Levenberg-Marquardt, identifiability): reverse mode needs one backward pass per output, forward-mode AD one solve per parameter.
+
+```python
+y, S = odeint_sensitivity(model, y0, t, list(model.parameters()), method='radau', rtol=1e-8, atol=1e-8)
+# chain a second solve, carrying the sensitivities on
+y2, S2 = odeint_sensitivity(model, y[-1], t2, list(model.parameters()), S0=S[-1], method='radau')
+```
+
+- `params`: the tensors `func` uses, each with `requires_grad=True`; not limited to `nn.Parameter`s. Their elements are flattened in order into the `p` directions. A tensor `func` does not use gets a zero column.
+- `S0`: sensitivity of `y0`, shape `(*y0.shape, p)`, default zeros.
+- `y` is identical to what `odeint(..., method='radau')` returns under `no_grad`. The step sequence is chosen for `y` alone and is not itself differentiated (as with `errconS = False` in CVODES), so `S` is the exact derivative of the solution the solver produced, the same quantity reverse mode through `radau` computes. Neither `y` nor `S` carries an autograd graph.
+- The derivatives of `func` with respect to `y` and `params` come from autograd. With the default `options={'jacobian': 'auto'}` they are checked against finite differences on the 1st, 2nd, 4th, ... evaluation and a mismatch **raises** (there is no finite difference fallback for the parameter derivative). `'autograd'` skips the check; `'fd'` is not accepted.
+- Only `method='radau'` and a single-tensor `y0`; no events, no `grad_jacobian='iterative'`.
+- Cost: one solve plus, per accepted step, three evaluations of `func` with a backward pass over the state size, and one linear solve with `p` right-hand sides. On a 16-state, 18-parameter stiff network, about 3x a plain solve for all 18 directions.
 
  ## Adjoint options
 
