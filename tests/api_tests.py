@@ -9,6 +9,32 @@ EPS = {torch.float32: 1e-4, torch.float64: 1e-12, torch.complex64: 1e-4}
 
 
 class TestCollectionState(unittest.TestCase):
+    def test_dense_output(self):
+        for device in DEVICES:
+            with self.subTest(device=device):
+                # Integrate the state and its running integral together.
+                y0 = torch.tensor([1., 2.], dtype=torch.float64, device=device, requires_grad=True)
+                integral0 = y0.new_zeros((), requires_grad=True)
+                rate = y0.new_tensor(0.3, requires_grad=True)
+
+                def func(t, state):
+                    y, integral = state
+                    return rate * y, y.sum()
+
+                times = y0.new_tensor([0., 0.23, 0.74, 1.])
+                dense = torchdiffeq.odeint_dense(func, (y0, integral0), times[0], times[-1])
+                reference = torchdiffeq.odeint(func, (y0, integral0), times)
+                for i in (1, 2):
+                    result = dense(times[i].cpu())
+                    self.assertIsInstance(result, tuple)
+                    for part, expected in zip(result, reference):
+                        torch.testing.assert_close(part, expected[i])
+                inputs = (y0, integral0, rate)
+                actual_grad = torch.autograd.grad(result[0].sum() + result[1], inputs)
+                expected_grad = torch.autograd.grad(reference[0][i].sum() + reference[1][i], inputs)
+                for actual, expected in zip(actual_grad, expected_grad):
+                    torch.testing.assert_close(actual, expected)
+
     def test_forward(self):
         for dtype in DTYPES:
             eps = EPS[dtype]
