@@ -109,8 +109,7 @@ def odeint(func, y0, t, *, rtol=1e-7, atol=1e-9, method=None, options=None, even
 
 
 def odeint_dense(func, y0, t0, t1, *, rtol=1e-7, atol=1e-9, method=None, options=None):
-
-    assert torch.is_tensor(y0)  # TODO: handle tuple of tensors
+    """Integrate once and return a scalar-time interpolant with the same state structure as y0."""
 
     t = torch.tensor([t0, t1]).to(t0)
 
@@ -152,7 +151,8 @@ def odeint_dense(func, y0, t0, t1, *, rtol=1e-7, atol=1e-9, method=None, options
         t0 = times[idx - 1]
         t1 = times[idx]
         coef = [interp_coeffs[idx - 1][i] for i in range(interp_coeffs.shape[1])]
-        return _interp_evaluate(coef, t0, t1, t_eval)
+        state = _interp_evaluate(coef, t0, t1, t_eval)
+        return state if shapes is None else _flat_to_shape(state, (), shapes)
 
     return dense_output_fn
 
