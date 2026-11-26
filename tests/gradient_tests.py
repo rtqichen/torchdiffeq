@@ -3,6 +3,8 @@ import torch
 import torchdiffeq
 
 from problems import construct_problem, PROBLEMS, DEVICES, METHODS
+from problems import FIXED_EXPLICIT_METHODS
+from torchdiffeq._impl.solvers import FixedGridODESolver
 
 
 def max_abs(tensor):
@@ -133,6 +135,73 @@ class TestCompareAdjointGradient(unittest.TestCase):
                         if t_grad:
                             self.assertLess(max_abs(t_points.grad - adj_t_grad), eps[1])
                         self.assertLess(max_abs(func.A.grad - adj_A_grad), eps[2])
+
+
+class TestFixedGridTimeGradient(unittest.TestCase):
+    def test_observation_times_on_grid(self):
+        for dtype in (torch.float32, torch.float64):
+            for method in FIXED_EXPLICIT_METHODS:
+                for reverse in (False, True):
+                    for interp in ('linear', 'cubic'):
+                        for query in (0.5, 0.375):
+                            with self.subTest(dtype=dtype, method=method, reverse=reverse, interp=interp, query=query):
+                                t = torch.tensor([0., query, 1.], dtype=dtype)
+                                if reverse:
+                                    t = 1 - t
+                                t.requires_grad_()
+                                y0 = torch.tensor([0.7, -0.3], dtype=dtype, requires_grad=True)
+                                rate = torch.tensor(0.6, dtype=dtype, requires_grad=True)
+                                weights = torch.tensor([[1., 2.], [3., -1.], [-2., 4.]], dtype=dtype)
+                                solution = torchdiffeq.odeint(
+                                    lambda time, value: rate * torch.ones_like(value), y0, t,
+                                    method=method, options={'step_size': 0.25, 'interp': interp}
+                                )
+                                expected = y0.detach()[None] + rate.detach() * (t.detach() - t[0].detach())[:, None]
+                                tolerance = 2e-6 if dtype == torch.float32 else 1e-12
+                                self.assertTrue(torch.allclose(solution, expected, atol=tolerance, rtol=tolerance))
+                                grad_t, grad_y0, grad_rate = torch.autograd.grad(
+                                    (solution * weights).sum(), (t, y0, rate)
+                                )
+                                expected_t = rate.detach() * weights.sum(dim=1)
+                                expected_t[0] = -rate.detach() * weights[1:].sum()
+                                self.assertTrue(torch.allclose(grad_t, expected_t, atol=tolerance, rtol=tolerance))
+                                self.assertTrue(torch.allclose(grad_y0, weights.sum(dim=0), atol=tolerance, rtol=tolerance))
+                                expected_rate = ((t.detach() - t[0].detach()) * weights.sum(dim=1)).sum()
+                                self.assertTrue(torch.allclose(grad_rate, expected_rate, atol=tolerance, rtol=tolerance))
+
+    def test_linear_interpolation_endpoint_gradcheck(self):
+        for query in (0., 1.):
+            with self.subTest(query=query):
+                arguments = tuple(
+                    torch.tensor(value, dtype=torch.float64, requires_grad=True)
+                    for value in (0., 1., 2., 5., query)
+                )
+                interpolate = lambda t0, t1, y0, y1, t: FixedGridODESolver._linear_interp(None, t0, t1, y0, y1, t)
+                self.assertTrue(torch.autograd.gradcheck(interpolate, arguments))
+                large_y0 = torch.tensor(1e20, dtype=torch.float64)
+                small_y1 = torch.tensor(1., dtype=torch.float64)
+                result = interpolate(arguments[0], arguments[1], large_y0, small_y1, arguments[-1])
+                self.assertEqual(result.item(), large_y0.item() if query == 0 else small_y1.item())
+
+    def test_tuple_observation_times_on_grid(self):
+        for dtype in (torch.float32, torch.float64):
+            for reverse in (False, True):
+                for interp in ('linear', 'cubic'):
+                    with self.subTest(dtype=dtype, reverse=reverse, interp=interp):
+                        t = torch.tensor([0., 0.5, 1.], dtype=dtype)
+                        if reverse:
+                            t = 1 - t
+                        t.requires_grad_()
+                        y0 = (torch.tensor(0.7, dtype=dtype, requires_grad=True),
+                              torch.ones(2, 3, dtype=dtype, requires_grad=True))
+                        solution = torchdiffeq.odeint(
+                            lambda time, state: (torch.ones_like(state[0]), 2 * torch.ones_like(state[1])),
+                            y0, t, method='rk4', options={'step_size': 0.25, 'interp': interp}
+                        )
+                        gradients = torch.autograd.grad(solution[0][1] + solution[1][1].sum(), (t,) + y0)
+                        self.assertTrue(torch.allclose(gradients[0], torch.tensor([-13., 13., 0.], dtype=dtype)))
+                        self.assertEqual(gradients[1].item(), 1.)
+                        self.assertTrue(torch.equal(gradients[2], torch.ones_like(y0[1])))
 
 
 if __name__ == '__main__':
