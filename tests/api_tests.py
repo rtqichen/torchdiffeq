@@ -39,5 +39,42 @@ class TestCollectionState(unittest.TestCase):
                         self.assertTrue(torch.autograd.gradcheck(func, (y0, t_points)))
 
 
+class TestScipySingleTimeShape(unittest.TestCase):
+    def test_tensor_state_shape(self):
+        for dtype in (torch.float32, torch.float64):
+            for shape in ((), (3,), (2, 3), (1, 2, 1)):
+                for interface in (torchdiffeq.odeint, torchdiffeq.odeint_adjoint):
+                    with self.subTest(dtype=dtype, shape=shape, interface=interface.__name__):
+                        y0 = torch.arange(1, 1 + torch.Size(shape).numel(), dtype=dtype).reshape(shape)
+                        y0.requires_grad_()
+                        t = torch.tensor([0.7], dtype=dtype, requires_grad=True)
+                        options = {'adjoint_params': ()} if interface is torchdiffeq.odeint_adjoint else {}
+                        solution = interface(lambda time, value: value, y0, t, method='scipy_solver', **options)
+                        self.assertEqual(solution.shape, (1,) + shape)
+                        self.assertEqual(solution.dtype, y0.dtype)
+                        self.assertTrue(torch.equal(solution[0], y0))
+                        if interface is torchdiffeq.odeint_adjoint:
+                            grad_y0, grad_t = torch.autograd.grad(solution.sum(), (y0, t))
+                            self.assertTrue(torch.equal(grad_y0, torch.ones_like(y0)))
+                            self.assertTrue(torch.equal(grad_t, torch.zeros_like(t)))
+
+    def test_tuple_state_control(self):
+        for dtype in (torch.float32, torch.float64):
+            for interface in (torchdiffeq.odeint, torchdiffeq.odeint_adjoint):
+                with self.subTest(dtype=dtype, interface=interface.__name__):
+                    y0 = (torch.tensor(2., dtype=dtype, requires_grad=True),
+                          torch.arange(6, dtype=dtype).reshape(2, 3).requires_grad_())
+                    t = torch.tensor([0.7], dtype=dtype)
+                    options = {'adjoint_params': ()} if interface is torchdiffeq.odeint_adjoint else {}
+                    solution = interface(lambda time, value: value, y0, t, method='scipy_solver', **options)
+                    for initial, actual in zip(y0, solution):
+                        self.assertEqual(actual.shape, (1,) + initial.shape)
+                        self.assertTrue(torch.equal(actual[0], initial))
+                    if interface is torchdiffeq.odeint_adjoint:
+                        gradients = torch.autograd.grad(sum(value.sum() for value in solution), y0)
+                        for initial, gradient in zip(y0, gradients):
+                            self.assertTrue(torch.equal(gradient, torch.ones_like(initial)))
+
+
 if __name__ == '__main__':
     unittest.main()
