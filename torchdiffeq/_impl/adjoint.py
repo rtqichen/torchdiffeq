@@ -2,7 +2,7 @@ import warnings
 import torch
 import torch.nn as nn
 from .odeint import SOLVERS, odeint
-from .misc import _check_inputs, _flat_to_shape, _mixed_norm, _all_callback_names, _all_adjoint_callback_names
+from .misc import _check_inputs, _flat_to_shape, _mixed_norm, _all_callback_names, _all_adjoint_callback_names, _flip_option
 
 
 class OdeintAdjointMethod(torch.autograd.Function):
@@ -198,6 +198,14 @@ def odeint_adjoint(func, y0, t, *, rtol=1e-7, atol=1e-9, method=None, options=No
 
     # Convert to flattened state.
     shapes, func, y0, t, rtol, atol, method, options, event_fn, decreasing_time = _check_inputs(func, y0, t, rtol, atol, method, options, event_fn, SOLVERS)
+
+    if decreasing_time:
+        # The adjoint solves the normalized system, whose time coordinate is -t.
+        _flip_option(adjoint_options, 'step_t')
+        _flip_option(adjoint_options, 'jump_t')
+        if 'grid_constructor' in adjoint_options:
+            grid_constructor = adjoint_options['grid_constructor']
+            adjoint_options['grid_constructor'] = lambda func, y0, t: -grid_constructor(func, y0, -t)
 
     # Handle the adjoint norm function.
     state_norm = options["norm"]
