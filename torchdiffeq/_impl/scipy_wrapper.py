@@ -26,7 +26,7 @@ class ScipyWrapperODESolver(metaclass=abc.ABCMeta):
 
     def integrate(self, t):
         if t.numel() == 1:
-            return torch.tensor(self.y0)[None].to(self.device, self.dtype)
+            return torch.tensor(self.y0).reshape(1, *self.shape).to(self.device, self.dtype)
         t = t.detach().cpu().numpy()
         sol = solve_ivp(
             self.func,
