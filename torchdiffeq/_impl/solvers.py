@@ -173,9 +173,7 @@ class FixedGridODESolver(metaclass=abc.ABCMeta):
         return h00 * y0 + h10 * dt * f0 + h01 * y1 + h11 * dt * f1
 
     def _linear_interp(self, t0, t1, y0, y1, t):
-        if t == t0:
-            return y0
         if t == t1:
-            return y1
+            return y1 + ((t - t1) / (t1 - t0)) * (y1 - y0)
         slope = (t - t0) / (t1 - t0)
         return y0 + slope * (y1 - y0)
