@@ -54,6 +54,8 @@ For this solver, `rtol` and `atol` correspond to the tolerance for convergence o
 
  - `adjoint_options` has the special key-value pair `{"norm": "seminorm"}` that provides a potentially more efficient adjoint solve when using adaptive step solvers, as described in the ["Hey, that's not an ODE"](https://arxiv.org/abs/2009.09457) paper.
 
+ - Express `step_t` and `jump_t` in the same time coordinates as the input `t`, including when `t` is decreasing. A `grid_constructor` also receives times in these coordinates and should return a grid following the direction of the times it receives.
+
  - `adjoint_params`: The parameters to compute gradients with respect to in the backward pass. Should be a tuple of tensors. Defaults to `tuple(func.parameters())`.
    - If passed then `func` does not have to be a `torch.nn.Module`.
    - If `func` has no parameters, `adjoint_params=()` must be specified.
